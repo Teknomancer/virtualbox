@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 99040 2023-03-18 21:03:42Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114096 2026-05-06 23:25:08Z knut.osmundsen@oracle.com $
 ## @file
 # Makefile for the OS/2 Guest Additions Shared Folder FSD.
 #
@@ -116,8 +116,8 @@ ifdef VBOX_USE_WATCOM_FOR_OS2
  VBoxSF_LDFLAGS     := \
  	OPTION MODNAME='VBoxSF' \
  	SEG TYPE CODE PRELOAD DYNAMIC SHARED NONPERMANENT, \
- 	TYPE DATA PRELOAD DYNAMIC
- #	OPTION DESCRIPTION "'VirtualBox Guest Additions Shared Folder FSD for OS/2.'" - quoting issues
+ 	TYPE DATA PRELOAD DYNAMIC \
+ 	OPTION DESCRIPTION '$(VBOX_DEF_FILE_DESCRIPTION_BASE) - Shared Folder FSD for OS/2'
  # Data exports:
  VBoxSF_LDFLAGS += \
  	EXPORT 'FS_ATTRIBUTE' \

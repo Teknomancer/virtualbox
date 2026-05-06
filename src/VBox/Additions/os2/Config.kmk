@@ -1,4 +1,4 @@
-# $Id: Config.kmk 114079 2026-05-06 00:59:20Z knut.osmundsen@oracle.com $
+# $Id: Config.kmk 114096 2026-05-06 23:25:08Z knut.osmundsen@oracle.com $
 ## @file
 # kBuild Configuration file for the OS/2 Guest Additions.
 #
@@ -36,12 +36,15 @@ ifndef VBOX_ROOT_CONFIG_KMK_INCLUDED
 endif
 
 ## FIXME
-PATH_DDKVIDEO     ?= D:/ddk/200402/video
-PATH_DDKBASE      ?= D:/ddk/200402/base
-TOOL_MASM510_AS   ?= $(PATH_DDKBASE)/tools/masm.exe
-TOOL_MSLINK510_LD ?= $(PATH_DDKBASE)/tools/link.exe
 PATH_TOOL_VAC308  ?= D:/VACpp/v3.08
 PATH_TOOL_ALP     ?= D:/Toolkit/v4.52/bin
+
+#
+# OS/2 DDK location & some related tool configs.
+#
+VBOX_PATH_OS2_DDK ?= $(KBUILD_DEVTOOLS)/os2.x86/ddk/200402/DDK
+TOOL_MASM510_AS   ?= $(VBOX_PATH_OS2_DDK)/base/tools/masm.exe
+TOOL_MSLINK510_LD ?= $(VBOX_PATH_OS2_DDK)/base/tools/link.exe
 
 #
 # Template for GRADD stuff.
@@ -54,7 +57,7 @@ TEMPLATE_VBoxOs2Gradd_ASFLAGS          = $(VBOX_NASM_ASFLAGS.lx.x86)
 TEMPLATE_VBoxOs2Gradd_DEFS            := RT_OS_OS2 IN_RING3 LOG_DONT_USE_C99 IN_GUEST IN_GUEST_R3 IN_RT_R3
 TEMPLATE_VBoxOs2Gradd_BLD_TRG         := os2
 TEMPLATE_VBoxOs2Gradd_BLD_TRG_ARCH    := x86
-ifndef VBOX_USE_WATCOM_FOR_OS2
+ifdef VBOX_USE_VAC308_FOR_OS2_GRADD
  TEMPLATE_VBoxOs2Gradd_TOOL           := VAC308
  TEMPLATE_VBoxOs2Gradd_ARTOOL         := GCC3OMF
  TEMPLATE_VBoxOs2Gradd_DEFS           += VBOXGRADD_COMPILED_WITH_VAC308
@@ -86,7 +89,7 @@ ifndef VBOX_USE_WATCOM_FOR_OS2
  TEMPLATE_VBoxOs2Gradd_LDFLAGS        += -B"/NoDefaultLibrarySearch"
  TEMPLATE_VBoxOs2Gradd_LDFLAGS        += -B"/Optfunc"          # remove unreachable functions
  TEMPLATE_VBoxOs2Gradd_LDFLAGS        := $(strip $(TEMPLATE_VBoxOs2Gradd_LDFLAGS))
-else  # VBOX_USE_WATCOM_FOR_OS2
+else  # VBOX_USE_VAC308_FOR_OS2_GRADD
  TEMPLATE_VBoxOs2Gradd_TOOL           := OPENWATCOM
  TEMPLATE_VBoxOs2Gradd_ARTOOL         := OPENWATCOM
  TEMPLATE_VBoxOs2Gradd_LDTOOL         := OPENWATCOM-WL
@@ -106,13 +109,13 @@ else  # VBOX_USE_WATCOM_FOR_OS2
  TEMPLATE_VBoxOs2Gradd_LDFLAGS        += option NODefaultlibs, internalrelocs, togglerelocs
  TEMPLATE_VBoxOs2Gradd_LDFLAGS        += debug codeview all
  TEMPLATE_VBoxOs2Gradd_LDFLAGS        += option symfile=$(outbase).sym
-endif # VBOX_USE_WATCOM_FOR_OS2
+endif # VBOX_USE_VAC308_FOR_OS2_GRADD
 TEMPLATE_VBoxOs2Gradd_INCS             = \
-	$(PATH_DDKVIDEO)/rel/os2c/include/base/os2 \
-	$(PATH_DDKVIDEO)/rel/os2c/include/base/os2/16bit
+	$(VBOX_PATH_OS2_DDK)/video/rel/os2c/include/base/os2 \
+	$(VBOX_PATH_OS2_DDK)/video/rel/os2c/include/base/os2/16bit
 
 TEMPLATE_VBoxOs2Gradd_LATE_LIBS        = \
-	$(PATH_DDKVIDEO)/rel/os2c/lib/os2/os2386.lib
+	$(VBOX_PATH_OS2_DDK)/video/rel/os2c/lib/os2/os2386.lib
 
 
 #

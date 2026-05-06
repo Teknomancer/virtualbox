@@ -1,4 +1,4 @@
-# $Id: Config.kmk 114015 2026-04-24 12:59:27Z andreas.loeffler@oracle.com $
+# $Id: Config.kmk 114096 2026-05-06 23:25:08Z knut.osmundsen@oracle.com $
 ## @file
 # The global build configuration file for VBox.
 #
@@ -327,6 +327,9 @@ endif
 
 # Maybe we want set this manually.
 VBOX_C_YEAR = $(date-utc %Y)
+
+## The basic DESCRIPTION value for OS/2 .def-files.
+VBOX_DEF_FILE_DESCRIPTION_BASE = $(VBOX_PRODUCT) v$(VBOX_VERSION_STRING) r$(VBOX_SVN_REV)
 
 #
 # The VirtualBox package type.
@@ -5389,6 +5392,12 @@ else
 endif
 
 #
+# SDK for the kLibc OS/2 DDK headers.
+#
+SDK_VBoxKLibcOs2DDK             := kLibc OS/2 DDK headers
+SDK_VBoxKLibcOs2DDK_INCS        := $(KBUILD_DEVTOOLS)/os2.x86/klibcddk/r3951/include
+
+#
 # Determine Solaris version.
 #
 ifeq ($(KBUILD_TARGET),solaris)
@@ -6006,8 +6015,10 @@ endif # linux target
 ifeq ($(KBUILD_TARGET),os2)
  ifndef VBOX_USE_WATCOM_FOR_OS2
   TEMPLATE_VBoxR0Drv_TOOL              = GXX3OMF
-  TEMPLATE_VBoxR0Drv_CXXFLAGS          = -g $(VBOX_GCC_pipe) $(VBOX_GCC_PEDANTIC_CXX) $(VBOX_GCC_Wno-variadic-macros) $(VBOX_GCC_R0_OPT) $(VBOX_GCC_R0_FP) -fno-strict-aliasing -fno-exceptions -fno-rtti
-  TEMPLATE_VBoxR0Drv_CFLAGS            = -g $(VBOX_GCC_pipe) $(VBOX_GCC_PEDANTIC_C)   $(VBOX_GCC_Wno-variadic-macros) $(VBOX_GCC_R0_OPT) $(VBOX_GCC_R0_FP) -fno-strict-aliasing -fno-exceptions
+  TEMPLATE_VBoxR0Drv_CXXFLAGS          = -g $(VBOX_GCC_pipe) $(VBOX_GCC_PEDANTIC_CXX) $(VBOX_GCC_Wno-variadic-macros) \
+  	$(VBOX_GCC_R0_OPT) $(VBOX_GCC_R0_FP) -fno-strict-aliasing -fno-exceptions -idirafter "$(SDK_VBoxKLibcOs2DDK_INCS)" -fno-rtti
+  TEMPLATE_VBoxR0Drv_CFLAGS            = -g $(VBOX_GCC_pipe) $(VBOX_GCC_PEDANTIC_C)   $(VBOX_GCC_Wno-variadic-macros) \
+  	$(VBOX_GCC_R0_OPT) $(VBOX_GCC_R0_FP) -fno-strict-aliasing -fno-exceptions -idirafter "$(SDK_VBoxKLibcOs2DDK_INCS)"
   TEMPLATE_VBoxR0Drv_LATE_LIBS         = $(VBOX_GCC_LIBGCC)
   # wlink thinks physdevice doesn't need fixups and should have a stack - stupid!
   TEMPLATE_VBoxR0Drv_LDFLAGS           = -Zlinker Option -Zlinker internalrelocs, -Zlinker togglerelocs
@@ -6025,7 +6036,7 @@ ifeq ($(KBUILD_TARGET),os2)
   	$(PATH_TOOL_OPENWATCOM)/h \
   	$(PATH_TOOL_OPENWATCOM)/h/os2 \
   	$(PATH_ROOT)/include \
-  	$(PATH_KLIBC_TRUNK)/libc/include # for os2ddk
+	$(SDK_VBoxKLibcOs2DDK_INCS)
   TEMPLATE_VBoxR0Drv_CFLAGS = -s -ze -w4 -hd -d1+ -nt=TEXT32 -nc=CODE -4 -of+
   TEMPLATE_VBoxR0Drv_CXXFLAGS = -s -ze -w4 -hd -d2t -nt=TEXT32 -nc=CODE -4 -of+
   TEMPLATE_VBoxR0Drv_LDFLAGS = \
@@ -9576,7 +9587,7 @@ SVN                    ?= svn$(HOSTSUFF_EXE)
 GIT                    ?= git$(HOSTSUFF_EXE)
 VBOX_SVN_REV_KMK        = $(PATH_OUT)/revision.kmk
 ifndef VBOX_SVN_REV
- VBOX_SVN_REV_CONFIG_FALLBACK := $(patsubst %:,,  $Rev: 114015 $  )
+ VBOX_SVN_REV_CONFIG_FALLBACK := $(patsubst %:,,  $Rev: 114096 $  )
  VBOX_SVN_REV_FALLBACK := $(if-expr $(VBOX_SVN_REV_CONFIG_FALLBACK) > $(VBOX_SVN_REV_VERSION_FALLBACK),$(VBOX_SVN_REV_CONFIG_FALLBACK),$(VBOX_SVN_REV_VERSION_FALLBACK))
  VBOX_SVN_DEP          := $(firstword $(wildcard $(PATH_ROOT)/.svn/wc.db $(abspath $(PATH_ROOT)/../.svn/wc.db) $(abspath $(PATH_ROOT)/../../.svn/wc.db) $(PATH_ROOT)/.svn/entries))
  VBOX_GIT_DEP          := $(firstword $(wildcard $(PATH_ROOT)/.git/config $(abspath $(PATH_ROOT)/../.git/config) $(abspath $(PATH_ROOT)/../../.git/config)))
@@ -9590,7 +9601,7 @@ ifndef VBOX_SVN_REV
  ifneq ($(VBOX_GIT_DEP),)
   #
   # VBOX_SVN_REV_CONFIG_FALLBACK is not properly populated for a git checkout,
-  # as the $Rev: 114015 $ is not expanded, so we have to set it based on the information in the repo.
+  # as the $Rev: 114096 $ is not expanded, so we have to set it based on the information in the repo.
   #
   VBOX_SVN_REV_FALLBACK := $(shell $(GIT) log -1 $(PATH_ROOT)/Config.kmk | $(SED) -e 's/^[ \t]*//' -e '/svn:sync-xref-src-repo-rev\: r/!d' -e 's/svn:sync-xref-src-repo-rev\: r*//; t a; :a q')
  endif

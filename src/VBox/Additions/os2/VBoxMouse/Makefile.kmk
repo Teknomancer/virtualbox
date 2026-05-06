@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114089 2026-05-06 13:45:14Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114096 2026-05-06 23:25:08Z knut.osmundsen@oracle.com $
 ## @file
 # VirtualBox Additions - OS/2 Mouse Driver.
 #
@@ -117,13 +117,13 @@ else
 endif
 VBoxMouse_CINCS += \
 	. \
-	$(PATH_DDKBASE)/h \
-	$(PATH_DDKBASE)/inc \
+	$(VBOX_PATH_OS2_DDK)/base/h \
+	$(VBOX_PATH_OS2_DDK)/base/inc \
 	../../../ValidationKit/bootsectors/bs3kit
 
 VBoxMouse_ASINCS = \
 	. \
-	$(PATH_DDKBASE)/inc
+	$(VBOX_PATH_OS2_DDK)/base/inc
 
 VBoxMouse_SOURCES = \
 	data.asm \
@@ -159,11 +159,11 @@ VBoxMouse_SOURCES = \
 	VBoxMouseDebug.c
 
 VBoxMouse_LIBS = \
-	$(PATH_DDKBASE)/src/dev/resource/rmcalls/rmcalls.lib \
+	$(VBOX_PATH_OS2_DDK)/base/src/dev/resource/rmcalls/rmcalls.lib \
 	$(VBoxMouseBs3Kit_1_TARGET) \
-	$(PATH_DDKBASE)/lib/os2286.lib \
+	$(VBOX_PATH_OS2_DDK)/base/lib/os2286.lib \
 	$(VBoxMouseEnd_1_TARGET) \
-	$(PATH_DDKBASE)/lib/os2286p.lib
+	$(VBOX_PATH_OS2_DDK)/base/lib/os2286p.lib
 
 
 #
