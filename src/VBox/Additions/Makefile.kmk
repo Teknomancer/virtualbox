@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114099 2026-05-06 23:55:14Z knut.osmundsen@oracle.com $
 ## @file
 # Top-level makefile for the VirtualBox Guest Additions.
 #
@@ -273,6 +273,7 @@ ifdef VBOX_WITH_ADDITIONS_ISO.os2.x86
  	OS2/readme.txt=$(VBOX_PATH_ADDITIONS.os2.x86)/readme.txt \
  	\
  	OS2/gengradd.dll=$(VBOX_PATH_ADDITIONS.os2.x86)/gengradd.dll \
+ 	OS2/VBoxGrext.dll=$(VBOX_PATH_ADDITIONS.os2.x86)/VBoxGrext.dll \
  	OS2/VBoxMouse.sys=$(VBOX_PATH_ADDITIONS.os2.x86)/vboxmouse.sys
 endif
 
