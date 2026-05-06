@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114098 2026-05-06 23:53:01Z knut.osmundsen@oracle.com $
 ## @file
 # Sub-Makefile for the OS/2 specific part of the guest additions.
 #
@@ -36,12 +36,12 @@ endif
 #
 # The sub-makefiles.
 #
+include $(PATH_SUB_CURRENT)/VBoxGradd/Makefile.kmk
+include $(PATH_SUB_CURRENT)/VBoxGrext/Makefile.kmk
 ifndef VBOX_OSE
- include $(PATH_SUB_CURRENT)/VBoxGradd/Makefile.kmk
- # include $(PATH_SUB_CURRENT)/VBoxGrext/Makefile.kmk
  include $(PATH_SUB_CURRENT)/VBoxMouse/Makefile.kmk
- include $(PATH_SUB_CURRENT)/Bin/Makefile.kmk
 endif
+include $(PATH_SUB_CURRENT)/Bin/Makefile.kmk
 include $(PATH_SUB_CURRENT)/VBoxSF/Makefile.kmk
 
 
