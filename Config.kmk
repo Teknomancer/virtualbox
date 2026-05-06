@@ -1,4 +1,4 @@
-# $Id: Config.kmk 114096 2026-05-06 23:25:08Z knut.osmundsen@oracle.com $
+# $Id: Config.kmk 114097 2026-05-06 23:25:27Z knut.osmundsen@oracle.com $
 ## @file
 # The global build configuration file for VBox.
 #
@@ -6036,7 +6036,7 @@ ifeq ($(KBUILD_TARGET),os2)
   	$(PATH_TOOL_OPENWATCOM)/h \
   	$(PATH_TOOL_OPENWATCOM)/h/os2 \
   	$(PATH_ROOT)/include \
-	$(SDK_VBoxKLibcOs2DDK_INCS)
+  	$(SDK_VBoxKLibcOs2DDK_INCS)
   TEMPLATE_VBoxR0Drv_CFLAGS = -s -ze -w4 -hd -d1+ -nt=TEXT32 -nc=CODE -4 -of+
   TEMPLATE_VBoxR0Drv_CXXFLAGS = -s -ze -w4 -hd -d2t -nt=TEXT32 -nc=CODE -4 -of+
   TEMPLATE_VBoxR0Drv_LDFLAGS = \
@@ -9587,7 +9587,7 @@ SVN                    ?= svn$(HOSTSUFF_EXE)
 GIT                    ?= git$(HOSTSUFF_EXE)
 VBOX_SVN_REV_KMK        = $(PATH_OUT)/revision.kmk
 ifndef VBOX_SVN_REV
- VBOX_SVN_REV_CONFIG_FALLBACK := $(patsubst %:,,  $Rev: 114096 $  )
+ VBOX_SVN_REV_CONFIG_FALLBACK := $(patsubst %:,,  $Rev: 114097 $  )
  VBOX_SVN_REV_FALLBACK := $(if-expr $(VBOX_SVN_REV_CONFIG_FALLBACK) > $(VBOX_SVN_REV_VERSION_FALLBACK),$(VBOX_SVN_REV_CONFIG_FALLBACK),$(VBOX_SVN_REV_VERSION_FALLBACK))
  VBOX_SVN_DEP          := $(firstword $(wildcard $(PATH_ROOT)/.svn/wc.db $(abspath $(PATH_ROOT)/../.svn/wc.db) $(abspath $(PATH_ROOT)/../../.svn/wc.db) $(PATH_ROOT)/.svn/entries))
  VBOX_GIT_DEP          := $(firstword $(wildcard $(PATH_ROOT)/.git/config $(abspath $(PATH_ROOT)/../.git/config) $(abspath $(PATH_ROOT)/../../.git/config)))
@@ -9601,7 +9601,7 @@ ifndef VBOX_SVN_REV
  ifneq ($(VBOX_GIT_DEP),)
   #
   # VBOX_SVN_REV_CONFIG_FALLBACK is not properly populated for a git checkout,
-  # as the $Rev: 114096 $ is not expanded, so we have to set it based on the information in the repo.
+  # as the $Rev: 114097 $ is not expanded, so we have to set it based on the information in the repo.
   #
   VBOX_SVN_REV_FALLBACK := $(shell $(GIT) log -1 $(PATH_ROOT)/Config.kmk | $(SED) -e 's/^[ \t]*//' -e '/svn:sync-xref-src-repo-rev\: r/!d' -e 's/svn:sync-xref-src-repo-rev\: r*//; t a; :a q')
  endif
