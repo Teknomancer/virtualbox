@@ -1,4 +1,4 @@
-/* $Id: HostImpl.cpp 113422 2026-03-16 14:28:47Z alexander.eichner@oracle.com $ */
+/* $Id: HostImpl.cpp 114094 2026-05-06 18:48:19Z klaus.espenlaub@oracle.com $ */
 /** @file
  * VirtualBox COM class implementation: Host
  */
@@ -204,6 +204,14 @@ typedef SOLARISFIXEDDISK *PSOLARISFIXEDDISK;
 #include "HostDnsService.h"
 #include "HostDriveImpl.h"
 #include "HostDrivePartitionImpl.h"
+
+#ifndef VBOX_OSE
+/* Oracle owned OUI, not used by actual hardware. */
+# define VBOX_ETHERNET_OUI "000F4B"
+#else /* VBOX_OSE */
+/* Traditional VirtualBox OUI, not officially assigned. */
+# define VBOX_ETHERNET_OUI "080027"
+#endif /* VBOX_OSE */
 
 ////////////////////////////////////////////////////////////////////////////////
 //
@@ -4084,12 +4092,12 @@ void Host::i_generateMACAddress(Utf8Str &mac)
 {
     /*
      * Our strategy is as follows: the first three bytes are our fixed
-     * vendor ID (080027). The remaining 3 bytes will be taken from the
-     * start of a GUID. This is a fairly safe algorithm.
+     * vendor ID. The remaining 3 bytes will be taken from the start of a GUID.
+     * This is a fairly safe algorithm.
      */
     Guid guid;
     guid.create();
-    mac = Utf8StrFmt("080027%02X%02X%02X",
+    mac = Utf8StrFmt(VBOX_ETHERNET_OUI "%02X%02X%02X",
                      guid.raw()->au8[0], guid.raw()->au8[1], guid.raw()->au8[2]);
 }
 
