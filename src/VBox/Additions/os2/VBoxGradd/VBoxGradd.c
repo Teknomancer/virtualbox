@@ -1,4 +1,4 @@
-/** $Id: VBoxGradd.c 114088 2026-05-06 13:44:56Z knut.osmundsen@oracle.com $ */
+/** $Id: VBoxGradd.c 114101 2026-05-07 00:25:26Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxGradd - OS/2 GRADD driver for VirtualBox (replaces gengradd).
  */
@@ -284,8 +284,8 @@ static BOOL vboxOpenDriver(void)
  *          an failure returned by the OS specific ioctl APIs.
  *
  * @param   uFunction   The requested function.
- * @param   pReq        The request (input & output).
- * @param   cbReq       The size of the request.
+ * @param   pHdr        The input and output request buffer.
+ * @param   cbReq       The size of the request buffer.
  *
  * @remark  Exactly how the VBoxGuestCommonIOCtl is ferried back
  *          here is OS specific. On BSD and Darwin we can use errno,
