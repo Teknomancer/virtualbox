@@ -501,6 +501,8 @@ void vbe_biosfn_set_mode(uint16_t STACK_BASED *AX, uint16_t BX, uint16_t ES, uin
 
         // first disable current mode (when switching between vesa modi)
         dispi_set_enable(VBE_DISPI_DISABLED);
+        // turn off linear addressing; we will enable it for >= 8bpp
+        outw(VGAREG_SEQU_ADDRESS, 0x0007);
 
         if (bpp == 4)
         {

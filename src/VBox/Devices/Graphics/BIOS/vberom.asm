@@ -403,7 +403,7 @@ bit9_clear:
   mov  dx, VBE_DISPI_IOPORT_DATA
   in_ax_dx
   cmp  al, 08
-  jb   vga_compat_end
+  jb   vga_compat_8bpp
   mov  dx, VGAREG_VGA_CRTC_ADDRESS
   mov  al, 14h
   out  dx, al
@@ -438,6 +438,14 @@ bit9_clear:
   and  al, 9Fh
   or   al, 40h
   out  dx, al
+  jmp  vga_compat_end
+
+vga_compat_8bpp:
+  ; enable linear addressing through VGA aperture
+  ; NB: initially disabled by caller
+  mov  dx, VGAREG_SEQU_ADDRESS
+  mov  ax, 0107h
+  out  dx, ax
 
 vga_compat_end:
   pop  dx

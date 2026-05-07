@@ -1,4 +1,4 @@
-/* $Id: DevVGATmpl.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: DevVGATmpl.h 114103 2026-05-07 11:16:25Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, code templates.
  */
@@ -344,19 +344,25 @@ static void RT_CONCAT(vga_draw_line4d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
 static void RT_CONCAT(vga_draw_line8d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
                                                 const uint8_t *s, int width)
 {
-    uint32_t *palette;
+    uint32_t *palette, src_inc, dwb_mode;
+
     int x;
     RT_NOREF(pThisCC);
 
     palette = s1->last_palette;
     width >>= 3;
+    if (s1->sr[0x07] & 1)
+        dwb_mode = 0;   // Non-VGA modes use linear addressing
+    else
+        dwb_mode = (s1->cr[0x14] & 0x40) ? 2 : (s1->cr[0x17] & 0x40) ? 0 : 1;
+    src_inc = 1 << dwb_mode;
     for(x = 0; x < width; x++) {
         PUT_PIXEL2(d, 0, palette[s[0]]);
         PUT_PIXEL2(d, 1, palette[s[1]]);
         PUT_PIXEL2(d, 2, palette[s[2]]);
         PUT_PIXEL2(d, 3, palette[s[3]]);
         d += BPP * 8;
-        s += 4;
+        s += 4 * src_inc;
     }
 }
 
@@ -368,23 +374,29 @@ static void RT_CONCAT(vga_draw_line8d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
 static void RT_CONCAT(vga_draw_line8_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
                                               const uint8_t *s, int width)
 {
-    uint32_t *palette;
+    uint32_t *palette, src_inc, dwb_mode;
     int x;
     RT_NOREF(pThisCC);
 
     palette = s1->last_palette;
     width >>= 3;
+    if (s1->sr[0x07] & 1)
+        dwb_mode = 0;   // Non-VGA modes use linear addressing
+    else
+        dwb_mode = (s1->cr[0x14] & 0x40) ? 2 : (s1->cr[0x17] & 0x40) ? 0 : 1;
+    src_inc = 1 << dwb_mode;
     for(x = 0; x < width; x++) {
         ((PIXEL_TYPE *)d)[0] = palette[s[0]];
         ((PIXEL_TYPE *)d)[1] = palette[s[1]];
         ((PIXEL_TYPE *)d)[2] = palette[s[2]];
         ((PIXEL_TYPE *)d)[3] = palette[s[3]];
-        ((PIXEL_TYPE *)d)[4] = palette[s[4]];
-        ((PIXEL_TYPE *)d)[5] = palette[s[5]];
-        ((PIXEL_TYPE *)d)[6] = palette[s[6]];
-        ((PIXEL_TYPE *)d)[7] = palette[s[7]];
+        s += 4 * src_inc;
+        ((PIXEL_TYPE *)d)[4] = palette[s[0]];
+        ((PIXEL_TYPE *)d)[5] = palette[s[1]];
+        ((PIXEL_TYPE *)d)[6] = palette[s[2]];
+        ((PIXEL_TYPE *)d)[7] = palette[s[3]];
+        s += 4 * src_inc;
         d += BPP * 8;
-        s += 8;
     }
 }
 

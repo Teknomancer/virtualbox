@@ -1,4 +1,4 @@
-/* $Id: DevVGA.cpp 114064 2026-05-04 16:56:20Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA.cpp 114103 2026-05-07 11:16:25Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device.
  */
@@ -1253,8 +1253,9 @@ static uint32_t vga_mem_readb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATECC p
     if (pThis->sr[0x04] & 0x08) {
         /* chain 4 mode : simplest access */
 #ifndef IN_RC
-        /* If all planes are accessible, then map the page to the frame buffer and make it writable. */
+        /* If all planes are accessible and linear addressing is on, map the page to the frame buffer and make it writable. */
         if (   (pThis->sr[0x02] & 3) == 3
+            && (pThis->sr[0x07] & 1)
             && !vgaIsRemapped(pThis, offMmio)
             && pThis->GCPhysVRAM)
         {
@@ -1266,6 +1267,9 @@ static uint32_t vga_mem_readb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATECC p
             vgaMarkRemapped(pThis, offMmio);
         }
 #endif /* !IN_RC */
+        /* VGA Chain-4 modes only use every 4th planar memory address. */
+        if (!(pThis->sr[0x07] & 1))
+            addr = ((addr & ~3) << 2) | (addr & 3);
         VERIFY_VRAM_READ_OFF_RETURN(pThis, addr, *prc);
 #ifdef VMSVGA_WITH_VGA_FB_BACKUP_AND_IN_RING3
         ret = !pThis->svga.fEnabled            ? pThisCC->pbVRam[addr]
@@ -1291,26 +1295,25 @@ static uint32_t vga_mem_readb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATECC p
         else
             plane = pThis->gr[0x04];
 
-        /** @todo We are not fully implementing GR6[1]. According to the Compaq EGA TRG,
-         * if GR6[1] is set then bit A0 coming from the CPU "is replaced by a higher
-         * CPU bit or the page select bit (bit <5>) from the Control and Status
-         * Miscellaneous Output register". Compaq offers no hint as to which higher order
-         * address bit or how to decide when MSR[5] should be used instead.
+        /* According to the Compaq EGA TRG, if GR6[1] is set then bit A0 coming from
+         * the CPU "is replaced by a higher CPU bit or the page select bit (bit <5>)
+         * from the Control and Status Miscellaneous Output register". Compaq offers
+         * no hint as to which higher order address bit or how to decide when MSR[5]
+         * should be used instead.
          * The Matrox MGA-2064W spec says that if the VGA is decoding the entire
          * 128K range (A000-BFFF, extremely unusual), bit A16 replaces A0; otherwise,
          * MSR[5] replaces A0.
          * The MSR[5] bit is extremely poorly documented and various vendors contradict
-         * each other as to the polarity of the bit.
-         * We do not implement MSR[5] because it has no known use and to be useful,
-         * text mode drawing would have to correctly deal with all CR17 bits as well.
-         * If it were implemented the way Compaq and Matrox say it works (MSR[5] replacing
-         * A0 in Chain Odd/Even mode), it would actively break text modes. If A0 were to
-         * be replaced by inverted MSR[5], it would make much more sense.
+         * each other as to the polarity of the bit. We follow the Cirrus Logic
+         * documentation which also matches CL-GD5426 hardware (A0 is replaced by
+         * inverted MSR[5]).
          */
+        /** @todo We are not fully implementing GR6[1] and ignore the GR6[3:2] bits.
 
         /* drop address bit 0 if GR6[1] (Chain Odd/Even) is set */
         addr &= ~((pThis->gr[0x06] & 2) >> 1);
-//        addr |= (~(pThis->msr & 0x20) >> 5) & ((pThis->gr[0x06] & 2) >> 1);   // see todo above
+        /* replace address bit 0 with inverted MISC[5] if GR6[1] is set */
+        addr |= (~(pThis->msr & 0x20) >> 5) & ((pThis->gr[0x06] & 2) >> 1);
 
         /* validate address once we're done adjusting it */
         VERIFY_VRAM_READ_OFF_RETURN(pThis, addr * 4 + 3, *prc);
@@ -1386,8 +1389,9 @@ static VBOXSTRICTRC vga_mem_writeb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTAT
         mask = (1 << plane);
         if (pThis->sr[0x02] & mask) {
 #ifndef IN_RC
-            /* If all planes are accessible, then map the page to the frame buffer and make it writable. */
+            /* If all planes are accessible and linear addressing is on, map the page to the frame buffer and make it writable. */
             if (   (pThis->sr[0x02] & 3) == 3
+                && (pThis->sr[0x07] & 1)
                 && !vgaIsRemapped(pThis, offMmio)
                 && pThis->GCPhysVRAM)
             {
@@ -1396,7 +1400,9 @@ static VBOXSTRICTRC vga_mem_writeb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTAT
                 vgaMarkRemapped(pThis, offMmio);
             }
 #endif /* !IN_RC */
-
+            /* VGA Chain-4 modes only use every 4th planar memory address. */
+            if (!(pThis->sr[0x07] & 1))
+                addr = ((addr & ~3) << 2) | (addr & 3);
             VERIFY_VRAM_WRITE_OFF_RETURN(pThis, addr);
 #ifdef VMSVGA_WITH_VGA_FB_BACKUP_AND_IN_RING3
             if (!pThis->svga.fEnabled)
@@ -1424,7 +1430,8 @@ static VBOXSTRICTRC vga_mem_writeb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTAT
 
         /* drop address bit 0 if GR6[1] (Chain Odd/Even) is set */
         addr &= ~((pThis->gr[0x06] & 2) >> 1);
-//        addr |= (~(pThis->msr & 0x20) >> 5) & ((pThis->gr[0x06] & 2) >> 1);   // see todo above
+        /* replace address bit 0 with inverted MISC[5] if GR6[1] is set */
+        addr |= (~(pThis->msr & 0x20) >> 5) & ((pThis->gr[0x06] & 2) >> 1);
 
         /* validate address once we're done adjusting it */
         VERIFY_VRAM_WRITE_OFF_RETURN(pThis, addr * 4 + 3);
@@ -1660,7 +1667,12 @@ static void vgaR3GetOffsets(PVGASTATE pThis,
         /* compute line_offset in bytes */
         line_offset = pThis->cr[0x13];
         line_offset <<= 3;
-        if (!(pThis->cr[0x14] & 0x40) && !(pThis->cr[0x17] & 0x40))
+        if (pThis->cr[0x14] & 0x40)
+        {
+            /* Dword mode. Used for chain-4 modes. */
+            line_offset *= 4;
+        }
+        else if (!(pThis->cr[0x17] & 0x40))
         {
             /* Word mode. Used for odd/even modes. */
             line_offset *= 2;
