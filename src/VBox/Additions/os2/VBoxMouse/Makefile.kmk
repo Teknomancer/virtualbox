@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114100 2026-05-07 00:23:55Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114102 2026-05-07 11:09:59Z knut.osmundsen@oracle.com $
 ## @file
 # VirtualBox Additions - OS/2 Mouse Driver.
 #
@@ -225,7 +225,7 @@ TEMPLATE_VBoxMouseBs3KitTmpl_BLD_TRG_ARCH = x86
 TEMPLATE_VBoxMouseBs3KitTmpl_TOOL         = OPENWATCOM-16
 TEMPLATE_VBoxMouseBs3KitTmpl_ASTOOL       = VBoxMouseNasm
 ifndef USE_JWASM
-TEMPLATE_VBoxMouseBs3KitTmpl_ARTOOL       = GCC3OMF
+ TEMPLATE_VBoxMouseBs3KitTmpl_ARTOOL      = GCC3OMF
 endif
 TEMPLATE_VBoxMouseBs3KitTmpl_ASFLAGS      = -f obj -g -w+orphan-labels
 TEMPLATE_VBoxMouseBs3KitTmpl_ASDEFS       = ASM_FORMAT_OMF RT_NOINC_SEGMENTS __NASM__ ARCH_BITS=16 RT_ARCH_X86 \
