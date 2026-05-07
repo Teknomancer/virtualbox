@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114096 2026-05-06 23:25:08Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114100 2026-05-07 00:23:55Z knut.osmundsen@oracle.com $
 ## @file
 # VirtualBox Additions - OS/2 Mouse Driver.
 #
@@ -44,6 +44,10 @@ VBoxMouseEnd_TOOL = GCC3OMF
 ifdef USE_MASM
  VBoxMouseEnd_ASTOOL = MASM510
  VBoxMouseEnd_ASFLAGS = -Ml
+else ifdef USE_JWASM
+ VBoxMouseEnd_TOOL = OPENWATCOM-16
+ VBoxMouseEnd_ASTOOL = JWASM
+ VBoxMouseEnd_ASFLAGS = -Zm -Cp
 else
  VBoxMouseEnd_ASTOOL = ALP
  VBoxMouseEnd_ASFLAGS = -Sv:M510
@@ -76,6 +80,9 @@ VBoxMouse_TOOL = OPENWATCOM-16
 ifdef USE_MASM
  VBoxMouse_ASTOOL = MASM510
  VBoxMouse_ASFLAGS = -Mx
+else ifdef USE_JWASM
+ VBoxMouse_ASTOOL = JWASM
+ VBoxMouse_ASFLAGS = -Zm -Cp
 else
  VBoxMouse_ASTOOL = ALP
  VBoxMouse_ASFLAGS = -Sv:M510 -Scs # Disable case sensivity, or it won't work.
@@ -217,7 +224,9 @@ TEMPLATE_VBoxMouseBs3KitTmpl_BLD_TRG      = os2
 TEMPLATE_VBoxMouseBs3KitTmpl_BLD_TRG_ARCH = x86
 TEMPLATE_VBoxMouseBs3KitTmpl_TOOL         = OPENWATCOM-16
 TEMPLATE_VBoxMouseBs3KitTmpl_ASTOOL       = VBoxMouseNasm
+ifndef USE_JWASM
 TEMPLATE_VBoxMouseBs3KitTmpl_ARTOOL       = GCC3OMF
+endif
 TEMPLATE_VBoxMouseBs3KitTmpl_ASFLAGS      = -f obj -g -w+orphan-labels
 TEMPLATE_VBoxMouseBs3KitTmpl_ASDEFS       = ASM_FORMAT_OMF RT_NOINC_SEGMENTS __NASM__ ARCH_BITS=16 RT_ARCH_X86 \
 	BS3TEXT16=CSEG CGROUP16=CGROUP \
