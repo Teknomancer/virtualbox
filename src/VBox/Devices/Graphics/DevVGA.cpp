@@ -1,4 +1,4 @@
-/* $Id: DevVGA.cpp 114103 2026-05-07 11:16:25Z michal.necasek@oracle.com $ */
+/* $Id: DevVGA.cpp 114104 2026-05-07 11:40:13Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device.
  */
@@ -1308,7 +1308,7 @@ static uint32_t vga_mem_readb(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATECC p
          * documentation which also matches CL-GD5426 hardware (A0 is replaced by
          * inverted MSR[5]).
          */
-        /** @todo We are not fully implementing GR6[1] and ignore the GR6[3:2] bits.
+        /** @todo We are not fully implementing GR6[1] (we ignore the GR6[3:2] state). */
 
         /* drop address bit 0 if GR6[1] (Chain Odd/Even) is set */
         addr &= ~((pThis->gr[0x06] & 2) >> 1);
