@@ -1,4 +1,4 @@
-/* $Id: VBoxService.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxService.cpp 114105 2026-05-07 12:04:23Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxService - Guest Additions Service Skeleton.
  */
@@ -854,6 +854,11 @@ static RTEXITCODE vgsvcProcessGlobalOption(int iShort, PCRTGETOPTUNION pValueUni
         case 'f':
             if (fCmdLine)
                 g_fDaemonize = false;
+            break;
+
+        case kVGSvcOptGlobalDaemonzied:
+            if (fCmdLine)
+                g_fDaemonized = true;
             break;
 
         case 'v':
