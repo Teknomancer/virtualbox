@@ -1,4 +1,4 @@
-/* $Id: DrvNAT.cpp 114092 2026-05-06 16:19:50Z andreas.loeffler@oracle.com $ */
+/* $Id: DrvNAT.cpp 114107 2026-05-08 14:07:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * DrvNATlibslirp - NATlibslirp network transport driver.
  */
@@ -1282,26 +1282,27 @@ static int drvNAT_PollEventHostToSlirp(int iEvents) {
 static ssize_t drvNAT_SendPacketCb(const void *pvBuf, ssize_t cb, void *pvUser /* PDRVNAT */)
 {
     PDRVNAT const pThis = (PDRVNAT)pvUser;
-    Assert(pThis);
+    AssertPtr(pThis);
 
-    void * const pvNewBuf = RTMemDup(pvBuf, cb);
-    AssertReturn(pvNewBuf, -1);
-
-    LogFlow(("slirp_output BEGIN %p %d\n", pvNewBuf, cb));
-    Log6(("slirp_output: pvNewBuf=%p cb=%#x (pThis=%p)\n"
-          "%.*Rhxd\n", pvNewBuf, cb, pThis, cb, pvNewBuf));
-
-    /* don't queue new requests when the NAT thread is about to stop */
+    /* Don't queue new requests when the NAT thread is about to stop. */
     if (pThis->pSlirpThread->enmState != PDMTHREADSTATE_RUNNING)
         return -1;
+
+    void * const pvNewBuf = RTMemDup(pvBuf, cb);
+    AssertPtrReturn(pvNewBuf, -1);
+
+    Log6Func(("pvNewBuf=%p cb=%#x (pThis=%p)\n"
+              "%.*Rhxd\n", pvNewBuf, cb, pThis, cb, pvNewBuf));
 
     ASMAtomicIncU32(&pThis->cPkts);
     int rc = RTReqQueueCallEx(pThis->hRecvReqQueue, NULL /*ppReq*/, 0 /*cMillies*/, RTREQFLAGS_VOID | RTREQFLAGS_NO_WAIT,
                               (PFNRT)drvNATRecvWorker, 3, pThis, pvNewBuf, cb);
     AssertRCStmt(rc, RTMemFree(pvNewBuf));
+
     drvNATRecvWakeup(pThis->pDrvIns, pThis->pRecvThread);
 
     STAM_COUNTER_INC(&pThis->StatQueuePktSent);
+
     LogFlowFuncLeave();
     return cb;
 }
