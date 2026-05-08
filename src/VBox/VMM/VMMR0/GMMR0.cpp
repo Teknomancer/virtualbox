@@ -1,4 +1,4 @@
-/* $Id: GMMR0.cpp 113451 2026-03-17 21:18:24Z knut.osmundsen@oracle.com $ */
+/* $Id: GMMR0.cpp 114108 2026-05-08 22:01:49Z knut.osmundsen@oracle.com $ */
 /** @file
  * GMM - Global Memory Manager.
  */
@@ -2393,13 +2393,13 @@ static int gmmR0RegisterChunk(PGMM pGMM, PGMMCHUNKFREESET pSet, RTR0MEMOBJ hMemO
                 Assert(*piPage - iDstPageFirst == cToFree);
                 for (uint32_t iDstPage = iDstPageFirst, iPage = 0; iPage < cToFree; iPage++, iDstPage++)
                 {
-                    paPages[iDstPageFirst].fZeroed = false;
+                    paPages[iDstPage].fZeroed = false;
                     if (pChunk->aPages[iPage].Private.pfn == GMM_PAGE_PFN_UNSHAREABLE)
-                        paPages[iDstPageFirst].HCPhysGCPhys = NIL_GMMPAGEDESC_PHYS;
+                        paPages[iDstPage].HCPhysGCPhys = NIL_GMMPAGEDESC_PHYS;
                     else
-                        paPages[iDstPageFirst].HCPhysGCPhys = (RTHCPHYS)pChunk->aPages[iPage].Private.pfn << GUEST_PAGE_SHIFT;
-                    paPages[iDstPageFirst].idPage       = NIL_GMM_PAGEID;
-                    paPages[iDstPageFirst].idSharedPage = NIL_GMM_PAGEID;
+                        paPages[iDstPage].HCPhysGCPhys = (RTHCPHYS)pChunk->aPages[iPage].Private.pfn << GUEST_PAGE_SHIFT;
+                    paPages[iDstPage].idPage       = NIL_GMM_PAGEID;
+                    paPages[iDstPage].idSharedPage = NIL_GMM_PAGEID;
                 }
                 *piPage = iDstPageFirst;
             }
