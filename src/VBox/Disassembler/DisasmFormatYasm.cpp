@@ -1,4 +1,4 @@
-/* $Id: DisasmFormatYasm.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: DisasmFormatYasm.cpp 114111 2026-05-09 00:15:16Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBox Disassembler - Yasm(/Nasm) Style Formatter.
  */
@@ -243,15 +243,15 @@ static const char *disasmFormatYasmIndexReg(PCDISSTATE pDis, PCDISOPPARAM pParam
         *pcchReg = 4 + !!psz[4];
         return psz;
     }
-    else if (pParam->fUse & DISUSE_REG_YMM)
+
+    if (pParam->fUse & DISUSE_REG_YMM)
     {
         Assert(pParam->x86.Index.idxYmmReg < RT_ELEMENTS(g_aszYasmRegYMM));
         const char *psz = g_aszYasmRegYMM[pParam->x86.Index.idxYmmReg];
         *pcchReg = 4 + !!psz[4];
         return psz;
-
     }
-    else
+
     switch (pDis->x86.uAddrMode)
     {
         case DISCPUMODE_16BIT:
