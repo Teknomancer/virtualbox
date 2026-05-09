@@ -1,4 +1,4 @@
-/* $Id: scmsubversion.cpp 112398 2026-01-11 16:23:55Z knut.osmundsen@oracle.com $ */
+/* $Id: scmsubversion.cpp 114112 2026-05-09 00:16:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * IPRT Testcase / Tool - Source Code Massager, Subversion Access.
  */
@@ -1674,13 +1674,17 @@ int ScmSvnApplyChanges(PSCMRWSTATE pState)
      */
     for (size_t i = 0; i < pState->cSvnPropChanges; i++)
     {
-        const char *apszArgv[6];
+        const char *apszArgv[7];
         apszArgv[0] = g_szSvnPath;
         apszArgv[1] = pState->paSvnPropChanges[i].pszValue ? "propset" : "propdel";
         apszArgv[2] = pState->paSvnPropChanges[i].pszName;
         int iArg = 3;
         if (pState->paSvnPropChanges[i].pszValue)
+        {
             apszArgv[iArg++] = pState->paSvnPropChanges[i].pszValue;
+            if (strcmp(pState->paSvnPropChanges[i].pszName, "svn:sync-process") == 0)
+                apszArgv[iArg++] = "--force";
+        }
         apszArgv[iArg++] = pState->pszFilename;
         apszArgv[iArg++] = NULL;
 
