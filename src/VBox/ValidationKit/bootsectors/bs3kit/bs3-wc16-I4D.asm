@@ -1,4 +1,4 @@
-; $Id: bs3-wc16-I4D.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bs3-wc16-I4D.asm 114115 2026-05-10 21:49:18Z knut.osmundsen@oracle.com $
 ;; @file
 ; BS3Kit - 16-bit Watcom C/C++, 32-bit signed integer division.
 ;
@@ -46,8 +46,8 @@
 ;
 ; @uses     Nothing.
 ;
-global $_?I4D
-$_?I4D:
+global _?I4D
+_?I4D:
 ;; @todo no idea if we're getting the negative division stuff right here according to what watcom expectes...
 extern TODO_NEGATIVE_SIGNED_DIVISION
         ; Move dividend into EDX:EAX

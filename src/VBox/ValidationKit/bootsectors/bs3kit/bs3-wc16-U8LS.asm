@@ -1,4 +1,4 @@
-; $Id: bs3-wc16-U8LS.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bs3-wc16-U8LS.asm 114115 2026-05-10 21:49:18Z knut.osmundsen@oracle.com $
 ;; @file
 ; BS3Kit - 16-bit Watcom C/C++, 64-bit integer left shift.
 ;
@@ -44,10 +44,10 @@
 ; @param    AX:BX:CX:DX Value to shift.
 ; @param    SI          Shift count.
 ;
-global $_?U8LS
-$_?U8LS:
-global $_?I8LS
-$_?I8LS:
+global _?U8LS
+_?U8LS:
+global _?I8LS
+_?I8LS:
         push    si
 
         ;

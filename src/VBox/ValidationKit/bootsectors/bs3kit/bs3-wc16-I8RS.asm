@@ -1,4 +1,4 @@
-; $Id: bs3-wc16-I8RS.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bs3-wc16-I8RS.asm 114115 2026-05-10 21:49:18Z knut.osmundsen@oracle.com $
 ;; @file
 ; BS3Kit - 16-bit Watcom C/C++, 64-bit signed integer right shift.
 ;
@@ -44,8 +44,8 @@
 ; @param    AX:BX:CX:DX Value to shift.
 ; @param    SI          Shift count.
 ;
-global $_?I8RS
-$_?I8RS:
+global _?I8RS
+_?I8RS:
         push    si
 
         ;

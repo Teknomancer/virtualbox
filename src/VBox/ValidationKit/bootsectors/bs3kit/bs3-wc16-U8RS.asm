@@ -1,4 +1,4 @@
-; $Id: bs3-wc16-U8RS.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bs3-wc16-U8RS.asm 114115 2026-05-10 21:49:18Z knut.osmundsen@oracle.com $
 ;; @file
 ; BS3Kit - 16-bit Watcom C/C++, 64-bit unsigned integer right shift.
 ;
@@ -48,8 +48,8 @@
 global __U8RS
 __U8RS:
 %endif
-global $_?U8RS
-$_?U8RS:
+global _?U8RS
+_?U8RS:
         push    si
 
         ;
