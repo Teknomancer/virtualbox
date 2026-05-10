@@ -1955,7 +1955,11 @@ static void set_scan_lines(uint8_t lines)
  rows = vde / lines;
  write_byte(BIOSMEM_SEG,BIOSMEM_NB_ROWS, rows-1);
  cols = read_word(BIOSMEM_SEG,BIOSMEM_NB_COLS);
- write_word(BIOSMEM_SEG,BIOSMEM_PAGE_SIZE, rows * cols * 2);
+ // Add 256 bytes of padding between pages. In some modes, such
+ // as 80x43, an extra line of text is partially visible. Padding
+ // ensures that it will stay empty instead of being used by the
+ // next page.
+ write_word(BIOSMEM_SEG,BIOSMEM_PAGE_SIZE, rows * cols * 2 + 256);
 }
 
 static void biosfn_set_font_block(uint8_t BL)
