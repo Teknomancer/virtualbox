@@ -1,4 +1,4 @@
-/* $Id: DevPciVfio.cpp 114120 2026-05-11 16:13:21Z alexander.eichner@oracle.com $ */
+/* $Id: DevPciVfio.cpp 114122 2026-05-11 16:25:57Z alexander.eichner@oracle.com $ */
 /** @file
  * PCI passthrough device emulation using VFIO/IOMMUFD.
  */
@@ -329,7 +329,7 @@ typedef struct VFIOPCIFUN
     volatile uint64_t    *pbmMsixPba;
     /** MSI-X region handle. */
     PGMMMIO2HANDLE       hMsix;
-    /** MSI-X intercept handle for the non aligned case. */;
+    /** MSI-X intercept handle for the non aligned case. */
     IOMMMIOHANDLE        hMsixMmio;
 #if 0
     /** The write protection layer for the MSI-X MMIO2 region. */
