@@ -1,4 +1,4 @@
-/* $Id: DevVGA.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: DevVGA.h 114117 2026-05-11 10:15:41Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, internal header.
  */
@@ -321,8 +321,10 @@ typedef struct VGAState
     uint32_t start_addr;
     uint32_t plane_updated;
     uint8_t last_cw, last_ch;
-    uint8_t last_uline;                                                 \
-    bool last_blink;                                                    \
+    uint8_t last_uline;
+    uint8_t last_preset_row;
+    uint8_t padding2[7];
+    bool last_blink;
     uint32_t last_width, last_height; /* in chars or pixels */
     uint32_t last_scr_width, last_scr_height; /* in pixels */
     uint32_t last_bpp;

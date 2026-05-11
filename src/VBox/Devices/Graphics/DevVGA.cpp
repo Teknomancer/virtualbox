@@ -1,4 +1,4 @@
-/* $Id: DevVGA.cpp 114104 2026-05-07 11:40:13Z michal.necasek@oracle.com $ */
+/* $Id: DevVGA.cpp 114117 2026-05-11 10:15:41Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device.
  */
@@ -1774,6 +1774,7 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
                          bool fFailOnResize, bool reset_dirty, PDMIDISPLAYCONNECTOR *pDrv)
 {
     int cx, cy, cheight, cw, ch, cattr, height, width, ch_attr;
+    int height_in_ch, width_in_ch, cheight_vis, preset_row_scan;
     int cx_min, cx_max, linesize, x_incr;
     int cx_min_upd, cx_max_upd, cy_start;
     uint32_t offset, fgcol, bgcol, v, cursor_offset;
@@ -1828,7 +1829,15 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         full_update = true;
     }
 
+    preset_row_scan = pThis->cr[0x08] & 0x1f;
+    if (preset_row_scan != pThis->last_preset_row) {
+        pThis->last_preset_row = preset_row_scan;
+        full_update = true;
+    }
+
     full_update |= vgaR3UpdateBasicParams(pThis, pThisCC);
+
+    pThisCC->get_resolution(pThis, &width, &height);
 
     /* Evaluate word/byte mode. Need to count by 4 because text is only in plane 0. */
     s_incr = pThis->cr[0x17] & 0x40 ? 4 : 8;
@@ -1858,26 +1867,25 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         cw = 9;
     if (pThis->sr[0x01] & 0x08)
         cw = 16; /* NOTE: no 18 pixel wide */
-    width = (pThis->cr[0x01] + 1);
+    width_in_ch = (pThis->cr[0x01] + 1);
+    /* update width because get_resolution() may have lied */
+    width = width_in_ch * cw;
     if (pThis->cr[0x06] == 100) {
         /* ugly hack for CGA 160x100x16 - explain me the logic */
-        height = 100;
+        height_in_ch = 100;
     } else {
-        height = pThis->cr[0x12] |
-            ((pThis->cr[0x07] & 0x02) << 7) |
-            ((pThis->cr[0x07] & 0x40) << 3);
-        height = (height + 1) / cheight;
+        height_in_ch = (height + 1) / cheight;
     }
     /** @todo r=michaln This conditional is questionable; we should be able
      * to draw whatver the guest asks for. */
-    if ((height * width) > CH_ATTR_SIZE) {
+    if ((height_in_ch * width_in_ch) > CH_ATTR_SIZE) {
         /* better than nothing: exit if transient size is too big */
         return VINF_SUCCESS;
     }
 
-    int const scr_width = width * cw;
-    int const scr_height = height * cheight;
-    if (width != (int)pThis->last_width || height != (int)pThis->last_height ||
+    int const scr_width = width;
+    int const scr_height = height;
+    if (width_in_ch != (int)pThis->last_width || height_in_ch != (int)pThis->last_height ||
         cw != pThis->last_cw || cheight != pThis->last_ch ||
         scr_width != (int)pDrv->cx || scr_height != (int)pDrv->cy) {
         if (fFailOnResize)
@@ -1889,8 +1897,8 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         pThis->last_scr_height = scr_height;
         /* For text modes the direct use of guest VRAM is not implemented, so bpp and cbLine are 0 here. */
         int rc = pDrv->pfnResize(pDrv, 0, NULL, 0, pThis->last_scr_width, pThis->last_scr_height);
-        pThis->last_width = width;
-        pThis->last_height = height;
+        pThis->last_width = width_in_ch;
+        pThis->last_height = height_in_ch;
         pThis->last_ch = cheight;
         pThis->last_cw = cw;
         full_update = true;
@@ -1941,7 +1949,7 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
     ch_attr_ptr = pThis->last_ch_attr;
     cy_start = -1;
     cx_max_upd = -1;
-    cx_min_upd = width;
+    cx_min_upd = width_in_ch;
 
     /* Figure out if we're in the visible period of the blink cycle. */
     time_ns  = PDMDevHlpTMTimeVirtGetNano(pDevIns);
@@ -1957,15 +1965,49 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         cur_blink_flip = true;
     }
 
-    for(cy = 0; cy < (height - dscan); cy = cy + (1 << dscan)) {
+    /* Convert preset row scan to actual scanlines */
+    preset_row_scan <<= dscan;
+
+    /* Drawing needs to be done with pixel granularity:
+     * - Row scan preset can skip pixels at the top of first row of text
+     * - Split screen can skip pixels at the bottom of a row
+     * - Split screen can occur in the middle of a double-scanned line
+     */
+    for(cy = 0; cy < height - dscan; cy = cy + cheight_vis) {
+        /* Line compare works in text modes, too. */
+        if (RT_UNLIKELY((uint32_t)cy == pThis->line_compare))
+            s1 = pThisCC->pbVRam;
+
         d1 = dest;
         src = s1;
-        cx_min = width;
+        cx_min = width_in_ch;
         cx_max = -1;
-        for(cx = 0; cx < width; cx++) {
+        cheight_vis = cheight << dscan;
+
+        /* Preset row scan can skip initial scanlines of the top row.
+         * NB: The Compaq EGA TRG says: "This value should NOT exceed the maximum
+         * scan line value [in CR9] or unpredictable results may occur."
+         */
+        if (RT_UNLIKELY(preset_row_scan)) {
+            /* Ignore preset row scan if it's out of range. */
+            if (preset_row_scan < cheight_vis) {
+                cheight_vis = cheight_vis - preset_row_scan;
+            }
+        }
+
+        /* If line compare cuts into the current row, take it into account. */
+        if (RT_UNLIKELY((unsigned)(pThis->line_compare - cy - 1) < (unsigned)cheight_vis))
+            cheight_vis = pThis->line_compare - cy;
+
+        /* Text row may not be fully displayed at bottom of screen. Happens in EGA 43-line modes */
+        if (cheight_vis > height - cy)
+            cheight_vis = height - cy;
+
+        for(cx = 0; cx < width_in_ch; cx++) {
             ch_attr = *(uint16_t *)src;
             /* Figure out if character needs redrawing due to blink state change. */
             blink_do_redraw = blink_enabled && chr_blink_flip && (ch_attr & 0x8000);
+
             if (full_update || ch_attr != (int)*ch_attr_ptr || blink_do_redraw || (src == cursor_ptr && cur_blink_flip)) {
                 if (cx < cx_min)
                     cx_min = cx;
@@ -1982,6 +2024,7 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
 #endif
                 font_ptr = font_base[(cattr >> 3) & 1];
                 font_ptr += 32 * 4 * ch;
+                font_ptr += 4 * preset_row_scan;
                 bgcol = palette[cattr >> 4];
                 fgcol = palette[cattr & 0x0f];
 
@@ -1994,17 +2037,18 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
 
                 if (cw != 9) {
                     if (pThis->fRenderVRAM)
-                        vga_draw_glyph8(d1, linesize, font_ptr, cheight, fgcol, bgcol, dscan);
+                        vga_draw_glyph8(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dscan);
                 } else {
                     dup9 = 0;
+                    /* Duplicate 9th pixel for chars in B0-DF range. */
                     if (ch >= 0xb0 && ch <= 0xdf && (pThis->ar[0x10] & 0x04))
                         dup9 = 1;
                     if (pThis->fRenderVRAM)
-                        vga_draw_glyph9(d1, linesize, font_ptr, cheight, fgcol, bgcol, dup9);
+                        vga_draw_glyph9(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dup9);
                 }
 
                 /* Underline. Typically turned off by setting it past cell height. */
-                if (((cattr & 0x03) == 1) && (uline_pos < cheight))
+                if (((cattr & 0x03) == 1) && (uline_pos < cheight_vis))
                 {
                     int h;
 
@@ -2030,8 +2074,8 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
                         line_start = pThis->cr[0x0a] & 0x1f;
                         line_last = pThis->cr[0x0b] & 0x1f;
                         /* XXX: check that */
-                        if (line_last > cheight - 1)
-                            line_last = cheight - 1;
+                        if (line_last > cheight_vis - 1)
+                            line_last = cheight_vis - 1;
                         if (line_last >= line_start && line_start < cheight) {
                             h = line_last - line_start + 1;
                             d = d1 + (linesize * line_start << dscan);
@@ -2062,29 +2106,25 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
                 cx_max_upd = cx_max;
         } else if (cy_start >= 0) {
             /* Flush updates to display. */
-            pDrv->pfnUpdateRect(pDrv, cx_min_upd * cw, cy_start * cheight,
-                                (cx_max_upd - cx_min_upd + 1) * cw, (cy - cy_start) * cheight);
+            pDrv->pfnUpdateRect(pDrv, cx_min_upd * cw, cy_start,
+                                (cx_max_upd - cx_min_upd + 1) * cw, cy - cy_start);
             cy_start = -1;
             cx_max_upd = -1;
-            cx_min_upd = width;
+            cx_min_upd = width_in_ch;
         }
 
-        dest += linesize * cheight << dscan;
+        dest += linesize * cheight_vis;
         s1 += line_offset;
-
-        /* Line compare works in text modes, too. */
-        /** @todo r=michaln This is inaccurate; text should be rendered line by line
-         * and line compare checked after every line. */
-        if ((uint32_t)cy == (pThis->line_compare / cheight))
-            s1 = pThisCC->pbVRam;
 
         if (s1 > (pThisCC->pbVRam + addr_mask))
             s1 = s1 - (addr_mask + 1);
+
+        preset_row_scan = 0;
     }
     if (cy_start >= 0)
         /* Flush any remaining changes to display. */
-        pDrv->pfnUpdateRect(pDrv, cx_min_upd * cw, cy_start * cheight,
-                            (cx_max_upd - cx_min_upd + 1) * cw, (cy - cy_start) * cheight);
+        pDrv->pfnUpdateRect(pDrv, cx_min_upd * cw, cy_start,
+                            (cx_max_upd - cx_min_upd + 1) * cw, cy - cy_start);
     return VINF_SUCCESS;
 }
 
@@ -4456,6 +4496,8 @@ static DECLCALLBACK(void) vgaR3InfoState(PPDMDEVINS pDevIns, PCDBGFINFOHLP pHlp,
     pHlp->pfnPrintf(pHlp, "vdisp : %d px\n", val);
     val = ((pThis->cr[0x09] & 0x40) << 3) + ((pThis->cr[0x07] & 0x10) << 4) + pThis->cr[0x18];
     pHlp->pfnPrintf(pHlp, "split : %d ln\n", val);
+    val = pThis->cr[0x08] & 0x1f;
+    pHlp->pfnPrintf(pHlp, "prscan: %#x\n", val);
     val = (pThis->cr[0x0c] << 8) + pThis->cr[0x0d];
     pHlp->pfnPrintf(pHlp, "start : %#x\n", val);
     if (!is_graph)

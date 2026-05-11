@@ -1,4 +1,4 @@
-/* $Id: DevVGATmpl.h 114103 2026-05-07 11:16:25Z michal.necasek@oracle.com $ */
+/* $Id: DevVGATmpl.h 114117 2026-05-11 10:15:41Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, code templates.
  */
@@ -114,7 +114,10 @@ static void RT_CONCAT(vga_draw_glyph8_, DEPTH)(uint8_t *d, int linesize,
         RT_CONCAT(vga_draw_glyph_line_, DEPTH)(d, font_data, xorcol, bgcol, dscan, linesize);
         font_ptr += 4;
         d += linesize << dscan;
-    } while (--h);
+        h -= 1 << dscan;
+        if (h == 1)
+            dscan = 0;  /* if only one scanline is left, turn off double scanning */
+    } while (h > 0);
 }
 
 static void RT_CONCAT(vga_draw_glyph16_, DEPTH)(uint8_t *d, int linesize,
@@ -135,7 +138,10 @@ static void RT_CONCAT(vga_draw_glyph16_, DEPTH)(uint8_t *d, int linesize,
                                                xorcol, bgcol, dscan, linesize);
         font_ptr += 4;
         d += linesize << dscan;
-    } while (--h);
+        h -= 1 << dscan;
+        if (h == 1)
+            dscan = 0;  /* if only one scanline is left, turn off double scanning */
+    } while (h > 0);
 }
 
 static void RT_CONCAT(vga_draw_glyph9_, DEPTH)(uint8_t *d, int linesize,
