@@ -1,4 +1,4 @@
-/* $Id: DevVGA.cpp 114117 2026-05-11 10:15:41Z michal.necasek@oracle.com $ */
+/* $Id: DevVGA.cpp 114124 2026-05-12 09:37:48Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device.
  */
@@ -1530,6 +1530,10 @@ typedef void vga_draw_glyph8_func(uint8_t *d, int linesize,
 typedef void vga_draw_glyph9_func(uint8_t *d, int linesize,
                                   const uint8_t *font_ptr, int h,
                                   uint32_t fgcol, uint32_t bgcol, int dup9);
+typedef void vga_draw_glyph_slow_func(uint8_t *d, int linesize,
+                                      const uint8_t *font_ptr, int h,
+                                      uint32_t fgcol, uint32_t bgcol,
+                                      int dup9, int dscan, int lr_skip, int width);
 typedef void vga_draw_line_func(PVGASTATE pThis, PVGASTATECC pThisCC, uint8_t *pbDst, const uint8_t *pbSrc, int width);
 
 static inline unsigned int rgb_to_pixel8(unsigned int r, unsigned int g, unsigned b)
@@ -1746,6 +1750,13 @@ static vga_draw_glyph9_func * const vga_draw_glyph9_table[4] = {
     vga_draw_glyph9_32,
 };
 
+static vga_draw_glyph_slow_func * const vga_draw_glyph_slow_table[4] = {
+    vga_draw_glyph_slow_8,
+    vga_draw_glyph_slow_16,
+    vga_draw_glyph_slow_16,
+    vga_draw_glyph_slow_32,
+};
+
 static const uint8_t cursor_glyph[32 * 4] = {
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
     0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -1775,16 +1786,18 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
 {
     int cx, cy, cheight, cw, ch, cattr, height, width, ch_attr;
     int height_in_ch, width_in_ch, cheight_vis, preset_row_scan;
-    int cx_min, cx_max, linesize, x_incr;
+    int width_in_ch_mod, lshift, x_incr_mod;
+    int cx_min, cx_max, cx_pos, linesize, x_incr;
     int cx_min_upd, cx_max_upd, cy_start;
     uint32_t offset, fgcol, bgcol, v, cursor_offset;
-    uint8_t *d1, *d, *src, *s1, *dest, *cursor_ptr;
+    uint8_t *d1, *d, *src, *s1, *dest, *cursor_ptr, pix_pan;
     const uint8_t *font_ptr, *font_base[2];
     int dup9, line_offset, depth_index, dscan;
     uint32_t *palette;
     uint32_t *ch_attr_ptr;
     vga_draw_glyph8_func *vga_draw_glyph8;
     vga_draw_glyph9_func *vga_draw_glyph9;
+    vga_draw_glyph_slow_func *vga_draw_glyph_slow;
     uint64_t time_ns;
     bool blink_on, chr_blink_flip, cur_blink_flip;
     bool blink_enabled, blink_do_redraw;
@@ -1835,6 +1848,12 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         full_update = true;
     }
 
+    pix_pan = pThis->ar[0x13] & 0x0f;
+    if (pix_pan != pThis->last_pix_pan) {
+        pThis->last_pix_pan = pix_pan;
+        full_update = true;
+    }
+
     full_update |= vgaR3UpdateBasicParams(pThis, pThisCC);
 
     pThisCC->get_resolution(pThis, &width, &height);
@@ -1882,6 +1901,15 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         /* better than nothing: exit if transient size is too big */
         return VINF_SUCCESS;
     }
+    /* calculate left shift from pixel pan
+     * NB: out of range values are undocumented and undefined for most
+     * EGA/VGA implementations, we just clip the range to something sane
+     * similar to what Cirrus Logic documents
+     */
+    if (cw == 9)
+        lshift = pix_pan > 7 ? 0 : pix_pan + 1;
+    else
+        lshift = pix_pan > 7 ? 0 : pix_pan;
 
     int const scr_width = width;
     int const scr_height = height;
@@ -1943,13 +1971,14 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
     else
         vga_draw_glyph8 = vga_draw_glyph8_table[depth_index];
     vga_draw_glyph9 = vga_draw_glyph9_table[depth_index];
+    vga_draw_glyph_slow = vga_draw_glyph_slow_table[depth_index];
 
     dest = pDrv->pbData;
     linesize = pDrv->cbScanline;
     ch_attr_ptr = pThis->last_ch_attr;
     cy_start = -1;
     cx_max_upd = -1;
-    cx_min_upd = width_in_ch;
+    cx_min_upd = width_in_ch * cw;
 
     /* Figure out if we're in the visible period of the blink cycle. */
     time_ns  = PDMDevHlpTMTimeVirtGetNano(pDevIns);
@@ -1968,19 +1997,32 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
     /* Convert preset row scan to actual scanlines */
     preset_row_scan <<= dscan;
 
+    /* If pixel panning is in effect, we have to process one extra column of text. */
+    width_in_ch_mod = width_in_ch;
+    if (lshift)
+        width_in_ch_mod++;
+
     /* Drawing needs to be done with pixel granularity:
      * - Row scan preset can skip pixels at the top of first row of text
      * - Split screen can skip pixels at the bottom of a row
      * - Split screen can occur in the middle of a double-scanned line
+     * - Pixel panning can skip pixels in the leftmost column and cause
+     *   as many pixels to appear in an extra column on the right
      */
     for(cy = 0; cy < height - dscan; cy = cy + cheight_vis) {
         /* Line compare works in text modes, too. */
-        if (RT_UNLIKELY((uint32_t)cy == pThis->line_compare))
+        if (RT_UNLIKELY((uint32_t)cy == pThis->line_compare)) {
             s1 = pThisCC->pbVRam;
+            if (lshift && (pThis->ar[0x10] & 0x20)) {
+                /* The VGA can optionally reset pixel panning for split screen. */
+                lshift = 0;
+                width_in_ch_mod = width_in_ch;
+            }
+        }
 
         d1 = dest;
         src = s1;
-        cx_min = width_in_ch;
+        cx_min = width_in_ch * cw;
         cx_max = -1;
         cheight_vis = cheight << dscan;
 
@@ -2003,16 +2045,17 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
         if (cheight_vis > height - cy)
             cheight_vis = height - cy;
 
-        for(cx = 0; cx < width_in_ch; cx++) {
+        for(cx = 0, cx_pos = 0; cx < width_in_ch_mod; cx++) {
             ch_attr = *(uint16_t *)src;
+
             /* Figure out if character needs redrawing due to blink state change. */
             blink_do_redraw = blink_enabled && chr_blink_flip && (ch_attr & 0x8000);
 
             if (full_update || ch_attr != (int)*ch_attr_ptr || blink_do_redraw || (src == cursor_ptr && cur_blink_flip)) {
-                if (cx < cx_min)
-                    cx_min = cx;
-                if (cx > cx_max)
-                    cx_max = cx;
+                if (cx_pos < cx_min)
+                    cx_min = cx_pos;
+                if (cx_pos > cx_max)
+                    cx_max = cx_pos;
                 if (reset_dirty)
                     *ch_attr_ptr = ch_attr;
 #ifdef WORDS_BIGENDIAN
@@ -2035,66 +2078,113 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
                         font_ptr = empty_glyph;
                 }
 
-                if (cw != 9) {
-                    if (pThis->fRenderVRAM)
-                        vga_draw_glyph8(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dscan);
-                } else {
-                    dup9 = 0;
-                    /* Duplicate 9th pixel for chars in B0-DF range. */
-                    if (ch >= 0xb0 && ch <= 0xdf && (pThis->ar[0x10] & 0x04))
-                        dup9 = 1;
-                    if (pThis->fRenderVRAM)
-                        vga_draw_glyph9(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dup9);
-                }
+                dup9 = 0;
+                /* Duplicate 9th pixel for chars in B0-DF range. */
+                if (ch >= 0xb0 && ch <= 0xdf && (pThis->ar[0x10] & 0x04))
+                    dup9 = 1;
 
-                /* Underline. Typically turned off by setting it past cell height. */
-                if (((cattr & 0x03) == 1) && (uline_pos < cheight_vis))
-                {
-                    int h;
-
-                    d = d1 + (linesize * uline_pos << dscan);
-                    h = 1;
-
-                    if (cw != 9) {
-                        if (pThis->fRenderVRAM)
-                            vga_draw_glyph8(d, linesize, cursor_glyph, h, fgcol, bgcol, dscan);
+                if (pThis->fRenderVRAM) {
+                    /* Character glyph. Always drawn. */
+                    if (!lshift || ((cx != 0) && (cx != width_in_ch))) {
+                        if (cw != 9)
+                            vga_draw_glyph8(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dscan);
+                        else
+                            vga_draw_glyph9(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dup9);
                     } else {
-                        if (pThis->fRenderVRAM)
-                            vga_draw_glyph9(d, linesize, cursor_glyph, h, fgcol, bgcol, 1);
+                        if (cx == 0) {
+                            /* First column, will skip some pixels on the left. */
+                            vga_draw_glyph_slow(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dup9, dscan, lshift, cw);
+                        } else { /* (cx == width_in_ch) */
+                            /* Last column, will skip some pixels on the right. */
+                            vga_draw_glyph_slow(d1, linesize, font_ptr, cheight_vis, fgcol, bgcol, dup9, dscan, -lshift, cw);
+                        }
                     }
-                }
 
-                /* Cursor. */
-                if (src == cursor_ptr &&
-                    !(pThis->cr[0x0a] & 0x20)) {
-                    int line_start, line_last, h;
+                    /* Underline. Typically turned off by setting it past cell height. */
+                    if (((cattr & 0x03) == 1) && (uline_pos < cheight_vis))
+                    {
+                        int h;
 
-                    /* draw the cursor if within the visible period */
-                    if (blink_on) {
-                        line_start = pThis->cr[0x0a] & 0x1f;
-                        line_last = pThis->cr[0x0b] & 0x1f;
-                        /* XXX: check that */
-                        if (line_last > cheight_vis - 1)
-                            line_last = cheight_vis - 1;
-                        if (line_last >= line_start && line_start < cheight) {
-                            h = line_last - line_start + 1;
-                            d = d1 + (linesize * line_start << dscan);
-                            if (cw != 9) {
-                                if (pThis->fRenderVRAM)
-                                    vga_draw_glyph8(d, linesize, cursor_glyph, h, fgcol, bgcol, dscan);
-                            } else {
-                                if (pThis->fRenderVRAM)
-                                    vga_draw_glyph9(d, linesize, cursor_glyph, h, fgcol, bgcol, 1);
+                        d = d1 + (linesize * uline_pos << dscan);
+                        h = 1;
+
+                        if (!lshift || ((cx != 0) && (cx != width_in_ch))) {
+                            if (cw != 9)
+                                vga_draw_glyph8(d, linesize, cursor_glyph, h, fgcol, bgcol, dscan);
+                            else
+                                vga_draw_glyph9(d, linesize, cursor_glyph, h, fgcol, bgcol, 1);
+                        } else {
+                            if (cx == 0)
+                                vga_draw_glyph_slow(d1, linesize, cursor_glyph, h, fgcol, bgcol, 1, dscan, lshift, cw);
+                            else /* (cx == width_in_ch) */
+                                vga_draw_glyph_slow(d1, linesize, cursor_glyph, h, fgcol, bgcol, 1, dscan, -lshift, cw);
+                        }
+                    }
+
+                    /* Cursor. Only drawn in a single position on the screen if enabled and on. */
+                    /* NB: With split screen, the cursor can actually appear on the screen twice.
+                     * With pixel panning, it may be split across lines.
+                     */
+                    if (src == cursor_ptr && !(pThis->cr[0x0a] & 0x20)) {
+                        int line_start, line_last, h;
+
+                        /* draw the cursor if within the visible period */
+                        if (blink_on) {
+                            line_start = pThis->cr[0x0a] & 0x1f;
+                            line_last = pThis->cr[0x0b] & 0x1f;
+                            /* XXX: check that */
+                            if (line_last > cheight_vis - 1)
+                                line_last = cheight_vis - 1;
+                            if (line_last >= line_start && line_start < cheight) {
+                                h = line_last - line_start + 1;
+                                d = d1 + (linesize * line_start << dscan);
+
+                                if (!lshift || ((cx != 0) && (cx != width_in_ch))) {
+                                    if (cw != 9)
+                                        vga_draw_glyph8(d, linesize, cursor_glyph, h, fgcol, bgcol, dscan);
+                                    else
+                                        vga_draw_glyph9(d, linesize, cursor_glyph, h, fgcol, bgcol, 1);
+                                } else {
+                                    if (cx == 0)
+                                        vga_draw_glyph_slow(d1, linesize, cursor_glyph, h, fgcol, bgcol, 1, dscan, lshift, cw);
+                                    else /* (cx == width_in_ch) */
+                                        vga_draw_glyph_slow(d1, linesize, cursor_glyph, h, fgcol, bgcol, 1, dscan, -lshift, cw);
+                                }
                             }
                         }
                     }
                 }
             }
-            d1 += x_incr;
+
+            x_incr_mod = x_incr;
+            if (RT_UNLIKELY(lshift && (cx == 0))) {
+                if (cw == 16)
+                    cx_pos = cw - lshift * 2;
+                else
+                    cx_pos = cw - lshift;
+                x_incr_mod = cx_pos * ((pDrv->cBits + 7) >> 3);
+            } else {
+                cx_pos += cw;
+            }
+
+            d1 += x_incr_mod;
             src += s_incr;  /* Even in text mode, word/byte mode matters. */
             if (src > (pThisCC->pbVRam + addr_mask))
-                src = pThisCC->pbVRam;
+                src = src - (addr_mask + 1);
+
             ch_attr_ptr++;
+            if (cx == width_in_ch) {
+                /* If we got here, it means we're drawing an extra column per line
+                 * due to pixel panning. The last character on a line will be drawn
+                 * again as the first character on the next line. We have to back
+                 * up ch_attr_ptr, otherwise cursor position changes can't work right.
+                 * We may also force the char dirty so that the second "copy" gets
+                 * redrawn properly.
+                 */
+                ch_attr_ptr--;
+                if (reset_dirty)
+                    *ch_attr_ptr = UINT32_MAX;
+            }
         }
         if (cx_max != -1) {
             /* Keep track of the bounding rectangle for updates. */
@@ -2106,11 +2196,11 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
                 cx_max_upd = cx_max;
         } else if (cy_start >= 0) {
             /* Flush updates to display. */
-            pDrv->pfnUpdateRect(pDrv, cx_min_upd * cw, cy_start,
-                                (cx_max_upd - cx_min_upd + 1) * cw, cy - cy_start);
+            pDrv->pfnUpdateRect(pDrv, cx_min_upd, cy_start,
+                                cx_max_upd - cx_min_upd + cw, cy - cy_start);
             cy_start = -1;
             cx_max_upd = -1;
-            cx_min_upd = width_in_ch;
+            cx_min_upd = width_in_ch * cw;
         }
 
         dest += linesize * cheight_vis;
@@ -2123,8 +2213,8 @@ static int vgaR3DrawText(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATER3 pThisC
     }
     if (cy_start >= 0)
         /* Flush any remaining changes to display. */
-        pDrv->pfnUpdateRect(pDrv, cx_min_upd * cw, cy_start,
-                            (cx_max_upd - cx_min_upd + 1) * cw, cy - cy_start);
+        pDrv->pfnUpdateRect(pDrv, cx_min_upd, cy_start,
+                            cx_max_upd - cx_min_upd + cw, cy - cy_start);
     return VINF_SUCCESS;
 }
 

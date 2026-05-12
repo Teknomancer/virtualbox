@@ -1,4 +1,4 @@
-/* $Id: DevVGA.h 114117 2026-05-11 10:15:41Z michal.necasek@oracle.com $ */
+/* $Id: DevVGA.h 114124 2026-05-12 09:37:48Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, internal header.
  */
@@ -323,7 +323,8 @@ typedef struct VGAState
     uint8_t last_cw, last_ch;
     uint8_t last_uline;
     uint8_t last_preset_row;
-    uint8_t padding2[7];
+    uint8_t last_pix_pan;
+    uint8_t padding2[6];
     bool last_blink;
     uint32_t last_width, last_height; /* in chars or pixels */
     uint32_t last_scr_width, last_scr_height; /* in pixels */
@@ -749,19 +750,6 @@ void vga_common_init(VGAState *s, DisplayState *ds, uint8_t *vga_ram_base,
 uint32_t vga_mem_readb(void *opaque, target_phys_addr_t addr);
 void vga_mem_writeb(void *opaque, target_phys_addr_t addr, uint32_t val);
 void vga_invalidate_scanlines(VGAState *s, int y1, int y2);
-
-void vga_draw_cursor_line_8(uint8_t *d1, const uint8_t *src1,
-                            int poffset, int w,
-                            unsigned int color0, unsigned int color1,
-                            unsigned int color_xor);
-void vga_draw_cursor_line_16(uint8_t *d1, const uint8_t *src1,
-                             int poffset, int w,
-                             unsigned int color0, unsigned int color1,
-                             unsigned int color_xor);
-void vga_draw_cursor_line_32(uint8_t *d1, const uint8_t *src1,
-                             int poffset, int w,
-                             unsigned int color0, unsigned int color1,
-                             unsigned int color_xor);
 
 extern const uint8_t sr_mask[8];
 extern const uint8_t gr_mask[16];

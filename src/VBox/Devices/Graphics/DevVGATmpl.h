@@ -1,4 +1,4 @@
-/* $Id: DevVGATmpl.h 114117 2026-05-11 10:15:41Z michal.necasek@oracle.com $ */
+/* $Id: DevVGATmpl.h 114124 2026-05-12 09:37:48Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, code templates.
  */
@@ -191,6 +191,77 @@ static void RT_CONCAT(vga_draw_glyph9_, DEPTH)(uint8_t *d, int linesize,
         font_ptr += 4;
         d += linesize;
     } while (--h);
+}
+
+/* Slow glyph drawing routine that goes pixel by pixel but handles everything,
+ * including skipping pixels on the left or right.
+ */
+static void RT_CONCAT(vga_draw_glyph_slow_, DEPTH)(uint8_t *d, int linesize,
+                                                   const uint8_t *font_ptr, int h,
+                                                   uint32_t fgcol, uint32_t bgcol,
+                                                   int dup9, int dscan, int lr_skip, int cw)
+{
+    uint32_t    xorcol, v;
+    int         font_data;
+    int         fnt_sh, i;
+    int         dclk  = 0;
+    int         lskip = 0;
+    int         width;
+
+    switch (cw) {
+    case 16:        // Double clocked 8-pixel wide font
+        width = 8;
+        dclk  = 1;
+        break;
+    case 9:         // 9-pixel wide text is mutually exclusive
+        dscan  = 0; // with double scanning or double clocking
+        width  = 9;
+        break;
+    default:        // Force 8-pixel wide for everything else
+        width  = 8; // may or may not be double scanned
+    }
+
+    if (lr_skip > 0) {
+        // Positive lr_skip means skipping pixels on the left (shift and reduce width)
+        lskip = lr_skip;
+        width = width - lr_skip;
+    } else if (lr_skip < 0) {
+        // Negative lr_skip means we skipped pixels on the left and now we need to
+        // add that many pixels on the right
+        width = -lr_skip;
+    }
+
+    xorcol = bgcol ^ fgcol;
+    do {
+        font_data = font_ptr[0];
+        if (cw == 9) {
+            fnt_sh = 8;
+            if (dup9)
+                font_data = (font_data << 1) | (font_data & 1);
+            else
+                font_data <<= 1;
+        } else {
+            fnt_sh = 7;
+        }
+
+        font_data <<= lskip;
+
+        for (i = 0; i < width; ++i) {
+            v = (-((font_data >> fnt_sh--) & 1) & xorcol) ^ bgcol;
+            ((PIXEL_TYPE *)d)[i << dclk] = v;
+            if (dclk)
+                ((PIXEL_TYPE *)d)[(i << dclk) + 1] = v;
+        }
+
+        if (dscan)
+            memcpy(d + linesize, d, (width << dclk) * sizeof(PIXEL_TYPE));
+
+        font_ptr += 4;
+        d += linesize << dscan;
+        h -= 1 << dscan;
+        if (h == 1)
+            dscan = 0;  /* if only one scanline is left, turn off double scanning */
+    } while (h > 0);
 }
 
 /*
@@ -520,79 +591,6 @@ static void RT_CONCAT(vga_draw_line32_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC
     } while (--w != 0);
 #endif
 }
-
-#if DEPTH != 15
-#ifndef VBOX
-#ifdef VBOX
-static
-#endif/* VBOX */
-void RT_CONCAT(vga_draw_cursor_line_, DEPTH)(uint8_t *d1,
-                                             const uint8_t *src1,
-                                             int poffset, int w,
-                                             unsigned int color0,
-                                             unsigned int color1,
-                                             unsigned int color_xor)
-{
-    const uint8_t *plane0, *plane1;
-    int x, b0, b1;
-    uint8_t *d;
-
-    d = d1;
-    plane0 = src1;
-    plane1 = src1 + poffset;
-    for(x = 0; x < w; x++) {
-        b0 = (plane0[x >> 3] >> (7 - (x & 7))) & 1;
-        b1 = (plane1[x >> 3] >> (7 - (x & 7))) & 1;
-#if DEPTH == 8
-        switch(b0 | (b1 << 1)) {
-        case 0:
-            break;
-        case 1:
-            d[0] ^= color_xor;
-            break;
-        case 2:
-            d[0] = color0;
-            break;
-        case 3:
-            d[0] = color1;
-            break;
-        }
-#elif DEPTH == 16
-        switch(b0 | (b1 << 1)) {
-        case 0:
-            break;
-        case 1:
-            ((uint16_t *)d)[0] ^= color_xor;
-            break;
-        case 2:
-            ((uint16_t *)d)[0] = color0;
-            break;
-        case 3:
-            ((uint16_t *)d)[0] = color1;
-            break;
-        }
-#elif DEPTH == 32
-        switch(b0 | (b1 << 1)) {
-        case 0:
-            break;
-        case 1:
-            ((uint32_t *)d)[0] ^= color_xor;
-            break;
-        case 2:
-            ((uint32_t *)d)[0] = color0;
-            break;
-        case 3:
-            ((uint32_t *)d)[0] = color1;
-            break;
-        }
-#else
-#error unsupported depth
-#endif
-        d += BPP;
-    }
-}
-#endif /* !VBOX */
-#endif
 
 #undef PUT_PIXEL2
 #undef DEPTH
