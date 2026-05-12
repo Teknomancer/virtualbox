@@ -1,4 +1,4 @@
-/* $Id: EMR3Dbg.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: EMR3Dbg.cpp 114123 2026-05-12 07:16:15Z knut.osmundsen@oracle.com $ */
 /** @file
  * EM - Execution Monitor / Manager, Debugger Related Bits.
  */
@@ -214,7 +214,8 @@ static const char *emR3HistoryGetExitName(uint16_t uFlagsAndType, uint32_t uInfo
     switch (uFlagsAndType & EMEXIT_F_KIND_MASK)
     {
         case EMEXIT_F_KIND_EM:
-            pszExitName = EMR3GetExitTypeName((EMEXITTYPE)(uFlagsAndType & EMEXIT_F_TYPE_MASK), uInfo, pszFallback, cbFallback);
+            pszExitName = EMR3GetExitTypeName((EMEXITTYPE)(uFlagsAndType & (EMEXIT_F_TYPE_MASK & ~EMEXIT_F_CS_EIP & ~EMEXIT_F_HM)),
+                                              uInfo, pszFallback, cbFallback);
             break;
 
 #if defined(VBOX_VMM_TARGET_X86) && defined(VBOX_WITH_HWVIRT)
