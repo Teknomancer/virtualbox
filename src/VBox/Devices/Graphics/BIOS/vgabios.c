@@ -1891,6 +1891,7 @@ static void biosfn_write_teletype(uint8_t car, uint8_t page, uint8_t attr, uint8
    if(vga_modes[line].class==TEXT)
     {
      address = page * read_word(BIOSMEM_SEG, BIOSMEM_PAGE_SIZE);
+     address += (xcurs + (ycurs - 1) * nbcols) * 2;
      attr=read_byte(vga_modes[line].sstart,address+1);
      biosfn_scroll(0x01,attr,0,0,nbrows-1,nbcols-1,page,SCROLL_UP);
     }
