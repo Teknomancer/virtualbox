@@ -1,4 +1,4 @@
-/* $Id: DevVGA.cpp 114124 2026-05-12 09:37:48Z michal.necasek@oracle.com $ */
+/* $Id: DevVGA.cpp 114125 2026-05-13 12:39:30Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device.
  */
@@ -1534,7 +1534,7 @@ typedef void vga_draw_glyph_slow_func(uint8_t *d, int linesize,
                                       const uint8_t *font_ptr, int h,
                                       uint32_t fgcol, uint32_t bgcol,
                                       int dup9, int dscan, int lr_skip, int width);
-typedef void vga_draw_line_func(PVGASTATE pThis, PVGASTATECC pThisCC, uint8_t *pbDst, const uint8_t *pbSrc, int width);
+typedef void vga_draw_line_func(PVGASTATE pThis, PVGASTATECC pThisCC, uint8_t *pbDst, const uint8_t *pbSrc, int width, int lskip);
 
 static inline unsigned int rgb_to_pixel8(unsigned int r, unsigned int g, unsigned b)
 {
@@ -2561,7 +2561,7 @@ static int vmsvgaR3DrawGraphic(PVGASTATE pThis, PVGASTATER3 pThisCC, bool fFullU
             if ((int32_t)offPage1 > offPageMax)
                 offPageMax = offPage1;
             if (pThis->fRenderVRAM)
-                pfnVgaDrawLine(pThis, pThisCC, pbDst, pThisCC->pbVRam + offSrcLine, cx);
+                pfnVgaDrawLine(pThis, pThisCC, pbDst, pThisCC->pbVRam + offSrcLine, cx, 0);
             //not used// if (pThisCC->cursor_draw_line)
             //not used//     pThisCC->cursor_draw_line(pThis, pbDst, y);
         }
@@ -2600,7 +2600,8 @@ static int vgaR3DrawGraphic(PVGASTATE pThis, PVGASTATER3 pThisCC, bool full_upda
     int y1, y2, y, page_min, page_max, linesize, y_start, double_scan;
     int width, height, shift_control, line_offset, page0, page1, bwidth, bits;
     int disp_width, multi_run;
-    uint8_t *d;
+    int lshift;
+    uint8_t *d, pix_pan;
     uint32_t v, addr1, addr;
     vga_draw_line_func *pfnVgaDrawLine;
 
@@ -2620,6 +2621,19 @@ static int vgaR3DrawGraphic(PVGASTATE pThis, PVGASTATER3 pThisCC, bool full_upda
         pThis->shift_control = shift_control;
         pThis->double_scan = double_scan;
     }
+
+    pix_pan = pThis->ar[0x13] & 0x0f;
+    if (pix_pan != pThis->last_pix_pan) {
+        pThis->last_pix_pan = pix_pan;
+        full_update = true;
+    }
+
+    /* Calculate pixel shift from the pixel panning value.
+     * NB: out of range values are undocumented and undefined for
+     * most implementations; we just clip the range to something sane
+     * similar to what Cirrus Logic documents.
+     */
+    lshift = pix_pan > 7 ? 7 : pix_pan;
 
     if (shift_control == 0) {
         full_update |= vgaR3UpdatePalette16(pThis, pThisCC);
@@ -2762,7 +2776,7 @@ static int vgaR3DrawGraphic(PVGASTATE pThis, PVGASTATER3 pThisCC, bool full_upda
             if (page1 > page_max)
                 page_max = page1;
             if (pThis->fRenderVRAM)
-                pfnVgaDrawLine(pThis, pThisCC, d, pThisCC->pbVRam + addr, width);
+                pfnVgaDrawLine(pThis, pThisCC, d, pThisCC->pbVRam + addr, width, lshift);
             if (pThisCC->cursor_draw_line)
                 pThisCC->cursor_draw_line(pThis, d, y);
         } else {
@@ -2786,8 +2800,12 @@ static int vgaR3DrawGraphic(PVGASTATE pThis, PVGASTATER3 pThisCC, bool full_upda
             multi_run--;
         }
         /* line compare acts on the displayed lines */
-        if ((uint32_t)y == pThis->line_compare)
+        if ((uint32_t)y == pThis->line_compare) {
             addr1 = 0;
+            /* The VGA can optionally reset pixel panning for split screen. */
+            if (lshift && (pThis->ar[0x10] & 0x20))
+                lshift = 0;
+        }
         d += linesize;
     }
     if (y_start >= 0) {
@@ -4572,22 +4590,21 @@ static DECLCALLBACK(void) vgaR3InfoState(PPDMDEVINS pDevIns, PCDBGFINFOHLP pHlp,
     pHlp->pfnPrintf(pHlp, "decoding memory at %s\n", mem_map[(pThis->gr[0x06] >> 2) & 3]);
     pHlp->pfnPrintf(pHlp, "Misc status reg. MSR:%02X\n", pThis->msr);
     pHlp->pfnPrintf(pHlp, "pixel clock: %s\n", clocks[(pThis->msr >> 2) & 3]);
-    pHlp->pfnPrintf(pHlp, "double scanning %s\n", double_scan ? "on" : "off");
-    pHlp->pfnPrintf(pHlp, "double clocking %s\n", pThis->sr[0x01] & 0x08 ? "on" : "off");
+    pHlp->pfnPrintf(pHlp, "double scanning %s, double clocking %s\n", double_scan ? "on" : "off", pThis->sr[0x01] & 0x08 ? "on" : "off");
+    pHlp->pfnPrintf(pHlp, "shift register mode: %s\n", pThis->gr[0x05] & 0x40 ? "256c" : pThis->gr[0x05] & 0x20 ? "CGA" : "EGA (planar)");
     val = pThis->cr[0x00] + 5;
-    pHlp->pfnPrintf(pHlp, "htotal: %d px (%d cclk)\n", val * char_dots, val);
+    pHlp->pfnPrintf(pHlp, "htotal: %d px (%3d cclk),  ", val * char_dots, val);
     val = pThis->cr[0x06] + ((pThis->cr[0x07] & 1) << 8) + ((pThis->cr[0x07] & 0x20) << 4) + 2;
     pHlp->pfnPrintf(pHlp, "vtotal: %d px\n", val);
     val = pThis->cr[0x01] + 1;
     w   = val * char_dots;
-    pHlp->pfnPrintf(pHlp, "hdisp : %d px (%d cclk)\n", w, val);
+    pHlp->pfnPrintf(pHlp, "hdisp : %d px (%3d cclk),  ", w, val);
     val = pThis->cr[0x12] + ((pThis->cr[0x07] & 2) << 7) + ((pThis->cr[0x07] & 0x40) << 3) + 1;
     h   = val;
     pHlp->pfnPrintf(pHlp, "vdisp : %d px\n", val);
     val = ((pThis->cr[0x09] & 0x40) << 3) + ((pThis->cr[0x07] & 0x10) << 4) + pThis->cr[0x18];
     pHlp->pfnPrintf(pHlp, "split : %d ln\n", val);
-    val = pThis->cr[0x08] & 0x1f;
-    pHlp->pfnPrintf(pHlp, "prscan: %#x\n", val);
+    pHlp->pfnPrintf(pHlp, "prscan: %#02x,  pelpan: %#02x\n", pThis->cr[0x08] & 0x1f, pThis->ar[0x13] & 0x0f);
     val = (pThis->cr[0x0c] << 8) + pThis->cr[0x0d];
     pHlp->pfnPrintf(pHlp, "start : %#x\n", val);
     if (!is_graph)
@@ -5383,7 +5400,7 @@ static DECLCALLBACK(int) vgaR3PortDisplayBlt(PPDMIDISPLAYPORT pInterface, const 
             Assert(pfnVgaDrawLine);
             while (cyLeft-- > 0)
             {
-                pfnVgaDrawLine(pThis, pThisCC, pbDst, pbSrc, cx);
+                pfnVgaDrawLine(pThis, pThisCC, pbDst, pbSrc, cx, 0);
                 pbDst += cbLineDst;
                 pbSrc += cbLineSrc;
             }
@@ -5547,7 +5564,7 @@ static DECLCALLBACK(void) vgaR3PortUpdateDisplayRect(PPDMIDISPLAYPORT pInterface
 
     while (cy-- > 0)
     {
-        pfnVgaDrawLine(pThis, pThisCC, pbDst, pbSrc, cx);
+        pfnVgaDrawLine(pThis, pThisCC, pbDst, pbSrc, cx, 0);
         pbDst += cbLineDst;
         pbSrc += cbLineSrc;
     }
@@ -5707,7 +5724,7 @@ vgaR3PortCopyRect(PPDMIDISPLAYPORT pInterface,
 
     while (cyCorrected-- > 0)
     {
-        pfnVgaDrawLine(pThis, pThisCC, pbDstCur, pbSrcCur, cxCorrected);
+        pfnVgaDrawLine(pThis, pThisCC, pbDstCur, pbSrcCur, cxCorrected, 0);
         pbDstCur += cbLineDst;
         pbSrcCur += cbLineSrc;
     }

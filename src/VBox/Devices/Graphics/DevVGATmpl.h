@@ -1,4 +1,4 @@
-/* $Id: DevVGATmpl.h 114124 2026-05-12 09:37:48Z michal.necasek@oracle.com $ */
+/* $Id: DevVGATmpl.h 114125 2026-05-13 12:39:30Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, code templates.
  */
@@ -268,35 +268,52 @@ static void RT_CONCAT(vga_draw_glyph_slow_, DEPTH)(uint8_t *d, int linesize,
  * 4 color mode
  */
 static void RT_CONCAT(vga_draw_line2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                              const uint8_t *s, int width)
+                                              const uint8_t *s, int width, int lskip)
 {
     uint32_t plane_mask, *palette, data, v, src_inc, dwb_mode;
+    uint32_t vram_ofs, v1, v2;
+    uint64_t vx2;
     int x;
-    RT_NOREF(pThisCC);
 
+    vram_ofs = s - pThisCC->pbVRam;
     palette = s1->last_palette;
     plane_mask = mask16[s1->ar[0x12] & 0xf];
     dwb_mode = (s1->cr[0x14] & 0x40) ? 2 : (s1->cr[0x17] & 0x40) ? 0 : 1;
     src_inc = 4 << dwb_mode;
     width >>= 3;
+
     for(x = 0; x < width; x++) {
+        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
         data = ((uint32_t *)s)[0];
         data &= plane_mask;
-        v = expand2[GET_PLANE(data, 0)];
-        v |= expand2[GET_PLANE(data, 2)] << 2;
-        ((PIXEL_TYPE *)d)[0] = palette[v >> 12];
-        ((PIXEL_TYPE *)d)[1] = palette[(v >> 8) & 0xf];
-        ((PIXEL_TYPE *)d)[2] = palette[(v >> 4) & 0xf];
-        ((PIXEL_TYPE *)d)[3] = palette[(v >> 0) & 0xf];
+        v1  = expand2[GET_PLANE(data, 0)] << 16;
+        v1 |= expand2[GET_PLANE(data, 2)] << 18;
+        v1 |= expand2[GET_PLANE(data, 1)] << 0;
+        v1 |= expand2[GET_PLANE(data, 3)] << 2;
 
-        v = expand2[GET_PLANE(data, 1)];
-        v |= expand2[GET_PLANE(data, 3)] << 2;
-        ((PIXEL_TYPE *)d)[4] = palette[v >> 12];
+        s = pThisCC->pbVRam + ((vram_ofs + src_inc) & s1->vga_addr_mask);
+        data = ((uint32_t *)s)[0];
+        data &= plane_mask;
+        v2  = expand2[GET_PLANE(data, 0)] << 16;
+        v2 |= expand2[GET_PLANE(data, 2)] << 18;
+        v2 |= expand2[GET_PLANE(data, 1)] << 0;
+        v2 |= expand2[GET_PLANE(data, 3)] << 2;
+
+        vx2 = RT_MAKE_U64(v2, v1);
+        vx2 <<= lskip * 4;
+        v = vx2 >> 32;
+
+        ((PIXEL_TYPE *)d)[0] = palette[v >> 28];
+        ((PIXEL_TYPE *)d)[1] = palette[(v >> 24) & 0xf];
+        ((PIXEL_TYPE *)d)[2] = palette[(v >> 20) & 0xf];
+        ((PIXEL_TYPE *)d)[3] = palette[(v >> 16) & 0xf];
+        ((PIXEL_TYPE *)d)[4] = palette[(v >> 12) & 0xf];
         ((PIXEL_TYPE *)d)[5] = palette[(v >> 8) & 0xf];
         ((PIXEL_TYPE *)d)[6] = palette[(v >> 4) & 0xf];
         ((PIXEL_TYPE *)d)[7] = palette[(v >> 0) & 0xf];
+
         d += BPP * 8;
-        s += src_inc;
+        vram_ofs += src_inc;
     }
 }
 
@@ -313,35 +330,53 @@ static void RT_CONCAT(vga_draw_line2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
  * 4 color mode, dup2 horizontal
  */
 static void RT_CONCAT(vga_draw_line2d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                                const uint8_t *s, int width)
+                                                const uint8_t *s, int width, int lskip)
 {
     uint32_t plane_mask, *palette, data, v, src_inc, dwb_mode;
+    uint32_t vram_ofs, v1, v2;
+    uint64_t vx2;
     int x;
-    RT_NOREF(pThisCC);
+    RT_NOREF(pThisCC, lskip);
 
+    vram_ofs = s - pThisCC->pbVRam;
     palette = s1->last_palette;
     plane_mask = mask16[s1->ar[0x12] & 0xf];
     dwb_mode = (s1->cr[0x14] & 0x40) ? 2 : (s1->cr[0x17] & 0x40) ? 0 : 1;
     src_inc = 4 << dwb_mode;
     width >>= 3;
+
     for(x = 0; x < width; x++) {
+        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
         data = ((uint32_t *)s)[0];
         data &= plane_mask;
-        v = expand2[GET_PLANE(data, 0)];
-        v |= expand2[GET_PLANE(data, 2)] << 2;
-        PUT_PIXEL2(d, 0, palette[v >> 12]);
-        PUT_PIXEL2(d, 1, palette[(v >> 8) & 0xf]);
-        PUT_PIXEL2(d, 2, palette[(v >> 4) & 0xf]);
-        PUT_PIXEL2(d, 3, palette[(v >> 0) & 0xf]);
+        v1  = expand2[GET_PLANE(data, 0)] << 16;
+        v1 |= expand2[GET_PLANE(data, 2)] << 18;
+        v1 |= expand2[GET_PLANE(data, 1)] << 0;
+        v1 |= expand2[GET_PLANE(data, 3)] << 2;
 
-        v = expand2[GET_PLANE(data, 1)];
-        v |= expand2[GET_PLANE(data, 3)] << 2;
-        PUT_PIXEL2(d, 4, palette[v >> 12]);
+        s = pThisCC->pbVRam + ((vram_ofs + src_inc) & s1->vga_addr_mask);
+        data = ((uint32_t *)s)[0];
+        data &= plane_mask;
+        v2  = expand2[GET_PLANE(data, 0)] << 16;
+        v2 |= expand2[GET_PLANE(data, 2)] << 18;
+        v2 |= expand2[GET_PLANE(data, 1)] << 0;
+        v2 |= expand2[GET_PLANE(data, 3)] << 2;
+
+        vx2 = RT_MAKE_U64(v2, v1);
+        vx2 <<= lskip * 4;
+        v = vx2 >> 32;
+
+        PUT_PIXEL2(d, 0, palette[v >> 28]);
+        PUT_PIXEL2(d, 1, palette[(v >> 24) & 0xf]);
+        PUT_PIXEL2(d, 2, palette[(v >> 20) & 0xf]);
+        PUT_PIXEL2(d, 3, palette[(v >> 16) & 0xf]);
+        PUT_PIXEL2(d, 4, palette[(v >> 12) & 0xf]);
         PUT_PIXEL2(d, 5, palette[(v >> 8) & 0xf]);
         PUT_PIXEL2(d, 6, palette[(v >> 4) & 0xf]);
         PUT_PIXEL2(d, 7, palette[(v >> 0) & 0xf]);
+
         d += BPP * 16;
-        s += src_inc;
+        vram_ofs += src_inc;
     }
 }
 
@@ -349,24 +384,45 @@ static void RT_CONCAT(vga_draw_line2d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
  * 16 color mode
  */
 static void RT_CONCAT(vga_draw_line4_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                              const uint8_t *s, int width)
+                                              const uint8_t *s, int width, int lskip)
 {
     uint32_t plane_mask, data, v, *palette, vram_ofs;
+    uint32_t v1, v2;
+    uint64_t vx2;
     int x;
-    RT_NOREF(pThisCC);
 
     vram_ofs = s - pThisCC->pbVRam;
     palette = s1->last_palette;
     plane_mask = mask16[s1->ar[0x12] & 0xf];
     width >>= 3;
+
     for(x = 0; x < width; x++) {
+        // With VGA planar memory organization, eight 4-bit pixels live at the
+        // same memory/CRTC address. Changing the CRTC start address only
+        // changes the displayed image with 8-pixel granularity.
+        // Pixel panning needs to shift and combine adjacent bits within
+        // planes.
         s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
         data = ((uint32_t *)s)[0];
         data &= plane_mask;
-        v = expand4[GET_PLANE(data, 0)];
-        v |= expand4[GET_PLANE(data, 1)] << 1;
-        v |= expand4[GET_PLANE(data, 2)] << 2;
-        v |= expand4[GET_PLANE(data, 3)] << 3;
+        v1 = expand4[GET_PLANE(data, 0)];
+        v1 |= expand4[GET_PLANE(data, 1)] << 1;
+        v1 |= expand4[GET_PLANE(data, 2)] << 2;
+        v1 |= expand4[GET_PLANE(data, 3)] << 3;
+
+        s = pThisCC->pbVRam + ((vram_ofs + 4) & s1->vga_addr_mask);
+        data = ((uint32_t *)s)[0];
+        data &= plane_mask;
+        v2 = expand4[GET_PLANE(data, 0)];
+        v2 |= expand4[GET_PLANE(data, 1)] << 1;
+        v2 |= expand4[GET_PLANE(data, 2)] << 2;
+        v2 |= expand4[GET_PLANE(data, 3)] << 3;
+
+        // Glue together 16 pixels, shift up to 7 pels left, keep the leftmost 8
+        vx2 = RT_MAKE_U64(v2, v1);
+        vx2 <<= lskip * 4;
+        v = vx2 >> 32;
+
         ((PIXEL_TYPE *)d)[0] = palette[v >> 28];
         ((PIXEL_TYPE *)d)[1] = palette[(v >> 24) & 0xf];
         ((PIXEL_TYPE *)d)[2] = palette[(v >> 20) & 0xf];
@@ -375,6 +431,7 @@ static void RT_CONCAT(vga_draw_line4_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
         ((PIXEL_TYPE *)d)[5] = palette[(v >> 8) & 0xf];
         ((PIXEL_TYPE *)d)[6] = palette[(v >> 4) & 0xf];
         ((PIXEL_TYPE *)d)[7] = palette[(v >> 0) & 0xf];
+
         d += BPP * 8;
         vram_ofs += 4;
     }
@@ -384,22 +441,38 @@ static void RT_CONCAT(vga_draw_line4_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
  * 16 color mode, dup2 horizontal
  */
 static void RT_CONCAT(vga_draw_line4d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                                const uint8_t *s, int width)
+                                                const uint8_t *s, int width, int lskip)
 {
-    uint32_t plane_mask, data, v, *palette;
+    uint32_t plane_mask, v, data, *palette, vram_ofs;
+    uint32_t v1, v2;
+    uint64_t vx2;
     int x;
-    RT_NOREF(pThisCC);
 
+    vram_ofs = s - pThisCC->pbVRam;
     palette = s1->last_palette;
     plane_mask = mask16[s1->ar[0x12] & 0xf];
     width >>= 3;
     for(x = 0; x < width; x++) {
+        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
         data = ((uint32_t *)s)[0];
         data &= plane_mask;
-        v = expand4[GET_PLANE(data, 0)];
-        v |= expand4[GET_PLANE(data, 1)] << 1;
-        v |= expand4[GET_PLANE(data, 2)] << 2;
-        v |= expand4[GET_PLANE(data, 3)] << 3;
+        v1 = expand4[GET_PLANE(data, 0)];
+        v1 |= expand4[GET_PLANE(data, 1)] << 1;
+        v1 |= expand4[GET_PLANE(data, 2)] << 2;
+        v1 |= expand4[GET_PLANE(data, 3)] << 3;
+
+        s = pThisCC->pbVRam + ((vram_ofs + 4) & s1->vga_addr_mask);
+        data = ((uint32_t *)s)[0];
+        data &= plane_mask;
+        v2 = expand4[GET_PLANE(data, 0)];
+        v2 |= expand4[GET_PLANE(data, 1)] << 1;
+        v2 |= expand4[GET_PLANE(data, 2)] << 2;
+        v2 |= expand4[GET_PLANE(data, 3)] << 3;
+
+        vx2 = RT_MAKE_U64(v2, v1);
+        vx2 <<= lskip * 4;
+        v = vx2 >> 32;
+
         PUT_PIXEL2(d, 0, palette[v >> 28]);
         PUT_PIXEL2(d, 1, palette[(v >> 24) & 0xf]);
         PUT_PIXEL2(d, 2, palette[(v >> 20) & 0xf]);
@@ -408,38 +481,65 @@ static void RT_CONCAT(vga_draw_line4d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
         PUT_PIXEL2(d, 5, palette[(v >> 8) & 0xf]);
         PUT_PIXEL2(d, 6, palette[(v >> 4) & 0xf]);
         PUT_PIXEL2(d, 7, palette[(v >> 0) & 0xf]);
+
         d += BPP * 16;
-        s += 4;
+        vram_ofs += 4;
     }
 }
 
 /*
- * 256 color mode, double pixels
- *
- * XXX: add plane_mask support (never used in standard VGA modes)
+ * VGA 256-color mode
+ * NB: VGA 256-color is not double-clocked, but outputs pixels at half
+ * the rate of EGA modes since it uses twice the bits per pixel
  */
 static void RT_CONCAT(vga_draw_line8d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                                const uint8_t *s, int width)
+                                                const uint8_t *s, int width, int lskip)
 {
-    uint32_t *palette, src_inc, dwb_mode;
-
+    uint32_t plane_mask, v, *palette, src_inc, dwb_mode, vram_ofs;
+    uint32_t v1, v2;
+    uint64_t vx2;
     int x;
-    RT_NOREF(pThisCC);
 
+    vram_ofs = s - pThisCC->pbVRam;
     palette = s1->last_palette;
+    plane_mask = mask16[s1->ar[0x12] & 0xf];
     width >>= 3;
     if (s1->sr[0x07] & 1)
         dwb_mode = 0;   // Non-VGA modes use linear addressing
     else
         dwb_mode = (s1->cr[0x14] & 0x40) ? 2 : (s1->cr[0x17] & 0x40) ? 0 : 1;
-    src_inc = 1 << dwb_mode;
+    src_inc = 4 << dwb_mode;
+    lskip >>= 1;
+
+    // With VGA planar memory organization, four 8-bit pixels live at the
+    // same memory/CRTC address, each in a separate plane. Changing the CRTC
+    // start address only can only change the displayed image with 4-pixel
+    // granularity. Pixel panning in effect allows starting the display
+    // from plane n instead of plane 0. Things are complicated by the fact
+    // that the next 4 pixels may live at addr + 1, addr + 2, or addr + 4,
+    // and advancing the address may trigger wraparound.
+
     for(x = 0; x < width; x++) {
-        PUT_PIXEL2(d, 0, palette[s[0]]);
-        PUT_PIXEL2(d, 1, palette[s[1]]);
-        PUT_PIXEL2(d, 2, palette[s[2]]);
-        PUT_PIXEL2(d, 3, palette[s[3]]);
+        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
+        v1 = ((uint32_t *)s)[0];
+        v1 &= plane_mask;
+
+        s = pThisCC->pbVRam + ((vram_ofs + src_inc) & s1->vga_addr_mask);
+        v2 = ((uint32_t *)s)[0];
+        v2 &= plane_mask;
+
+        // Glue together 8 pixels, shift up to 3 pels off, keep the bottom 4
+        vx2 = RT_MAKE_U64(v1, v2);
+        vx2 >>= lskip * 8;
+        v = (uint32_t)vx2;
+
+        PUT_PIXEL2(d, 0, palette[GET_PLANE(v, 0)]);
+        PUT_PIXEL2(d, 1, palette[GET_PLANE(v, 1)]);
+        PUT_PIXEL2(d, 2, palette[GET_PLANE(v, 2)]);
+        PUT_PIXEL2(d, 3, palette[GET_PLANE(v, 3)]);
+
         d += BPP * 8;
-        s += 4 * src_inc;
+        vram_ofs += src_inc;
     }
 }
 
@@ -449,11 +549,11 @@ static void RT_CONCAT(vga_draw_line8d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
  * XXX: add plane_mask support (never used in standard VGA modes)
  */
 static void RT_CONCAT(vga_draw_line8_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                              const uint8_t *s, int width)
+                                              const uint8_t *s, int width, int lskip)
 {
     uint32_t *palette, src_inc, dwb_mode;
     int x;
-    RT_NOREF(pThisCC);
+    RT_NOREF(pThisCC, lskip);
 
     palette = s1->last_palette;
     width >>= 3;
@@ -461,18 +561,18 @@ static void RT_CONCAT(vga_draw_line8_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
         dwb_mode = 0;   // Non-VGA modes use linear addressing
     else
         dwb_mode = (s1->cr[0x14] & 0x40) ? 2 : (s1->cr[0x17] & 0x40) ? 0 : 1;
-    src_inc = 1 << dwb_mode;
+    src_inc = 4 << dwb_mode;
     for(x = 0; x < width; x++) {
         ((PIXEL_TYPE *)d)[0] = palette[s[0]];
         ((PIXEL_TYPE *)d)[1] = palette[s[1]];
         ((PIXEL_TYPE *)d)[2] = palette[s[2]];
         ((PIXEL_TYPE *)d)[3] = palette[s[3]];
-        s += 4 * src_inc;
+        s += src_inc;
         ((PIXEL_TYPE *)d)[4] = palette[s[0]];
         ((PIXEL_TYPE *)d)[5] = palette[s[1]];
         ((PIXEL_TYPE *)d)[6] = palette[s[2]];
         ((PIXEL_TYPE *)d)[7] = palette[s[3]];
-        s += 4 * src_inc;
+        s += src_inc;
         d += BPP * 8;
     }
 }
@@ -486,9 +586,9 @@ static void RT_CONCAT(vga_draw_line8_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
  * 15 bit color
  */
 static void RT_CONCAT(vga_draw_line15_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                               const uint8_t *s, int width)
+                                               const uint8_t *s, int width, int lskip)
 {
-    RT_NOREF(s1, pThisCC);
+    RT_NOREF(s1, pThisCC, lskip);
 #if DEPTH == 15 && defined(WORDS_BIGENDIAN) == defined(TARGET_WORDS_BIGENDIAN)
     memcpy(d, s, width * 2);
 #else
@@ -512,9 +612,9 @@ static void RT_CONCAT(vga_draw_line15_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC
  * 16 bit color
  */
 static void RT_CONCAT(vga_draw_line16_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                               const uint8_t *s, int width)
+                                               const uint8_t *s, int width, int lskip)
 {
-    RT_NOREF(s1, pThisCC);
+    RT_NOREF(s1, pThisCC, lskip);
 #if DEPTH == 16 && defined(WORDS_BIGENDIAN) == defined(TARGET_WORDS_BIGENDIAN)
     memcpy(d, s, width * 2);
 #else
@@ -538,11 +638,11 @@ static void RT_CONCAT(vga_draw_line16_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC
  * 24 bit color
  */
 static void RT_CONCAT(vga_draw_line24_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                               const uint8_t *s, int width)
+                                               const uint8_t *s, int width, int lskip)
 {
     int w;
     uint32_t r, g, b;
-    RT_NOREF(s1, pThisCC);
+    RT_NOREF(s1, pThisCC, lskip);
 
     w = width;
     do {
@@ -565,9 +665,9 @@ static void RT_CONCAT(vga_draw_line24_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC
  * 32 bit color
  */
 static void RT_CONCAT(vga_draw_line32_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC, uint8_t *d,
-                                               const uint8_t *s, int width)
+                                               const uint8_t *s, int width, int lskip)
 {
-    RT_NOREF(s1, pThisCC);
+    RT_NOREF(s1, pThisCC, lskip);
 #if DEPTH == 32 && defined(WORDS_BIGENDIAN) == defined(TARGET_WORDS_BIGENDIAN)
     memcpy(d, s, width * 4);
 #else
