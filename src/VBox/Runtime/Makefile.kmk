@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 113489 2026-03-21 22:44:14Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114131 2026-05-14 12:27:45Z knut.osmundsen@oracle.com $
 ## @file
 # Sub-Makefile for the IPRT.
 #
@@ -2251,6 +2251,7 @@ ifdef VBOX_WITH_NOCRT_STATIC
   	common/compiler/vcc/stack-except-seh-vcc.cpp \
   	common/compiler/vcc/stack-probe-vcc.asm \
   	common/compiler/vcc/except-seh-vcc.cpp
+  RuntimeR3_ASINCS.win.x86 = common/compiler/vcc/ # NASM crap
   RuntimeR3_SOURCES.win.x86 = $(RuntimeBaseR3_SOURCES.win.x86) \
   	r3/win/nocrt-atexit-win.asm \
   	r3/win/nocrt-mainCRTStartup-win.asm \
