@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 112988 2026-02-13 09:06:23Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114129 2026-05-14 12:03:04Z knut.osmundsen@oracle.com $
 ## @file
 # Sub-Makefile for the IPRT testcases.
 #
@@ -818,6 +818,7 @@ ifdef VBOX_WITH_TESTCASES # The whole file
   tstRTNoCrt-5_BLD_TRG_ARCH := x86
  endif
  tstRTNoCrt-5_SOURCES := tstRTNoCrt-5.cpp
+ tstRTNoCrt-5_ASINCS.win.x86 = ../common/compiler/vcc/ # NASM crap
  tstRTNoCrt-5_SOURCES.win.x86 := \
  	../common/compiler/vcc/x86-allshl.asm \
  	../common/compiler/vcc/x86-allshr.asm \
