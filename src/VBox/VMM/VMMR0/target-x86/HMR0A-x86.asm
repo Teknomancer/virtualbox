@@ -1,4 +1,4 @@
-; $Id: HMR0A-x86.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: HMR0A-x86.asm 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $
 ;; @file
 ; HM - Ring-0 VMX, SVM world-switch and helper routines.
 ;
@@ -945,7 +945,7 @@ ALIGNCODE(8)
         jmp     .wrote_host_rsp
 
 ALIGNCODE(64)
-GLOBALNAME RT_CONCAT(hmR0VmxStartVmHostRIP,%1)
+GLOBALNAME_EX RT_CONCAT(hmR0VmxStartVmHostRIP,%1), notype, hidden,NAME(RT_CONCAT(hmR0VmxStartVmHostRIP,%1)) - NAME(RT_CONCAT(RT_CONCAT(hmR0VmxStartVm,%1),_EndProc))
 %ifdef RT_OS_LINUX
         IBT_ENDBRxx                     ; Shut up objtool warning.
 %endif
@@ -1049,9 +1049,6 @@ GLOBALNAME RT_CONCAT(hmR0VmxStartVmHostRIP,%1)
  %undef frm_guest_rax
  %undef cbFrame
 ENDPROC RT_CONCAT(hmR0VmxStartVm,%1)
- %ifdef ASM_FORMAT_ELF
-size NAME(RT_CONCAT(hmR0VmxStartVmHostRIP,%1))  NAME(RT_CONCAT(hmR0VmxStartVm,%1) %+ _EndProc) - NAME(RT_CONCAT(hmR0VmxStartVmHostRIP,%1))
- %endif
 
 
 %endmacro ; hmR0VmxStartVmTemplate

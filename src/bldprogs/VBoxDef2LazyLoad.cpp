@@ -1,4 +1,4 @@
-/* $Id: VBoxDef2LazyLoad.cpp 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxDef2LazyLoad.cpp 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxDef2LazyLoad - Lazy Library Loader Generator.
  *
@@ -615,7 +615,7 @@ static RTEXITCODE generateOutputInnerX86AndAMD64(FILE *pOutput)
                 "    xor     rcx, rcx               ; pErrInfo\n"
                 "    xor     rdx, rdx               ; fFlags (local load)\n"
                 "    lea     rsi, [RT_WRT_RIP(g_hMod)]      ; phLdrMod\n"
-                "    lea     rdi, [RT_WRT_RIP(g_szLibrary]  ; pszFilename\n"
+                "    lea     rdi, [RT_WRT_RIP(g_szLibrary)] ; pszFilename\n"
                 "    sub     rsp, 08h\n"
                 "    call    IMP2(SUPR3HardenedLdrLoadAppPriv)\n"
                 "    add     rsp, 08h\n"
@@ -1885,7 +1885,7 @@ int main(int argc, char **argv)
             else if (   !strcmp(psz, "--version")
                      || !strcmp(psz, "-V"))
             {
-                printf("$Revision: 114133 $\n");
+                printf("$Revision: 114135 $\n");
                 return RTEXITCODE_SUCCESS;
             }
             else

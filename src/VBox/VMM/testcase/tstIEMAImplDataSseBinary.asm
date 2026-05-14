@@ -1,4 +1,4 @@
-; $Id: tstIEMAImplDataSseBinary.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: tstIEMAImplDataSseBinary.asm 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $
 ;; @file
 ; tstIEMAImplDataSseBinary - Test data for SSE binary instructions.
 ;
@@ -43,19 +43,12 @@ BEGINCONST
 ; @param    2       The filename
 ;
 %macro IEM_TEST_DATA 2
-EXPORTEDNAME g_abTests_ %+ %1
+EXPORTEDNAME_EX g_abTests_ %+ %1, object, (g_abTests_ %+ %1 %+ _end - NAME(g_abTests_ %+ %1))
         incbin %2
 g_abTests_ %+ %1 %+ _end:
         align   4, db 0
-EXPORTEDNAME g_cbTests_ %+ %1
+EXPORTEDNAME_EX g_cbTests_ %+ %1, object, 4
         dd  g_abTests_ %+ %1 %+ _end - NAME(g_abTests_ %+ %1)
-
- %ifdef ASM_FORMAT_ELF
-size g_abTests_ %+ %1   g_abTests_ %+ %1 %+ _end - NAME(g_abTests_ %+ %1)
-type g_abTests_ %+ %1   object
-size g_cbTests_ %+ %1   4
-type g_cbTests_ %+ %1   object
- %endif
 %endmacro
 
 IEM_TEST_DATA addps_u128,           "tstIEMAImplDataSseBinary-addps_u128.bin.gz"

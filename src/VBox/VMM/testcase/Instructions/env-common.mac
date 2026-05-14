@@ -1,4 +1,4 @@
-; $Id: env-common.mac 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: env-common.mac 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $
 ;; @file
 ; Instruction Test Environment - Common Bits.
 ;
@@ -281,18 +281,18 @@ VBINSTST_ENDPROC   Common_MissingTrap
 VBINSTST_BEGINDATA
         align 64
         dd      09d8af498h, 09ab3e5f8h
-VBINSTST_GLOBALNAME_EX g_u64Data, data hidden
+VBINSTST_GLOBALNAME_EX g_u64Data, data, hidden, 16
         dq      0
         dd      07d7af797h, 096b36562h
-VBINSTST_GLOBALNAME_EX g_u32Data, data hidden
+VBINSTST_GLOBALNAME_EX g_u32Data, data, hidden, 8
         dd      0
         dd      012305987h
-VBINSTST_GLOBALNAME_EX g_u16Data, data hidden
+VBINSTST_GLOBALNAME_EX g_u16Data, data, hidden, 8
         dw      0
         dw      05865h
         dw      03863h
         dw      02679h
-VBINSTST_GLOBALNAME_EX g_u8Data, data hidden
+VBINSTST_GLOBALNAME_EX g_u8Data, data, hidden, 8
         db      0
         db      90h
         dw      0865ah

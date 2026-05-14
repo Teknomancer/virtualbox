@@ -1,4 +1,4 @@
-; $Id: except-x86-vcc-asm.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: except-x86-vcc-asm.asm 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $
 ;; @file
 ; IPRT - Visual C++ Compiler - x86 Exception Handler Support Code.
 ;
@@ -111,7 +111,7 @@ safeseh _rtVccEh4DoLocalUnwindHandler@16
 
 %ifdef WITH_NLG_STUFF
 BEGINDATA
-GLOBALNAME_RAW __NLG_Destination, data, hidden
+GLOBALNAME_RAW __NLG_Destination, data, hidden, 4*4
         dd      019930520h
         dd      0
         dd      0

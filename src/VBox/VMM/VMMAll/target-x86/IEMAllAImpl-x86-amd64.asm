@@ -1,4 +1,4 @@
-; $Id: IEMAllAImpl-x86-amd64.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: IEMAllAImpl-x86-amd64.asm 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $
 ;; @file
 ; IEM - Instruction Implementation in Assembly, x86 target, amd64 host.
 ;
@@ -80,7 +80,7 @@
 ; @param        2       The argument size on x86.
 ;
 %macro BEGINPROC_FASTCALL 2
-GLOBALNAME_RAW NAME_FASTCALL(%1,%2,@), function, hidden
+GLOBALNAME_RAW NAME_FASTCALL(%1,%2,@), function, hidden, CALC_PROC_SIZE_RAW(NAME_FASTCALL(%1,%2,@))
         IBT_ENDBRxx
 %endmacro
 

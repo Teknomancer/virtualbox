@@ -1,4 +1,4 @@
-; $Id: ftol2-vcc.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: ftol2-vcc.asm 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $
 ;; @file
 ; IPRT - Floating Point to Integer related Visual C++ support routines.
 ;
@@ -49,8 +49,8 @@
 ; @param    st0     The value to convert.  Will be popped.
 ; @uses     eax, st0, FSW.TOP, FSW.exception
 ;
-GLOBALNAME_RAW  __ftol2_sse_excpt, function, RT_NOTHING
-GLOBALNAME_RAW  __ftol2_sse, function, RT_NOTHING ;; @todo kind of expect __ftol2_sse to take input in xmm0 and return in edx:eax.
+GLOBALNAME_RAW  __ftol2_sse_excpt, function, default, CALC_PROC_SIZE(__ftoi2)
+GLOBALNAME_RAW  __ftol2_sse, function, default, CALC_PROC_SIZE(__ftoi2) ;; @todo kind of expect __ftol2_sse to take input in xmm0 and return in edx:eax.
 BEGINPROC_RAW   __ftoi2
         push    ebp
         mov     ebp, esp
