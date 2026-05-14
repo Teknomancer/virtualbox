@@ -664,8 +664,18 @@ GLOBALNAME %1
 ;
 %macro GLOBALNAME_RAW 2-4 default, 0
 %ifdef ASM_FORMAT_ELF
- %ifidn %2,notype       ; YASM doesn't grok notype
-global %1: %3 %4
+ %ifdef __YASM__
+  %ifidn %2,notype       ; YASM doesn't grok notype
+   %ifidn %3,default     ; YASM doesn't grok default
+global %1:%4
+   %else
+global %1:%3 %4
+   %endif
+  %elifidn %3,default     ; YASM doesn't grok default
+global %1:%2 %4
+  %else
+global %1:%2 %3 %4
+  %endif
  %else
 global %1:%2 %3 %4
  %endif
