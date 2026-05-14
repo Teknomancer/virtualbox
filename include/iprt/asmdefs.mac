@@ -148,8 +148,7 @@
 
 ;;
 ; Empty define
-; @note probably only works for the final argument...
-%define RT_NOTHING              ?
+%define RT_NOTHING
 
 ;; Define ASM_FORMAT_PE64 if applicable.
 %ifdef ASM_FORMAT_PE
@@ -716,8 +715,8 @@ GLOBALNAME_RAW NAME(%1), %2, %3
 ; @param %1     The internal symbol name.
 ; @param %2     The external symbol name.
 ; @param %3     ELF and PE attributes: 'function', 'object', 'data', 'notype'.
-;               PE ignores all but 'function' (yasm only).  Other formats ignores
-;               this completely.
+;               PE ignores all but 'function'.  Other formats ignores this
+;               completely.
 ;
 %macro EXPORTEDNAME_RAW 3
  %ifdef ASM_FORMAT_PE
