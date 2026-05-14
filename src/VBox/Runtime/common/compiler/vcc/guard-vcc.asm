@@ -1,4 +1,4 @@
-; $Id: guard-vcc.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: guard-vcc.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 ;; @file
 ; IPRT - Control Flow Guard related Visual C++ support routines.
 ;
@@ -102,7 +102,7 @@ ENDPROC   __guard_dispatch_icall_nop
 ; This is for windows versions which doesn't support extended call flow guard stuff.
 ;
 BEGINPROC __guard_xfg_dispatch_icall_nop
-        jmp     [__guard_dispatch_icall_nop wrt RIP]
+        jmp     [RT_WRT_RIP(__guard_dispatch_icall_nop)]
 ENDPROC   __guard_xfg_dispatch_icall_nop
 %endif
 

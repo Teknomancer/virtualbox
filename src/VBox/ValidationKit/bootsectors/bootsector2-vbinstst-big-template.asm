@@ -1,4 +1,4 @@
-; $Id: bootsector2-vbinstst-big-template.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-vbinstst-big-template.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 ;; @file
 ; Boot Sector 2 with big instruction test image template.  For use with
 ; bootsector2-vbinstst-kernel.asm.  Requires:
@@ -73,9 +73,9 @@
 bs2_big_image_start:
 entrypoint:
         mov     xAX, .s_szTestName
-        call    [TMPL_NM_CMN(g_pfnTestInit) xWrtRIP]
+        call    [RT_WRT_RIP(TMPL_NM_CMN(g_pfnTestInit))]
         call    TMPL_NM(TestInstrMain)
-        call    [TMPL_NM_CMN(g_pfnTestTerm) xWrtRIP]
+        call    [RT_WRT_RIP(TMPL_NM_CMN(g_pfnTestTerm))]
 .hltloop:
         hlt
         jmp     .hltloop

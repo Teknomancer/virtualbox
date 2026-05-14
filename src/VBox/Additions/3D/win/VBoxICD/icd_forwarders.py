@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# $Id: icd_forwarders.py 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: icd_forwarders.py 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 
 """
 Generates forwards from a .def file.
@@ -28,7 +28,7 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 
 SPDX-License-Identifier: GPL-3.0-only
 """
-__version__ = "$Revision: 112403 $"
+__version__ = "$Revision: 114133 $"
 
 # Standard python imports"""
 import sys
@@ -74,7 +74,7 @@ def GenerateForwarders(asArgs):
             '',
             'BEGINPROC VBoxLoadICDWrapper',
             '    ; Check if loaded',
-            '    mov     xAX, [NAME(g_hmodICD) xWrtRIP]',
+            '    mov     xAX, [RT_WRT_RIP(NAME(g_hmodICD))]',
             '    test    xAX, xAX',
             '    jz      .needs_loading',
             '    ret',
@@ -124,7 +124,7 @@ def GenerateForwarders(asArgs):
                 '%ifdef ICD_LAZY_LOAD',
                 '    call    VBoxLoadICDWrapper',
                 '%endif',
-                '    mov     xAX, [NAME(g_pfn_%s) xWrtRIP]' % sFnNm,
+                '    mov     xAX, [RT_WRT_RIP(NAME(g_pfn_%s))]' % sFnNm,
                 '    test    xAX, xAX',
                 '    jz      .return',
                 '    jmp     xAX',

@@ -148,7 +148,8 @@
 
 ;;
 ; Empty define
-%define RT_NOTHING
+; @note probably only works for the final argument...
+%define RT_NOTHING              ?
 
 ;; Define ASM_FORMAT_PE64 if applicable.
 %ifdef ASM_FORMAT_PE
@@ -162,6 +163,9 @@
 %ifdef RT_ASM_WITH_SEH64
  %ifndef ASM_FORMAT_PE64
   %undef RT_ASM_WITH_SEH64
+ %elifdef __NASM__ ; NASM doesn't have built-in support
+  %undef  RT_ASM_WITH_SEH64
+  %define RT_ASM_WITH_SEH64_ALT
  %endif
 %endif
 
@@ -558,7 +562,7 @@ RT_CONCAT(.seh64_op_label_,seh64_idxOps):
 ; Gets the pointer to an imported object.
 %ifdef ASM_FORMAT_PE
  %ifdef RT_ARCH_AMD64
-  %define IMP(name)     qword [IMPNAME(name) wrt rip]
+  %define IMP(name)     qword [RT_WRT_RIP(IMPNAME(name))]
  %else
   %define IMP(name)     dword [IMPNAME(name)]
  %endif
@@ -570,7 +574,7 @@ RT_CONCAT(.seh64_op_label_,seh64_idxOps):
 ; Gets the pointer to an imported object.
 %ifdef ASM_FORMAT_PE
  %ifdef RT_ARCH_AMD64
-  %define IMP_SEG(SegOverride, name)  qword [SegOverride:IMPNAME(name) wrt rip]
+  %define IMP_SEG(SegOverride, name)  qword [RT_WRT_RIP(SegOverride:IMPNAME(name))]
  %else
   %define IMP_SEG(SegOverride, name)  dword [SegOverride:IMPNAME(name)]
  %endif
@@ -593,7 +597,7 @@ RT_CONCAT(.seh64_op_label_,seh64_idxOps):
 ; Gets the pointer to an imported object, version 2.
 %ifdef ASM_FORMAT_PE
  %ifdef RT_ARCH_AMD64
-  %define IMP2(name)    qword [IMPNAME(name) wrt rip]
+  %define IMP2(name)    qword [RT_WRT_RIP(IMPNAME(name))]
  %else
   %define IMP2(name)    dword [IMPNAME(name)]
  %endif
@@ -606,7 +610,7 @@ RT_CONCAT(.seh64_op_label_,seh64_idxOps):
   %endif
  %endif
 %elifdef ASM_FORMAT_MACHO
- %define IMP2(name)     RTCCPTR_PRE [g_Imp2_ %+ name xWrtRIP]
+ %define IMP2(name)     RTCCPTR_PRE [RT_WRT_RIP(g_Imp2_ %+ name)]
 %endif
 %ifndef IMP2
  %define IMP2(name)     IMPNAME(name)
@@ -662,7 +666,9 @@ global %1:%2 %3
 
 %elifdef ASM_FORMAT_PE
  %ifidn %2,function
-  %ifdef __YASM__      ; nasm does not support any attributes, it errors out. So, nasm is no good with control flow guard atm.
+  %ifdef __YASM__
+global %1:function
+  %elif __NASM_VERSION_ID__ >= 0x03016361 ;; @todo NASM: This assuming 3.02rc7 with pull request #233 applied!
 global %1:function
   %else
 global %1
@@ -840,7 +846,7 @@ ENDPROC_RAW NAME(%1)
 
 
 ;
-; Do OMF, Mach-O/Yasm and ELF/Yasm segment definitions.
+; Do segment definitions and switch to the code segment.
 ;
 ; For OMF and Mach-O it is to get the segment order right. For Mach-O it's only
 ; to make sure the .bss section ends up last (it's not declared here).
@@ -848,10 +854,12 @@ ENDPROC_RAW NAME(%1)
 ; Neither Mach-O nor ELF have data alignments propagated to the section
 ; alignment, so we have to explictly set the .data section and .rodata/.text
 ; alignments here to 16 bytes to ensure we can cope with most stuff.
-; TODO: Check what nasm does!
 ;
-%ifdef ASM_FORMAT_OMF
- %ifndef RT_NOINC_SEGMENTS
+; We do the same for NASM for now.
+;; @todo NASM: Check what's needed for ELF and Mach-O.
+;
+%ifndef RT_NOINC_SEGMENTS
+ %ifdef ASM_FORMAT_OMF
 
   ; 16-bit segments first (OMF / OS/2 specific).
   %ifdef RT_INCL_16BIT_SEGMENTS
@@ -896,29 +904,23 @@ ENDPROC_RAW NAME(%1)
 
   ; Make the TEXT32 segment default.
   segment TEXT32
- %endif ; RT_NOINC_SEGMENTS
-%endif
 
-%ifdef ASM_FORMAT_MACHO
- %ifdef __YASM__
-  %ifndef RT_NOINC_SEGMENTS
-   section .text
-   section .data   align=16
-   section .rodata align=16
-   section .text    ; Make the .text segment default and w/o attributes
-  %endif
- %endif
-%endif
+ %elifdef ASM_FORMAT_MACHO
+  section .text
+  section .data   align=16
+  section .rodata align=16
+  section .text    ; Make the .text segment default and w/o attributes
 
-%ifdef ASM_FORMAT_ELF
- %ifdef __YASM__
-  %ifndef RT_NOINC_SEGMENTS
-   section .text align=16
-   section .data align=16
-   section .text    ; Make the .text segment default and w/o attributes (or stuc/endstruc will trigger warnings).
-  %endif
+ %elifdef ASM_FORMAT_ELF
+  section .text align=16
+  section .data align=16
+  section .text    ; Make the .text segment default and w/o attributes (or stuc/endstruc will trigger warnings).
+
+ %else
+
+  section .text
  %endif
-%endif
+%endif ; RT_NOINC_SEGMENTS
 
 
 ;;
@@ -1346,11 +1348,6 @@ BEGINPROC_EXPORTED %1, 0
 ;
 %macro RT_NOCRT_BEGINPROC 1
  %ifdef RT_WITH_NOCRT_ALIASES
-  %ifdef IN_RT_STATIC
-BEGINPROC          RT_NOCRT(%1), 1 ; Do our own IBT_ENDBRxx after aliasing/
-  %else
-BEGINPROC_EXPORTED RT_NOCRT(%1), 1 ; Do our own IBT_ENDBRxx after aliasing/
-  %endif
   %ifdef ASM_FORMAT_ELF
    ; ELF
    %ifdef RT_WITH_NOCRT_UNDERSCORE_ALIASES
@@ -1369,14 +1366,12 @@ GLOBALNAME _%1
    %endif
 GLOBALNAME %1
   %endif
-        IBT_ENDBRxx
- %else  ; !RT_WITH_NOCRT_ALIASES
-  %ifdef IN_RT_STATIC
+ %endif ; RT_WITH_NOCRT_ALIASES
+ %ifdef IN_RT_STATIC
 BEGINPROC          RT_NOCRT(%1), 0
-  %else
+ %else
 BEGINPROC_EXPORTED RT_NOCRT(%1), 0
-  %endif
- %endif ; !RT_WITH_NOCRT_ALIASES
+ %endif
 %endmacro ; RT_NOCRT_BEGINPROC
 
 
@@ -1408,8 +1403,9 @@ BEGINPROC_EXPORTED RT_NOCRT(%1), 0
 ;; @def xSI
 ; RSI or ESI depending on context.
 
-;; @def xWrtRIP
-; 'wrt rip' for AMD64 targets, nothing for x86 ones.
+;; @def RT_WRT_RIP
+; @param a_Sym  The symbol being referenced.
+; RIP-relative for AMD64 targets, nothing for x86 ones.
 
 %ifdef RT_ARCH_AMD64
  %define xCB 8
@@ -1421,7 +1417,11 @@ BEGINPROC_EXPORTED RT_NOCRT(%1), 0
  %define xDX rdx
  %define xDI rdi
  %define xSI rsi
- %define xWrtRIP wrt rip
+ %ifdef __YASM__
+  %define RT_WRT_RIP(a_Sym)  a_Sym wrt rip
+ %else
+  %define RT_WRT_RIP(a_Sym)  rel a_Sym
+ %endif
 %else
  %define xCB 4
  %define xSP esp
@@ -1432,7 +1432,7 @@ BEGINPROC_EXPORTED RT_NOCRT(%1), 0
  %define xDX edx
  %define xDI edi
  %define xSI esi
- %define xWrtRIP
+ %define RT_WRT_RIP(a_Sym)  a_Sym
 %endif
 
 

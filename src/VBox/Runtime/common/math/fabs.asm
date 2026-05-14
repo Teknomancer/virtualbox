@@ -1,4 +1,4 @@
-; $Id: fabs.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: fabs.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 ;; @file
 ; IPRT - No-CRT fabs - AMD64 & X86.
 ;
@@ -53,7 +53,7 @@ RT_NOCRT_BEGINPROC fabs
         SEH64_END_PROLOGUE
 
 %ifdef RT_ARCH_AMD64
-        andps   xmm0, [g_r64ClearSignMask xWrtRIP]
+        andps   xmm0, [RT_WRT_RIP(g_r64ClearSignMask)]
 %else
         fld     qword [xBP + xCB*2]     ; This turns SNaN into QNaN.
         fabs

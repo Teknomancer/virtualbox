@@ -1,4 +1,4 @@
-; $Id: VMMR0JmpA-amd64.asm 113196 2026-02-27 07:51:00Z knut.osmundsen@oracle.com $
+; $Id: VMMR0JmpA-amd64.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 ;; @file
 ; VMM - R0 SetJmp / LongJmp routines for AMD64.
 ;
@@ -163,7 +163,7 @@ SEH64_END_PROLOGUE
     ; Save a PC and return PC here to assist unwinding in the debugger.
     ;
 .unwind_point:
-    lea     rcx, [.unwind_point wrt RIP]
+    lea     rcx, [RT_WRT_RIP(.unwind_point)]
     mov     [xDX + VMMR0JMPBUF.UnwindPc], rcx
     mov     rcx, [xDX + VMMR0JMPBUF.Core.s.rbp]
     lea     rcx, [rcx + 8]

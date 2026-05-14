@@ -1,4 +1,4 @@
-; $Id: bs3kit-template-footer.mac 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bs3kit-template-footer.mac 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 ;; @file
 ; BS3Kit footer for multi-mode code templates.
 ;
@@ -118,7 +118,8 @@
 %undef xDX
 %undef xDI
 %undef xSI
-%undef xWrtRIP
+%undef RT_WRT_RIP
+
 
 %undef sCB
 %undef sDEF

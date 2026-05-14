@@ -1,4 +1,4 @@
-; $Id: HMR0A-x86.asm 113493 2026-03-21 23:09:12Z knut.osmundsen@oracle.com $
+; $Id: HMR0A-x86.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
 ;; @file
 ; HM - Ring-0 VMX, SVM world-switch and helper routines.
 ;
@@ -855,7 +855,7 @@ BEGINPROC RT_CONCAT(hmR0VmxStartVm,%1)
         ; Set the vmlaunch/vmresume "return" host RIP and RSP values if they've changed (unlikly).
         ; The vmwrite isn't quite for free (on an 10980xe at least), thus we check if anything changed
         ; before writing here.
-        lea     rcx, [NAME(RT_CONCAT(hmR0VmxStartVmHostRIP,%1)) wrt rip]
+        lea     rcx, [RT_WRT_RIP(NAME(RT_CONCAT(hmR0VmxStartVmHostRIP,%1)))]
         cmp     rcx, [r9 + VMXVMCSINFO.uHostRip]
         jne     .write_host_rip
 .wrote_host_rip:
@@ -1056,7 +1056,7 @@ size NAME(RT_CONCAT(hmR0VmxStartVmHostRIP,%1))  NAME(RT_CONCAT(hmR0VmxStartVm,%1
 
 %endmacro ; hmR0VmxStartVmTemplate
 
-%macro hmR0VmxStartVmSseTemplate 2
+%macro hmR0VmxStartVmSseTemplate 1-2
 hmR0VmxStartVmTemplate _SansXcr0_SansIbpbEntry_SansL1dEntry_SansMdsEntry_SansIbpbExit %+ %2, 0, 0                 | 0                | 0                | 0               , %1
 hmR0VmxStartVmTemplate _WithXcr0_SansIbpbEntry_SansL1dEntry_SansMdsEntry_SansIbpbExit %+ %2, 1, 0                 | 0                | 0                | 0               , %1
 hmR0VmxStartVmTemplate _SansXcr0_WithIbpbEntry_SansL1dEntry_SansMdsEntry_SansIbpbExit %+ %2, 0, HM_WSF_IBPB_ENTRY | 0                | 0                | 0               , %1
@@ -1091,7 +1091,7 @@ hmR0VmxStartVmTemplate _SansXcr0_WithIbpbEntry_WithL1dEntry_WithMdsEntry_WithIbp
 hmR0VmxStartVmTemplate _WithXcr0_WithIbpbEntry_WithL1dEntry_WithMdsEntry_WithIbpbExit %+ %2, 1, HM_WSF_IBPB_ENTRY | HM_WSF_L1D_ENTRY | HM_WSF_MDS_ENTRY | HM_WSF_IBPB_EXIT, %1
 %endmacro
 
-hmR0VmxStartVmSseTemplate 0,,
+hmR0VmxStartVmSseTemplate 0
 %ifdef VBOX_WITH_KERNEL_USING_XMM
 hmR0VmxStartVmSseTemplate 1,_SseManual
 hmR0VmxStartVmSseTemplate 2,_SseXSave
