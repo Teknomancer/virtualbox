@@ -1,4 +1,4 @@
-/* $Id: VBoxGuest-darwin.cpp 114138 2026-05-14 22:23:55Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxGuest-darwin.cpp 114140 2026-05-15 00:22:56Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxGuest - Darwin Specifics.
  */
@@ -241,7 +241,7 @@ static struct cdevsw    g_DevCW =
     /*.d_select   = */ eno_select,
     /*.d_mmap     = */ eno_mmap,
     /*.d_strategy = */ eno_strat,
-#if MAC_OS_X_VERSION_MIN_REQUIRED >= 120000 /* changed from 'void *' to 'rsvd_fcn_t' */
+#if MAC_OS_X_VERSION_MIN_REQUIRED >= 110000 /* changed from 'void *' to 'rsvd_fcn_t' */
     /*.d_getc     = */ eno_getc,
     /*.d_putc     = */ eno_putc,
 #else
