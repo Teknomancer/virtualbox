@@ -1,4 +1,4 @@
-/* $Id: VBoxNetSlirpNAT.cpp 114053 2026-04-30 10:34:45Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxNetSlirpNAT.cpp 114144 2026-05-15 15:47:41Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxNetNAT - NAT Service for connecting to IntNet.
  */
@@ -127,6 +127,10 @@ typedef struct NATSERVICEPORTFORWARDRULE
 typedef std::vector<NATSERVICEPORTFORWARDRULE> VECNATSERVICEPF;
 typedef VECNATSERVICEPF::iterator ITERATORNATSERVICEPF;
 typedef VECNATSERVICEPF::const_iterator CITERATORNATSERVICEPF;
+
+/** The following assertions must hold in order to copy addresses around. */
+AssertCompile(sizeof(in_addr)  == sizeof(RTNETADDRIPV4));
+AssertCompile(sizeof(in6_addr) == sizeof(RTNETADDRIPV6));
 
 /** Slirp Timer */
 typedef struct slirpTimer
@@ -707,9 +711,9 @@ int VBoxNetSlirpNAT::initIPv4()
     RTNETADDRIPV4 Addr4;
     Addr4.u = Net4.u | RT_H2N_U32_C(0x00000001);
 
-    memcpy(&m_ProxyOptions.vnetwork, &Net4, sizeof(in_addr));
-    memcpy(&m_ProxyOptions.vnetmask, &Mask4, sizeof(in_addr));
-    memcpy(&m_ProxyOptions.vhost,    &Addr4, sizeof(in_addr));
+    memcpy(&m_ProxyOptions.vnetwork, &Net4, sizeof(RTNETADDRIPV4));
+    memcpy(&m_ProxyOptions.vnetmask, &Mask4, sizeof(RTNETADDRIPV4));
+    memcpy(&m_ProxyOptions.vhost,    &Addr4, sizeof(RTNETADDRIPV4));
 
     /*
      * IPv4 Nameservers
@@ -721,7 +725,7 @@ int VBoxNetSlirpNAT::initIPv4()
     m_ProxyOptions.cRealNameservers = cRealNameservers;
     if (cRealNameservers > 0)
     {
-        LogRel(("Transfered %u nameservers to NAT engine.\n", (unsigned)cRealNameservers));
+        LogRel(("Transferred %zu nameservers to NAT engine.\n", cRealNameservers));
     }
     else
     {
@@ -732,8 +736,8 @@ int VBoxNetSlirpNAT::initIPv4()
         Nameserver4.u = Net4.u | RT_H2N_U32_C(0x00000003);
 
         memcpy(&m_ProxyOptions.vnameserver, &Nameserver4, sizeof(in_addr));
-        m_ProxyOptions.cRealNameservers = 0; // Ensures libslirp uses fallback.
-        LogRel(("fallback virtual nameserver: %u", Nameserver4.u));
+        m_ProxyOptions.cRealNameservers = 0; /* Ensures libslirp uses fallback. */
+        LogRel(("Using fallback virtual nameserver: %RTnaipv4\n", Nameserver4.u));
     }
 
     rc = fetchNatPortForwardRules(m_vecPortForwardRule4, /* :fIsIPv6 */ false);
@@ -1473,7 +1477,7 @@ HRESULT VBoxNetSlirpNAT::HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent)
                 RTNETADDRIPV4 Nameserver4;
                 Nameserver4.u = m_ProxyOptions.vnetwork.s_addr | RT_H2N_U32_C(0x00000003);
 
-                memcpy(&m_ProxyOptions.vnameserver, &Nameserver4, sizeof(in_addr));
+                memcpy(&m_ProxyOptions.vnameserver, &Nameserver4, sizeof(RTNETADDRIPV4));
                 m_ProxyOptions.aRealNameservers = NULL;
                 m_ProxyOptions.cRealNameservers = 0;
 
