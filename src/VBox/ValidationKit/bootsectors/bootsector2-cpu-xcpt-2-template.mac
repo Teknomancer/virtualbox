@@ -1,4 +1,4 @@
-; $Id: bootsector2-cpu-xcpt-2-template.mac 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-cpu-xcpt-2-template.mac 114145 2026-05-16 11:03:28Z knut.osmundsen@oracle.com $
 ;; @file
 ; Bootsector test for debug exceptions - multi mode template.
 ;
@@ -107,9 +107,11 @@
         cmp     %1, %2
         %3      %%.ok
         cli                             ; raw-mode hack
-        push    dword __LINE__
   %ifdef TMPL_16BIT
+        push    dword __LINE__
         push    ds
+  %else
+        push    __LINE__
   %endif
         push    %%.s_szMsg
         call    TMPL_NM_CMN(TestFailedF)

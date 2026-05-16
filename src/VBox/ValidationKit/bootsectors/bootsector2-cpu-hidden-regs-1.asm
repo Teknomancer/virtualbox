@@ -1,4 +1,4 @@
-; $Id: bootsector2-cpu-hidden-regs-1.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-cpu-hidden-regs-1.asm 114145 2026-05-16 11:03:28Z knut.osmundsen@oracle.com $
 ;; @file
 ; Bootsector that shows/tests the content of hidden CPU registers.
 ;
@@ -96,7 +96,7 @@ BEGINPROC reportPostBiosValues
         mov     ax, .s_szzStart
         call    TestValueRegSZZ_rm
 
-.done
+.done:
         pop     bx
         pop     ax
         ret

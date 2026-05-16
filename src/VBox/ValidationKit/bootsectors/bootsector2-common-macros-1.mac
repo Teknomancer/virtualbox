@@ -1,4 +1,4 @@
-; $Id: bootsector2-common-macros-1.mac 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-common-macros-1.mac 114145 2026-05-16 11:03:28Z knut.osmundsen@oracle.com $
 ;; @file
 ; Common bootsector macros.
 ;
@@ -46,9 +46,11 @@
 %macro TEST_ASSERT_SIMPLE 4
         cmp     %1, %2
         %3      %%.ok
-        push    dword __LINE__
  %ifdef TMPL_16BIT
+        push    dword __LINE__
         push    ds
+ %else
+        push    __LINE__
  %endif
         push    %%.s_szMsg
         call    TMPL_NM_CMN(TestFailedF)

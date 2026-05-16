@@ -1,4 +1,4 @@
-; $Id: bootsector2-common-routines-template-2.mac 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-common-routines-template-2.mac 114145 2026-05-16 11:03:28Z knut.osmundsen@oracle.com $
 ;; @file
 ; bootsector2 common routines - template containing code specific to each mode.
 ;
@@ -35,7 +35,7 @@
 ;
 
 %include "bootsector2-template-header.mac"
-ALIGNCODE(32)
+ALIGNCODE(16)
 GLOBALNAME TMPL_NM(g_szMode)
         db TMPL_MODE_STR, 0
 

@@ -1,4 +1,4 @@
-; $Id: bootsector2-cpu-xcpt-1-template.mac 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-cpu-xcpt-1-template.mac 114145 2026-05-16 11:03:28Z knut.osmundsen@oracle.com $
 ;; @file
 ; Bootsector test for basic exceptions - multi mode template.
 ;
@@ -114,9 +114,11 @@
 %macro ASSERT_SIMPLE 4
         cmp     %1, %2
         %3      %%.ok
-        push    dword __LINE__
  %ifdef TMPL_16BIT
+        push    dword __LINE__
         push    ds
+ %else
+        push    __LINE__
  %endif
         push    %%.s_szMsg
         call    TMPL_NM_CMN(TestFailedF)
@@ -125,6 +127,7 @@
 %%.s_szMsg: db %4, " (0x%RX32)", 0
 %%.ok:
 %endmacro
+;        ASSERT_SIMPLE xDI, xSP, je, "Someone busted xSP during this test."
 
 
  ;;
@@ -1206,7 +1209,11 @@ BEGINPROC TMPL_NM(TestLoadMyCS)
         mov     [xSP + xCB*2], xAX
 
         pop     xAX
+%ifdef TMPL_64BIT
+        o64 retf                        ; NASM defaults to 32-bit op size (YASM to the more sensible 64-bit).
+%else
         retf
+%endif
 ENDPROC   TMPL_NM(TestLoadMyCS)
 
 
