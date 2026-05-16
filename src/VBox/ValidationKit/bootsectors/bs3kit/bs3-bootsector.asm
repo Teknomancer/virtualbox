@@ -1,4 +1,4 @@
-; $Id: bs3-bootsector.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: bs3-bootsector.asm 114146 2026-05-16 20:43:40Z knut.osmundsen@oracle.com $
 ;; @file
 ; Generic bootsector for BS3.
 ;
@@ -292,7 +292,7 @@ CPU 386
         mov     cr0, eax
 
         ; Load all the code.
-.do_load
+.do_load:
         mov     [g_bBootDrv], dl
         call    NAME(bs3InitLoadImage)
 %if 0
