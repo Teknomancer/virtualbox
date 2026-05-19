@@ -1,4 +1,4 @@
-/* $Id: memobj-r0drv-linux.c 113603 2026-03-26 23:37:08Z knut.osmundsen@oracle.com $ */
+/* $Id: memobj-r0drv-linux.c 114148 2026-05-19 09:16:31Z knut.osmundsen@oracle.com $ */
 /** @file
  * IPRT - Ring-0 Memory Objects, Linux.
  */
@@ -2292,7 +2292,7 @@ static void rtR0MemObjLinuxFlushTlbAll(void)
 {
 # if RTLNX_VER_MIN(6,19,0)
     if (RT_LIKELY(RT_VALID_PTR(g_pfnLinuxFlushTlbAll)))
-        g_pfnLinuxFlushTlbAll();
+        RTLNX_CET_UNSAFE_CALL(g_pfnLinuxFlushTlbAll, g_pfnLinuxFlushTlbAll());
     else
     {
         uint32_t uMax;
