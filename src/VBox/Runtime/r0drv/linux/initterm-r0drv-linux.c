@@ -1,4 +1,4 @@
-/* $Id: initterm-r0drv-linux.c 114148 2026-05-19 09:16:31Z knut.osmundsen@oracle.com $ */
+/* $Id: initterm-r0drv-linux.c 114149 2026-05-19 11:55:11Z knut.osmundsen@oracle.com $ */
 /** @file
  * IPRT - Initialization & Termination, R0 Driver, Linux.
  */
@@ -138,8 +138,8 @@ DECLHIDDEN(int) rtR0InitNative(void)
 #endif
 
     /*
-     * Support for calling dynamic functions on CET-enabled (control flow 
-     * enforcement technology) kernels. 
+     * Support for calling dynamic functions on CET-enabled (control flow
+     * enforcement technology) kernels.
      */
     g_fLnxIsCetSupported = false;
     g_fLnxIsCetEnabled   = false;

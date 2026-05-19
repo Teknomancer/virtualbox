@@ -1,4 +1,4 @@
-/* $Id: the-linux-kernel.h 114148 2026-05-19 09:16:31Z knut.osmundsen@oracle.com $ */
+/* $Id: the-linux-kernel.h 114149 2026-05-19 11:55:11Z knut.osmundsen@oracle.com $ */
 /** @file
  * IPRT - Include all necessary headers for the Linux kernel.
  */
@@ -522,9 +522,9 @@ extern void (*g_pfnLinuxFlushTlbAll)(void);
 
 /** @def RTLNX_CET_UNSAFE_CALL
  * Wrapper for calling code that may be missing an ENDBR instruction.
- * 
+ *
  * This will disable preemption and, if necessary, disable ENDBR checks.
- * 
+ *
  * @param a_pfn         The function being called.
  * @param a_CallExpr    The call expression.
  */
@@ -554,7 +554,7 @@ extern void (*g_pfnLinuxFlushTlbAll)(void);
     } while (0)
 #endif
 
-#ifdef RT_ARCH_AMD64                
+#ifdef RT_ARCH_AMD64
 # define RTLNX_CET_ENDBR                    UINT32_C(0xfa1e0ff3) /* endbr64 */
 #elif defined(RT_ARCH_X86)
 # define RTLNX_CET_ENDBR                    UINT32_C(0xfb1e0ff3) /* endbr32 */
