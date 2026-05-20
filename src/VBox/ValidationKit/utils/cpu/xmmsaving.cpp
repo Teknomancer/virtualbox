@@ -1,4 +1,4 @@
-/* $Id: xmmsaving.cpp 113413 2026-03-14 20:59:41Z knut.osmundsen@oracle.com $ */
+/* $Id: xmmsaving.cpp 114156 2026-05-20 08:54:03Z knut.osmundsen@oracle.com $ */
 /** @file
  * xmmsaving - Test that all XMM register state is handled correctly and
  *             not corrupted the VMM.
@@ -40,10 +40,14 @@
 *   Header Files                                                                                                                 *
 *********************************************************************************************************************************/
 #include <iprt/buildconfig.h>
+#include <iprt/cpuset.h>
 #include <iprt/getopt.h>
+#include <iprt/mem.h>
+#include <iprt/message.h>
 #include <iprt/process.h>
 #include <iprt/stream.h>
 #include <iprt/test.h>
+#include <iprt/thread.h>
 #include <iprt/x86.h>
 
 
@@ -59,87 +63,102 @@ typedef struct MYXMMREGSET
 /*********************************************************************************************************************************
 *   Global Variables                                                                                                             *
 *********************************************************************************************************************************/
+static RTTEST   g_hTest;
+static uint32_t g_cSets          = 256;
 static uint64_t g_cMaxIterations = 1000000;
+static RTTHREAD g_ahThreads[RTCPUSET_MAX_CPUS];
 
 
+/*********************************************************************************************************************************
+*   Internal Functions                                                                                                           *
+*********************************************************************************************************************************/
 DECLASM(int) XmmSavingTestLoadSet(const MYXMMREGSET *pSet, const MYXMMREGSET *pPrevSet, PRTUINT128U pBadVal);
 
 
-static void XmmSavingTest(void)
+static DECLCALLBACK(int) XmmSavingTest(RTTHREAD hThreadSelf, void *pvUser)
 {
-    RTTestISub("xmm saving and restoring");
+    uintptr_t const idxThread = (uintptr_t)pvUser;
+    RT_NOREF(hThreadSelf);
 
     /* Create the test sets. */
-    static MYXMMREGSET s_aSets[256];
-    for (unsigned s = 0; s < RT_ELEMENTS(s_aSets); s++)
-    {
-        for (unsigned r = 0; r < RT_ELEMENTS(s_aSets[s].aRegs); r++)
+    MYXMMREGSET * const paSets = (MYXMMREGSET *)RTMemAllocZ(sizeof(paSets[0]) * g_cSets);
+    RTTEST_CHECK_RET(g_hTest, paSets, VERR_NO_MEMORY);
+
+    for (unsigned s = 0; s < g_cSets; s++)
+        for (unsigned r = 0; r < RT_ELEMENTS(paSets[s].aRegs); r++)
         {
-            unsigned x = (s << 4) | r;
-            s_aSets[s].aRegs[r].au32[0] =  x        | UINT32_C(0x12345000);
-            s_aSets[s].aRegs[r].au32[1] = (x << 8)  | UINT32_C(0x88700011);
-            s_aSets[s].aRegs[r].au32[2] = (x << 16) | UINT32_C(0xe000dcba);
-            s_aSets[s].aRegs[r].au32[3] = (x << 20) | UINT32_C(0x00087654);
+            unsigned x = (s << 4) | (r + (unsigned)idxThread);
+            paSets[s].aRegs[r].au32[0] =  x        | UINT32_C(0x12345000);
+            paSets[s].aRegs[r].au32[1] = (x << 8)  | UINT32_C(0x88700011);
+            paSets[s].aRegs[r].au32[2] = (x << 16) | UINT32_C(0xe000dcba);
+            paSets[s].aRegs[r].au32[3] = (x << 20) | UINT32_C(0x00087654);
         }
-    }
 
     /* Do the actual testing. */
     const MYXMMREGSET *pPrev2 = NULL;
     const MYXMMREGSET *pPrev = NULL;
     for (uint64_t i = 1; i <= g_cMaxIterations; i++)
     {
-        if ((i & 0xffff) == 0)
+        if ((i & 0xffff) == 0 && idxThread == 0)
         {
-            RTTestIPrintf(RTTESTLVL_ALWAYS, ".");
+            RTTestPrintf(g_hTest, RTTESTLVL_ALWAYS, ".");
             pPrev = pPrev2 = NULL; /* May be trashed by the above call. */
         }
-        for (unsigned s = 0; s < RT_ELEMENTS(s_aSets); s++)
+        for (unsigned s = 0; s < g_cSets; s++)
         {
             RTUINT128U         BadVal;
-            const MYXMMREGSET *pSet = &s_aSets[s];
+            const MYXMMREGSET *pSet = &paSets[s];
             int r = XmmSavingTestLoadSet(pSet, pPrev, &BadVal);
             if (r-- != 0)
             {
-                RTTestIFailed("i=%llu s=%d r=%d", i, s, r);
-                RTTestIFailureDetails("XMM%-2d  = %08x,%08x,%08x,%08x\n",
-                                      r,
-                                      BadVal.au32[0],
-                                      BadVal.au32[1],
-                                      BadVal.au32[2],
-                                      BadVal.au32[3]);
-                RTTestIFailureDetails("Expected %08x,%08x,%08x,%08x\n",
-                                      pPrev->aRegs[r].au32[0],
-                                      pPrev->aRegs[r].au32[1],
-                                      pPrev->aRegs[r].au32[2],
-                                      pPrev->aRegs[r].au32[3]);
+                RTTestFailed(g_hTest, "%zu: i=%llu s=%d r=%d", idxThread, i, s, r);
+                RTTestFailureDetails(g_hTest, "%zu: XMM%-2d  = %08x,%08x,%08x,%08x\n",
+                                     idxThread,
+                                     r,
+                                     BadVal.au32[0],
+                                     BadVal.au32[1],
+                                     BadVal.au32[2],
+                                     BadVal.au32[3]);
+                RTTestFailureDetails(g_hTest, "%zu: Expected %08x,%08x,%08x,%08x\n",
+                                     idxThread,
+                                     pPrev->aRegs[r].au32[0],
+                                     pPrev->aRegs[r].au32[1],
+                                     pPrev->aRegs[r].au32[2],
+                                     pPrev->aRegs[r].au32[3]);
                 if (pPrev2)
-                    RTTestIFailureDetails("PrevPrev %08x,%08x,%08x,%08x\n",
-                                          pPrev2->aRegs[r].au32[0],
-                                          pPrev2->aRegs[r].au32[1],
-                                          pPrev2->aRegs[r].au32[2],
-                                          pPrev2->aRegs[r].au32[3]);
-                return;
+                    RTTestFailureDetails(g_hTest, "%zu: PrevPrev %08x,%08x,%08x,%08x\n",
+                                         idxThread,
+                                         pPrev2->aRegs[r].au32[0],
+                                         pPrev2->aRegs[r].au32[1],
+                                         pPrev2->aRegs[r].au32[2],
+                                         pPrev2->aRegs[r].au32[3]);
+                RTMemFree(paSets);
+                return VERR_GENERAL_FAILURE;
             }
             pPrev2 = pPrev;
             pPrev = pSet;
         }
     }
-    RTTestISubDone();
+
+    RTMemFree(paSets);
+    return VINF_SUCCESS;
 }
 
 
 int main(int argc, char **argv)
 {
-    RTTEST hTest;
-    int rc = RTTestInitExAndCreate(argc, &argv, 0, "xmmsaving", &hTest);
+    int rc = RTTestInitExAndCreate(argc, &argv, 0, "xmmsaving", &g_hTest);
     if (rc)
         return rc;
 
     static const RTGETOPTDEF s_aOptions[] =
     {
-        { "--iterations",       'i', RTGETOPT_REQ_UINT64 },
+        { "--iterations",       'i', RTGETOPT_REQ_UINT64  },
         { "--infinite",         'I', RTGETOPT_REQ_NOTHING },
+        { "--sets",             's', RTGETOPT_REQ_UINT32  },
+        { "--threads",          't', RTGETOPT_REQ_UINT32  },
     };
+    uint32_t cThreads = 1;
 
     RTGETOPTUNION ValueUnion;
     RTGETOPTSTATE GetState;
@@ -154,8 +173,20 @@ int main(int argc, char **argv)
             case 'I':
                 g_cMaxIterations = UINT64_MAX;
                 break;
+            case 's':
+                if (ValueUnion.u32 < 2 || ValueUnion.u32 > _32K)
+                    return RTMsgSyntax("Number of sets is out of range: %u, valid range [2..%u]", ValueUnion.u32, _32K);
+                g_cSets = ValueUnion.u32;
+                break;
+            case 't':
+                if (ValueUnion.u32 < 1 || ValueUnion.u32 > RTCPUSET_MAX_CPUS)
+                    return RTMsgSyntax("Number of threads is out of range: %u, valid range [1..%u]",
+                                       ValueUnion.u32, RTCPUSET_MAX_CPUS);
+                cThreads = ValueUnion.u32;
+                break;
             case 'h':
-                RTPrintf("usage: %s [--iterations|-i <n>] [--infinite|-I]\n", RTProcShortName());
+                RTPrintf("usage: %s [--iterations|-i <n>] [--infinite|-I] [--sets|-s <n>] [--threads|-t <n>]\n",
+                         RTProcShortName());
                 return RTEXITCODE_SUCCESS;
             case 'V':
                 RTPrintf("%sr%u\n", RTBldCfgVersion(), RTBldCfgRevision());
@@ -165,8 +196,20 @@ int main(int argc, char **argv)
         }
     }
 
-    XmmSavingTest();
+    RTTestISub("xmm saving and restoring");
+    uintptr_t iThread;
+    for (iThread = 1; iThread < cThreads; iThread++)
+    {
+        rc = RTThreadCreateF(&g_ahThreads[iThread], XmmSavingTest, (void *)iThread, 0,
+                             RTTHREADTYPE_DEFAULT, RTTHREADFLAGS_WAITABLE, "xmm%u", iThread);
+        RTTESTI_CHECK_RC_OK_BREAK(rc);
+    }
+    if (iThread > 1)
+        RTTestPrintf(g_hTest, RTTESTLVL_ALWAYS, "Started %zu additional thread%s.\n", iThread - 1, iThread - 1 == 1 ? "" : "s");
+    XmmSavingTest(RTThreadSelf(), NULL);
+    while (iThread-- > 1)
+        RTTESTI_CHECK_RC_OK(RTThreadWait(g_ahThreads[iThread], RT_MS_30SEC, NULL));
 
-    return RTTestSummaryAndDestroy(hTest);
+    return RTTestSummaryAndDestroy(g_hTest);
 }
 
