@@ -1,4 +1,4 @@
-/* $Id: tstClipboardMockHGCM.cpp 113235 2026-03-03 22:53:23Z brent.paulson@oracle.com $ */
+/* $Id: tstClipboardMockHGCM.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -446,7 +446,7 @@ static DECLCALLBACK(int) tstTestReadFromHost_OnClipboardReadCallback(PSHCLCONTEX
 
 typedef struct TSTUSERMOCK
 {
-#if defined(RT_OS_LINUX)
+#if defined(RT_OS_LINUX) || defined(RT_OS_SOLARIS)
     SHCLX11CTX   X11Ctx;
 #endif
     PSHCLCONTEXT pCtx;
@@ -455,7 +455,7 @@ typedef TSTUSERMOCK *PTSTUSERMOCK;
 
 static void tstTestReadFromHost_MockInit(PTSTUSERMOCK pUsrMock, const char *pszName)
 {
-#if defined(RT_OS_LINUX)
+#if defined(RT_OS_LINUX) || defined(RT_OS_SOLARIS)
     SHCLCALLBACKS Callbacks;
     RT_ZERO(Callbacks);
     Callbacks.pfnReportFormats   = tstTestReadFromHost_ReportFormatsCallback;
@@ -475,7 +475,7 @@ static void tstTestReadFromHost_MockInit(PTSTUSERMOCK pUsrMock, const char *pszN
 
 static void tstTestReadFromHost_MockDestroy(PTSTUSERMOCK pUsrMock)
 {
-#if defined(RT_OS_LINUX)
+#if defined(RT_OS_LINUX) || defined(RT_OS_SOLARIS)
     ShClX11ThreadStop(&pUsrMock->X11Ctx);
     ShClX11Destroy(&pUsrMock->X11Ctx);
     RTMemFree(pUsrMock->pCtx);

@@ -1,4 +1,4 @@
-/* $Id: ConsoleVRDPServer.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: ConsoleVRDPServer.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console VRDP helper class.
  */
@@ -3391,7 +3391,7 @@ DECLCALLBACK(int) ConsoleVRDPServer::ClipboardServiceExtension(void *pvExtension
                                              pParms->u.ReadWriteData.uFormat,
                                              pParms->u.ReadWriteData.pvData,
                                              pParms->u.ReadWriteData.cbData,
-                                             &pParms->u.ReadWriteData.cbData);
+                                             &pParms->u.ReadWriteData.cbActual);
             }
         } break;
 

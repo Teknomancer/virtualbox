@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114040 2026-04-28 05:22:35Z valery.portnyagin@oracle.com $
+# $Id: Makefile.kmk 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1144,6 +1144,12 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   VBoxC_LIBS += $(PATH_STAGE_LIB)/VBoxDnDHostR3Lib$(VBOX_SUFF_LIB)
  endif
 
+ ifdef VBOX_WITH_SHARED_CLIPBOARD
+  if1of ($(KBUILD_TARGET), linux solaris freebsd)
+   VBoxC_LIBS += Xt X11
+  endif
+ endif
+
  VBoxC_INTERMEDIATES = \
  	$(VBOX_MAIN_PREREQS) \
  	$(VBOX_XML_SCHEMADEFS_H) \
@@ -1291,8 +1297,45 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   	src-client/GuestSessionImpl.cpp
  endif
  ifdef VBOX_WITH_SHARED_CLIPBOARD
+  VBoxC_DEFS += VBOX_WITH_SHARED_CLIPBOARD_HOST
   VBoxC_SOURCES += \
-  	src-client/GuestShClPrivate.cpp
+  	src-client/GuestShClPrivate.cpp \
+  	src-client/VBoxSharedClipboardSvc-utils.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp
+  if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
+   VBoxC_INCS += $(PATH_ROOT)/src/VBox/HostServices/SharedClipboard
+  endif
+  if1of ($(KBUILD_TARGET), linux solaris freebsd)
+   ifndef VBOX_HEADLESS
+    VBoxC_SOURCES += \
+    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
+    	src-client/VBoxSharedClipboardSvc-x11.cpp
+   else
+    VBoxC_SOURCES += \
+    	src-client/VBoxSharedClipboardSvc-x11-stubs.cpp
+   endif
+  endif
+  VBoxC_SOURCES.win += \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-win.cpp \
+  	src-client/VBoxSharedClipboardSvc-win.cpp
+  VBoxC_SOURCES.darwin += \
+  	src-client/VBoxSharedClipboardSvc-darwin.cpp \
+  	src-client/darwin-pasteboard.cpp
+  ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+   ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
+    VBoxC_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
+    VBoxC_SOURCES += \
+    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-http.cpp
+   endif
+   VBoxC_SOURCES += \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardPath.cpp \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp
+   VBoxC_SOURCES.win += \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardDataObjectImpl-win.cpp \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardEnumFormatEtcImpl-win.cpp \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardStreamImpl-win.cpp
+  endif
  endif
  ifdef VBOX_WITH_DRAG_AND_DROP
   VBoxC_SOURCES += \

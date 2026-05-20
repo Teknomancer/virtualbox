@@ -1,4 +1,4 @@
-/* $Id: clipboard-win.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-win.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Windows-specific functions for clipboard handling.
  */
@@ -419,12 +419,21 @@ SHCLFORMAT ShClWinClipboardFormatToVBox(UINT uFormat)
                 {
                     LogFlowFunc(("uFormat=%u -> szFormatName=%s\n", uFormat, szFormatName));
 
+#ifdef UNICODE
+                    if (RTUtf16Cmp(szFormatName, RT_LSTR(SHCL_WIN_REGFMT_HTML)) == 0)
+#else
                     if (RTStrCmp(szFormatName, SHCL_WIN_REGFMT_HTML) == 0)
+#endif
                         vboxFormat = VBOX_SHCL_FMT_HTML;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
                     /* These types invoke our IDataObject / IStream implementations. */
+# ifdef UNICODE
+                    else if (   (RTUtf16Cmp(szFormatName, CFSTR_FILEDESCRIPTORA) == 0)
+                             || (RTUtf16Cmp(szFormatName, CFSTR_FILECONTENTS)    == 0))
+# else
                     else if (   (RTStrCmp(szFormatName, CFSTR_FILEDESCRIPTORA) == 0)
                              || (RTStrCmp(szFormatName, CFSTR_FILECONTENTS)    == 0))
+# endif
                         vboxFormat = VBOX_SHCL_FMT_URI_LIST;
                     /** @todo Do we need to handle CFSTR_FILEDESCRIPTORW here as well? */
 #endif
@@ -871,7 +880,7 @@ static int shClWinAnnounceFormats(PSHCLWINCTX pWinCtx, SHCLFORMATS fFormats)
          *  Set to 0 if unused / needs special handling. */
         UINT            uWinFormat;
         /** Own registered format. Set to NULL if not used / applicable. */
-        const char     *pszRegFormat;
+        const TCHAR    *pszRegFormat;
         const char     *pszLog;
     } s_aFormats[] =
     {
@@ -882,7 +891,11 @@ static int shClWinAnnounceFormats(PSHCLWINCTX pWinCtx, SHCLFORMATS fFormats)
         { VBOX_SHCL_FMT_URI_LIST,       0,              NULL,                 "SHCL_URI_LIST" },
 #endif
         { VBOX_SHCL_FMT_BITMAP,         CF_DIB,         NULL,                 "CF_DIB" },
+#ifdef UNICODE
+        { VBOX_SHCL_FMT_HTML,           0,              RT_LSTR(SHCL_WIN_REGFMT_HTML), "SHCL_WIN_REGFMT_HTML" }
+#else
         { VBOX_SHCL_FMT_HTML,           0,              SHCL_WIN_REGFMT_HTML, "SHCL_WIN_REGFMT_HTML" }
+#endif
     };
 
     unsigned    cSuccessfullySet = 0;

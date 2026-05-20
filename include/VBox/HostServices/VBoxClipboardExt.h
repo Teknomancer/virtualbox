@@ -41,6 +41,7 @@
 
 #include <VBox/types.h>
 #include <VBox/GuestHost/SharedClipboard.h>
+#include <VBox/HostServices/VBoxSharedClipboardSvc.h>
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 # include <VBox/GuestHost/SharedClipboard-transfers.h>
 #endif
@@ -57,6 +58,20 @@
 #define VBOX_CLIPBOARD_EXT_FN_DATA_WRITE                 (4)
 /** The clipboard service announces an error to the extension. */
 #define VBOX_CLIPBOARD_EXT_FN_ERROR                      (5)
+/** The clipboard service initializes the backend. */
+#define VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT               (6)
+/** The clipboard service tears down the backend. */
+#define VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY            (7)
+/** The clipboard service connects the backend. */
+#define VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT            (8)
+/** The clipboard service disconnects the backend. */
+#define VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT         (9)
+/** The clipboard service syncs with the backend. */
+#define VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC               (10)
+/** The clipboard service requests clipboard data from the extension. */
+#define VBOX_CLIPBOARD_EXT_FN_DATA_READ_VRDE             (11)
+/** The clipboard service initiates the transfer of a file from the guest. */
+#define VBOX_CLIPBOARD_EXT_FN_FILE_TRANSFER              (12)
 
 typedef DECLCALLBACKTYPE(int, FNSHCLEXTCALLBACK,(uint32_t u32Function, uint32_t u32Format, void *pvData, uint32_t cbData));
 typedef FNSHCLEXTCALLBACK *PFNSHCLEXTCALLBACK;
@@ -72,6 +87,7 @@ typedef struct _SHCLEXTPARMS
         struct
         {
             SHCLFORMATS             uFormats;
+            PSHCLCLIENT             pClient;
         } ReportFormats;
         /** Reads / writes clipboard data. */
         struct
@@ -79,6 +95,12 @@ typedef struct _SHCLEXTPARMS
             SHCLFORMAT              uFormat;
             void                   *pvData;
             uint32_t                cbData;
+            uint32_t                cbActual;
+            PSHCLCLIENT             pClient;
+            PSHCLBACKEND            pBackend;
+            VBOXHGCMSVCFNTABLE     *pTable;
+            PSHCLCLIENTCMDCTX       pCmdCtx;
+            bool                    fHeadless;
         } ReadWriteData;
         /** Sets a read / write callback. */
         struct
@@ -96,6 +118,14 @@ typedef struct _SHCLEXTPARMS
             /** IPRT-style error code. */
             int                     rc;
         } Error;
+        /** Sends / receives clipboard files */
+        struct
+        {
+            PSHCLCLIENT             pClient;
+            PSHCLTRANSFER           pTransfer;
+            SHCLSOURCE              enmShClSource;
+            PSHCLREPLY              pReply;
+        } FileTransferData;
     } u;
 } SHCLEXTPARMS;
 /** Pointer to Shared Clipboard service extension parameters. */

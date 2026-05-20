@@ -1,4 +1,4 @@
-/* $Id: darwin-pasteboard.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: darwin-pasteboard.h 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host implementation.
  */
@@ -25,8 +25,8 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-#ifndef VBOX_INCLUDED_SRC_SharedClipboard_darwin_pasteboard_h
-#define VBOX_INCLUDED_SRC_SharedClipboard_darwin_pasteboard_h
+#ifndef MAIN_INCLUDED_darwin_pasteboard_h
+#define MAIN_INCLUDED_darwin_pasteboard_h
 #ifndef RT_WITHOUT_PRAGMA_ONCE
 # pragma once
 #endif
@@ -45,5 +45,5 @@ DECLHIDDEN(int) takePasteboardOwnership(PasteboardRef pPasteboard, uint64_t idOw
                                         const char *pszOwnershipValue, void **phStrOwnershipFlavor);
 DECLHIDDEN(int) writeToPasteboard(PasteboardRef hPasteboard, uint64_t idOwnership, void const *pv, uint32_t cb, uint32_t fFormat);
 
-#endif /* !VBOX_INCLUDED_SRC_SharedClipboard_darwin_pasteboard_h */
+#endif /* !MAIN_INCLUDED_darwin_pasteboard_h */
 

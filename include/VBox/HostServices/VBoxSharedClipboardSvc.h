@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.h 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - header file for shared clipboard data transfer
  * interfaces and platform-dependent backend functionality.
@@ -52,11 +52,9 @@
 #include <VBox/hgcmsvc.h>
 #include <VBox/log.h>
 
-#include <VBox/HostServices/Service.h>
 #include <VBox/GuestHost/SharedClipboard.h>
 #include <VBox/GuestHost/SharedClipboard-transfers.h>
 
-using namespace HGCM;
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 struct SHCLCLIENTSTATE;
@@ -86,6 +84,9 @@ typedef struct SHCLCLIENTTRANSFERSTATE
 {
     /** Directory of the transfer to start. */
     SHCLTRANSFERDIR enmTransferDir;
+
+    /** Shared Clipboard (file) transfer mode. */
+    uint32_t        uTransferMode;
 } SHCLCLIENTTRANSFERSTATE, *PSHCLCLIENTTRANSFERSTATE;
 
 /**
@@ -180,6 +181,8 @@ typedef struct SHCLCLIENTSTATE
     SHCLCLIENTPODSTATE      POD;
     /** The client's transfers state. */
     SHCLCLIENTTRANSFERSTATE Transfers;
+    /** The current Shared Clipboard operation mode. */
+    uint32_t                uMode;
 } SHCLCLIENTSTATE, *PSHCLCLIENTSTATE;
 
 typedef struct _SHCLCLIENTCMDCTX
@@ -310,6 +313,12 @@ void ShClSvcClientLock(PSHCLCLIENT pClient);
 void ShClSvcClientUnlock(PSHCLCLIENT pClient);
 
 int ShClSvcClientWakeup(PSHCLCLIENT pClient);
+int shClSvcClientMsgAddAndWakeupClient(PSHCLCLIENT pClient, PSHCLCLIENTMSG pMsg);
+
+void shClSvcMsgSetPeekReturn(PSHCLCLIENTMSG pMsg, PVBOXHGCMSVCPARM paDstParms, uint32_t cDstParms);
+int shClSvcMsgSetOldWaitReturn(PSHCLCLIENTMSG pMsg, PVBOXHGCMSVCPARM paDstParms, uint32_t cDstParms);
+
+SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFORMATS fFormats);
 /** @} */
 
 /** @name Service functions, accessible by the backends.
@@ -339,6 +348,9 @@ typedef struct SHCLBACKEND
     /** Callback table to use.
      *  Some callbacks might be optional and therefore NULL -- see the table for more details. */
     SHCLCALLBACKS Callbacks;
+
+    /** Pointer to the helper functions in the VBOXHGCMSVCFNTABLE for use by the backend. */
+    PVBOXHGCMSVCHELPERS pHelpers;
 } SHCLBACKEND;
 /** Pointer to a Shared Clipboard backend. */
 typedef SHCLBACKEND *PSHCLBACKEND;
@@ -397,6 +409,17 @@ int ShClBackendDisconnect(PSHCLBACKEND pBackend, PSHCLCLIENT pClient);
  *                              VBOX_SHCL_FMT_XXX.
  */
 int ShClBackendReportFormats(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFORMATS fFormats);
+
+/**
+ * Called when the host reports available clipboard formats to the guest.
+ *
+ * @returns VBox status code.
+ * @param   pBackend            Shared Clipboard backend to announce formats to.
+ * @param   pClient             Shared Clipboard client context.
+ * @param   fFormats            The announced formats from the host,
+ *                              VBOX_SHCL_FMT_XXX.
+ */
+int ShClBackendReportFormatsToGuest(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFORMATS fFormats);
 
 /**
  * Called when the guest wants to read host clipboard data.
@@ -486,6 +509,11 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHListEntryRead(PSHCLTXPROVIDERCTX pCtx, S
 DECLCALLBACK(int) ShClSvcTransferIfaceGHObjOpen(PSHCLTXPROVIDERCTX pCtx, PSHCLOBJOPENCREATEPARMS pCreateParms, PSHCLOBJHANDLE phObj);
 DECLCALLBACK(int) ShClSvcTransferIfaceGHObjClose(PSHCLTXPROVIDERCTX pCtx, SHCLOBJHANDLE hObj);
 DECLCALLBACK(int) ShClSvcTransferIfaceGHObjRead(PSHCLTXPROVIDERCTX pCtx, SHCLOBJHANDLE hObj, void *pvData, uint32_t cbData, uint32_t fFlags, uint32_t *pcbRead);
+int ShClSvcTransferGHRootListReadEntry(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, uint64_t idxEntry,
+                                       PSHCLLISTENTRY *ppListEntry);
+int ShClSvcTransferGHRootListReadHdr(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, PSHCLLISTHDR pHdr);
+int shClSvcTransferSendStatusAsync(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, SHCLTRANSFERSTATUS enmSts,
+                                   int rcTransfer, PSHCLEVENT *ppEvent);
 /** @} */
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 

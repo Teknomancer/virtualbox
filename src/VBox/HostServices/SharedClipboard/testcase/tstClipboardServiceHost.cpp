@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -25,6 +25,11 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+#define LOG_ENABLED
+#define LOG_GROUP LOG_GROUP_SHARED_CLIPBOARD
+#include <VBox/log.h>
+
+#include <VBox/HostServices/VBoxClipboardExt.h>
 #include <VBox/HostServices/VBoxClipboardSvc.h>
 #include <VBox/HostServices/VBoxSharedClipboardSvc.h>
 
@@ -33,6 +38,23 @@
 #include <iprt/test.h>
 
 extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad (VBOXHGCMSVCFNTABLE *ptable);
+/**
+ * The following no-op functions which correspond to their Shared Clipboard
+ * backend namesakes (ShClBackend*()) are used by the dispatcher function
+ * below (tstHgcmMockSvcDispatcher()) for intercepting the unused backend
+ * calls.  The only backend routine needed is ShClBackendInit() which is
+ * triggered at connect time which is why each sub-section of tests like
+ * testSetMode() has a call to svcConnect() to setup the clipboard even
+ * though the other backend calls like ShClBackendConnect() are not needed.
+ */
+static int tstShClBackendConnect(PSHCLBACKEND, PSHCLCLIENT, bool) { return VINF_SUCCESS; }
+static int tstShClBackendDisconnect(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
+static void tstShClBackendDestroy(PSHCLBACKEND) { return; }
+static int tstShClBackendSync(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
+static int tstShClBackendReportFormats(PSHCLBACKEND, PSHCLCLIENT, SHCLFORMATS) { AssertFailed(); return VINF_SUCCESS; }
+static int tstShClBackendReportFormatsToGuest(PSHCLBACKEND, PSHCLCLIENT, uint32_t) { AssertFailed(); return VINF_SUCCESS; }
+static int tstShClBackendReadData(PSHCLBACKEND, PSHCLCLIENT, PSHCLCLIENTCMDCTX, SHCLFORMAT, void *, uint32_t, unsigned int *) { AssertFailed(); return VERR_WRONG_ORDER; }
+static int tstShClBackendWriteData(PSHCLBACKEND, PSHCLCLIENT, PSHCLCLIENTCMDCTX, SHCLFORMAT, void *, uint32_t) { AssertFailed(); return VINF_SUCCESS; }
 
 static SHCLCLIENT g_Client;
 static VBOXHGCMSVCHELPERS g_Helpers = { NULL };
@@ -51,13 +73,136 @@ static DECLCALLBACK(int) callComplete(VBOXHGCMCALLHANDLE callHandle, int32_t rc)
     return VINF_SUCCESS;
 }
 
+/**
+ * A copy of the GuestShCl::hgcmDispatcher() dispatcher routine which
+ * handles callbacks from the Shared Clipboard host service.  For the
+ * variety of tests here we only need ShClBackendInit() to get called to
+ * setup the shared clipboard for the tests and the remainder of the
+ * backend routines are routed to no-op equivalent routines.
+ */
+DECLCALLBACK(int) tstHgcmMockSvcDispatcher(void *pvExtension, uint32_t u32Function,
+                                           void *pvParms, uint32_t cbParms)
+{
+    NOREF(pvExtension);
+    int rc = VINF_SUCCESS;
+    PSHCLEXTPARMS pParms = (PSHCLEXTPARMS)pvParms; /* pParms might be NULL, depending on the message. */
+
+    LogFlowFunc(("u32Function=%RU32, pvParms=%p, cbParms=%RU32\n", u32Function, pvParms, cbParms));
+
+    switch (u32Function)
+    {
+        case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST: // via VBOX_SHCL_GUEST_FN_REPORT_FORMATS in the guest
+        {
+            PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
+            SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
+
+            rc = tstShClBackendReportFormats(pClient->pBackend, pClient, fFormats);
+            if (RT_FAILURE(rc))
+                LogRel(("Shared Clipboard: Reporting guest clipboard formats to the host failed with %Rrc\n", rc));
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST:
+        {
+            PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
+            SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
+
+            rc = tstShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_DATA_READ: // via VBOX_SHCL_GUEST_FN_DATA_READ in the guest
+        {
+            PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+            SHCLCLIENTCMDCTX cmdCtx;
+            void *pvData = pParms->u.ReadWriteData.pvData;
+            uint32_t cbData = pParms->u.ReadWriteData.cbData;
+            SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+            rc = tstShClBackendReadData(pClient->pBackend, pClient, &cmdCtx, fFormats, pvData, cbData,
+                &pParms->u.ReadWriteData.cbActual);
+            if (RT_SUCCESS(rc))
+                LogRel2(("Shared Clipboard: Read host clipboard data (max %RU32 bytes), got %RU32 bytes\n", cbData,
+                    pParms->u.ReadWriteData.cbActual));
+            else
+                LogRel(("Shared Clipboard: Reading host clipboard data failed with %Rrc\n", rc));
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_DATA_WRITE: // via VBOX_SHCL_GUEST_FN_DATA_WRITE in the guest
+        {
+            PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+            PSHCLCLIENTCMDCTX pCmdCtx = pParms->u.ReadWriteData.pCmdCtx;
+            void *pvData = pParms->u.ReadWriteData.pvData;
+            uint32_t cbData = pParms->u.ReadWriteData.cbData;
+            SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+            rc = tstShClBackendWriteData(pClient->pBackend, pClient, pCmdCtx, fFormats, pvData, cbData);
+            if (RT_FAILURE(rc))
+                LogRel(("Shared Clipboard: Writing guest clipboard data to the host failed with %Rrc\n", rc));
+            /* Complete any pending events. */
+            int rc2 = ShClSvcGuestDataSignal(pClient, pCmdCtx, fFormats, pvData, cbData);
+            if (RT_FAILURE(rc2))
+                LogRel(("Shared Clipboard: Signalling host about guest clipboard data failed with %Rrc\n", rc2));
+            AssertRC(rc2);
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT:
+        {
+            PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+            VBOXHGCMSVCFNTABLE *pTable = pParms->u.ReadWriteData.pTable;
+            rc = ShClBackendInit(pBackend, pTable);
+            break;
+        }
+
+        // via VbglR3HGCMDisconnect()->...HGCMService::DisconnectClient()->...HGCMService::instanceDestroy()->...svcUnload()
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY:
+        {
+            PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+            tstShClBackendDestroy(pBackend);
+            rc = VINF_SUCCESS;
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT: // via VbglR3ClipboardConnect()->VbglR3HGCMConnect() in the guest
+        {
+            PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+            PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+            bool fHeadless = pParms->u.ReadWriteData.fHeadless;
+            rc = tstShClBackendConnect(pBackend, pClient, fHeadless);
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT:  // via VbglR3ClipboardDisconnect()->VbglR3HGCMDisconnect() in the guest
+        {
+            PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+            rc = tstShClBackendDisconnect(pClient->pBackend, pClient);
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC:
+        {
+            PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+            PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+            rc = tstShClBackendSync(pBackend, pClient);
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    return rc;
+}
+
 static int setupTable(VBOXHGCMSVCFNTABLE *pTable)
 {
     pTable->cbSize = sizeof(*pTable);
     pTable->u32Version = VBOX_HGCM_SVC_VERSION;
     g_Helpers.pfnCallComplete = callComplete;
     pTable->pHelpers = &g_Helpers;
-    return VBoxHGCMSvcLoad(pTable);
+    int rc = VBoxHGCMSvcLoad(pTable);
+    RTTESTI_CHECK_MSG_RET(RT_SUCCESS(rc), ("rc=%Rrc\n", rc), rc);
+    return pTable->pfnRegisterExtension(pTable->pvService, tstHgcmMockSvcDispatcher, NULL);
 }
 
 static void testSetMode(void)
@@ -70,6 +215,9 @@ static void testSetMode(void)
     RTTestISub("Testing VBOX_SHCL_HOST_FN_SET_MODE");
     rc = setupTable(&table);
     RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    RT_ZERO(g_Client);
+    table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
 
     /* Reset global variable which doesn't reset itself. */
     HGCMSvcSetU32(&parms[0], VBOX_SHCL_MODE_OFF);
@@ -114,6 +262,9 @@ static void testSetTransferMode(void)
     RTTestISub("Testing VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE");
     int rc = setupTable(&table);
     RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    RT_ZERO(g_Client);
+    table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
 
     /* Invalid parameter. */
     HGCMSvcSetU64(&parms[0], 99);
@@ -252,6 +403,10 @@ static void testSetHeadless(void)
     RTTestISub("Testing HOST_FN_SET_HEADLESS");
     rc = setupTable(&table);
     RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    RT_ZERO(g_Client);
+    table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
+
     /* Reset global variable which doesn't reset itself. */
     HGCMSvcSetU32(&parms[0], false);
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_HEADLESS,
@@ -323,14 +478,6 @@ int main(int argc, char *argv[])
     return RTTestSummaryAndDestroy(hTest);
 }
 
-int ShClBackendInit(PSHCLBACKEND, VBOXHGCMSVCFNTABLE *) { return VINF_SUCCESS; }
-void ShClBackendDestroy(PSHCLBACKEND) { }
-int ShClBackendDisconnect(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
-int ShClBackendConnect(PSHCLBACKEND, PSHCLCLIENT, bool) { return VINF_SUCCESS; }
-int ShClBackendReportFormats(PSHCLBACKEND, PSHCLCLIENT, SHCLFORMATS) { AssertFailed(); return VINF_SUCCESS; }
-int ShClBackendReadData(PSHCLBACKEND, PSHCLCLIENT, PSHCLCLIENTCMDCTX, SHCLFORMAT, void *, uint32_t, unsigned int *) { AssertFailed(); return VERR_WRONG_ORDER; }
-int ShClBackendWriteData(PSHCLBACKEND, PSHCLCLIENT, PSHCLCLIENTCMDCTX, SHCLFORMAT, void *, uint32_t) { AssertFailed(); return VINF_SUCCESS; }
-int ShClBackendSync(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 int ShClBackendTransferHandleStatusReply(PSHCLBACKEND, PSHCLCLIENT, PSHCLTRANSFER, SHCLSOURCE, SHCLTRANSFERSTATUS, int) { return VINF_SUCCESS; }

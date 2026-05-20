@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-x11-stubs.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $*/
+/* $Id: VBoxSharedClipboardSvc-x11-stubs.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $*/
 /** @file
  * Shared Clipboard Service - Linux host, a stub version with no functionality for use on headless hosts.
  */
@@ -94,6 +94,15 @@ int ShClBackendDisconnect(PSHCLBACKEND pBackend, PSHCLCLIENT pClient)
  * Called by the HGCM clipboard subsystem.
  */
 int ShClBackendReportFormats(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFORMATS fFormats)
+{
+    RT_NOREF(pBackend, pClient, fFormats);
+    return VINF_SUCCESS;
+}
+
+/*
+ * The host reports available clipboard formats to the guest.
+ */
+int ShClBackendReportFormatsToGuest(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFORMATS fFormats)
 {
     RT_NOREF(pBackend, pClient, fFormats);
     return VINF_SUCCESS;

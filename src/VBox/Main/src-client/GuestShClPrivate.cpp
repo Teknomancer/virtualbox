@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -40,6 +40,8 @@
 # include <iprt/cpp/utils.h>
 
 # include <VMMDev.h>
+# include <VBox/VMMDevCoreTypes.h>
+
 
 # include <VBox/GuestHost/SharedClipboard.h>
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
@@ -47,6 +49,7 @@
 # endif
 # include <VBox/HostServices/VBoxClipboardSvc.h>
 # include <VBox/HostServices/VBoxClipboardExt.h>
+# include <VBox/GuestHost/clipboard-helper.h>
 # include <VBox/version.h>
 
 
@@ -262,10 +265,9 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
     GuestShCl *pThis = reinterpret_cast<GuestShCl*>(pvExtension);
     AssertPtrReturn(pThis, VERR_INVALID_POINTER);
 
-    PSHCLEXTPARMS pParms = (PSHCLEXTPARMS)pvParms;
-    /* pParms might be NULL, depending on the message. */
-
-    int vrc;
+    PSHCLEXTPARMS pParms = (PSHCLEXTPARMS)pvParms; /* pParms might be NULL, depending on the message. */
+    int vrc = VERR_NOT_SUPPORTED;
+    PSHCLSVCEXT const pSvcExtVRDP = &pThis->m_SvcExtVRDP; /* Currently we have one extension only. */
 
     switch (u32Function)
     {
@@ -274,24 +276,213 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
             vrc = VINF_SUCCESS;
             break;
 
+        case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST: // via VBOX_SHCL_GUEST_FN_REPORT_FORMATS in the guest
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
+                SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
+
+                vrc = ShClBackendReportFormats(pClient->pBackend, pClient, fFormats);
+                if (RT_FAILURE(vrc))
+                    LogRel(("Shared Clipboard: Reporting guest clipboard formats to the host failed with %Rrc\n", vrc));
+            }
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST: // via VRDE_CLIPBOARD_FUNCTION_FORMAT_ANNOUNCE in the VRDE server
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
+                SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
+
+                vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+            }
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_DATA_READ: // via VBOX_SHCL_GUEST_FN_DATA_READ in the guest
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+                SHCLCLIENTCMDCTX cmdCtx;
+                void *pvData = pParms->u.ReadWriteData.pvData;
+                uint32_t cbData = pParms->u.ReadWriteData.cbData;
+                SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+                vrc = ShClBackendReadData(pClient->pBackend, pClient, &cmdCtx, fFormats, pvData, cbData,
+                    &pParms->u.ReadWriteData.cbActual);
+                if (RT_SUCCESS(vrc))
+                    LogRel2(("Shared Clipboard: Read host clipboard data (max %RU32 bytes), got %RU32 bytes\n", cbData,
+                        pParms->u.ReadWriteData.cbActual));
+                else
+                    LogRel(("Shared Clipboard: Reading host clipboard data failed with %Rrc\n", vrc));
+            }
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_DATA_READ_VRDE: // via VBOX_SHCL_GUEST_FN_DATA_READ in the guest via the VRDE server
+        {
+            PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+            SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+            PSHCLEVENT pEvent;
+            void *pvData = pParms->u.ReadWriteData.pvData;
+            uint32_t cbData = pParms->u.ReadWriteData.cbData;
+
+            vrc = ShClSvcReadDataFromGuestAsync(pClient, fFormats, &pEvent);
+            if (RT_SUCCESS(vrc))
+            {
+                PSHCLEVENTPAYLOAD pPayload;
+                vrc = ShClEventWait(pEvent, SHCL_TIMEOUT_DEFAULT_MS, &pPayload);
+                if (RT_SUCCESS(vrc))
+                {
+                    if (pPayload)
+                    {
+                        memcpy(pvData, pPayload->pvData, RT_MIN(cbData, pPayload->cbData));
+                        ShClPayloadFree(pPayload);
+                        pPayload = NULL;
+                    }
+                    else
+                        pvData = NULL;
+                }
+            }
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_DATA_WRITE: // via VBOX_SHCL_GUEST_FN_DATA_WRITE in the guest
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+                PSHCLCLIENTCMDCTX pCmdCtx = pParms->u.ReadWriteData.pCmdCtx;
+                void *pvData = pParms->u.ReadWriteData.pvData;
+                uint32_t cbData = pParms->u.ReadWriteData.cbData;
+                SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+                vrc = ShClBackendWriteData(pClient->pBackend, pClient, pCmdCtx, fFormats, pvData, cbData);
+                if (RT_FAILURE(vrc))
+                    LogRel(("Shared Clipboard: Writing guest clipboard data to the host failed with %Rrc\n", vrc));
+                /* Complete any pending events. */
+                int vrc2 = ShClSvcGuestDataSignal(pClient, pCmdCtx, fFormats, pvData, cbData);
+                if (RT_FAILURE(vrc2))
+                    LogRel(("Shared Clipboard: Signalling host about guest clipboard data failed with %Rrc\n", vrc2));
+                AssertRC(vrc2);
+            }
+            break;
+        }
+
+        // called via VbglR3ClipboardConnect()->VbglR3HGCMConnect() in the guest and then via
+        // svcConnect() in the Shared Clipboard HGCM service to set things up before calling
+        // VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT.
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT:
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+                VBOXHGCMSVCFNTABLE *pTable = pParms->u.ReadWriteData.pTable;
+                vrc = ShClBackendInit(pBackend, pTable);
+            }
+            break;
+        }
+
+        // via VbglR3HGCMDisconnect()->...HGCMService::DisconnectClient()->...HGCMService::instanceDestroy()->...svcUnload()
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY:
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+                ShClBackendDestroy(pBackend);
+                vrc = VINF_SUCCESS;
+            }
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT: // via VbglR3ClipboardConnect()->VbglR3HGCMConnect() in the guest
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+                PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+                bool fHeadless = pParms->u.ReadWriteData.fHeadless;
+                vrc = ShClBackendConnect(pBackend, pClient, fHeadless);
+            }
+            break;
+        }
+
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT:  // via VbglR3ClipboardDisconnect()->VbglR3HGCMDisconnect() in the guest
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+                vrc = ShClBackendDisconnect(pClient->pBackend, pClient);
+            }
+            break;
+        }
+
+        // called via VbglR3ClipboardConnect()->VbglR3HGCMConnect() in the guest and then via
+        // svcConnect() in the Shared Clipboard HGCM service after calling
+        // VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT.
+        case VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC:
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
+                PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+                vrc = ShClBackendSync(pBackend, pClient);
+            }
+            break;
+        }
+
         case VBOX_CLIPBOARD_EXT_FN_ERROR:
         {
             vrc = pThis->reportError(pParms->u.Error.pszId, pParms->u.Error.rc, pParms->u.Error.pszMsg);
             break;
         }
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        case VBOX_CLIPBOARD_EXT_FN_FILE_TRANSFER:
+        {
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
+            if (vrc == VERR_NOT_SUPPORTED)
+            {
+                PSHCLCLIENT pClient = pParms->u.FileTransferData.pClient;
+                PSHCLTRANSFER pTransfer = pParms->u.FileTransferData.pTransfer;
+                SHCLSOURCE enmShClSource = pParms->u.FileTransferData.enmShClSource;
+                PSHCLREPLY pReply = pParms->u.FileTransferData.pReply;
+                vrc = ShClBackendTransferHandleStatusReply(pClient->pBackend, pClient, pTransfer, enmShClSource,
+                                                           pReply->u.TransferStatus.uStatus, pReply->rc);
+            }
+            break;
+        }
+#endif
+
         default:
-            vrc = VERR_NOT_SUPPORTED;
+            if (pSvcExtVRDP->pfnExt)
+                vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
             break;
     }
-
-    PSHCLSVCEXT const pExt = &pThis->m_SvcExtVRDP; /* Currently we have one extension only. */
-
-    if (pExt->pfnExt) /* Overwrite rc if we have an extension present. */
-        vrc = pExt->pfnExt(pExt->pvExt, u32Function, pvParms, cbParms);
 
     LogFlowFuncLeaveRC(vrc);
     return vrc; /* Goes back to host service. */
 }
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
 
+#endif /* VBOX_WITH_SHARED_CLIPBOARD */

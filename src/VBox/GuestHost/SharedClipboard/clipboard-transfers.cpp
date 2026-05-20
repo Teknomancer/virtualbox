@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -39,6 +39,9 @@
 
 #include <VBox/err.h>
 #include <VBox/HostServices/VBoxClipboardSvc.h>
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
+#include <VBox/HostServices/VBoxSharedClipboardSvc.h>
+#endif
 #include <VBox/GuestHost/clipboard-helper.h>
 #include <VBox/GuestHost/SharedClipboard-transfers.h>
 
@@ -1203,63 +1206,7 @@ int ShClTransferDestroy(PSHCLTRANSFER pTransfer)
     return VINF_SUCCESS;
 }
 
-/**
- * Initializes a clipboard transfer.
- *
- * @returns VBox status code.
- * @param   pTransfer           Transfer to initialize.
- */
-int ShClTransferInit(PSHCLTRANSFER pTransfer)
-{
-    shClTransferLock(pTransfer);
 
-    AssertMsgReturnStmt(pTransfer->State.enmStatus < SHCLTRANSFERSTATUS_INITIALIZED,
-                        ("Wrong status (currently is %s)\n", ShClTransferStatusToStr(pTransfer->State.enmStatus)),
-                        shClTransferUnlock(pTransfer), VERR_WRONG_ORDER);
-
-    pTransfer->cRefs = 0;
-
-    LogFlowFunc(("uID=%RU32, enmDir=%RU32, enmSource=%RU32\n",
-                 pTransfer->State.uID, pTransfer->State.enmDir, pTransfer->State.enmSource));
-
-    pTransfer->cListHandles    = 0;
-    pTransfer->uListHandleNext = 1;
-
-    pTransfer->cObjHandles     = 0;
-    pTransfer->uObjHandleNext  = 1;
-
-    pTransfer->Thread.fStarted   = false;
-    pTransfer->Thread.fStop      = false;
-    pTransfer->Thread.fCancelled = false;
-
-    int rc = VINF_SUCCESS;
-
-    if (pTransfer->Callbacks.pfnOnInitialize)
-        rc = pTransfer->Callbacks.pfnOnInitialize(&pTransfer->CallbackCtx);
-    if (RT_SUCCESS(rc))
-    {
-        /* Sanity: Make sure that the transfer we're gonna report as INITIALIZED
-         *         actually has some root entries set, as the other side can query for those at any time then. */
-        if (pTransfer->State.enmDir == SHCLTRANSFERDIR_TO_REMOTE)
-            AssertMsgStmt(ShClTransferRootsCount(pTransfer), ("Transfer has no root entries set (yet)\n"), rc = VERR_WRONG_ORDER);
-
-        if (RT_SUCCESS(rc))
-            rc = shClTransferSetStatus(pTransfer, SHCLTRANSFERSTATUS_INITIALIZED);
-    }
-
-    shClTransferUnlock(pTransfer);
-
-    /* Note: Callback will be called after we unlocked the transfer, as the caller might access the transfer right away. */
-    if (   RT_SUCCESS(rc)
-        && pTransfer->Callbacks.pfnOnInitialized)
-        pTransfer->Callbacks.pfnOnInitialized(&pTransfer->CallbackCtx);
-
-    if (RT_FAILURE(rc))
-        LogRel(("Shared Clipboard: Initialziation of transfer failed with %Rrc\n", rc));
-
-    LogFlowFuncLeaveRC(rc);
-    return rc;
-}
 
 /**
  * Returns whether a transfer is in a running state or not.
@@ -3621,3 +3568,1073 @@ int ShClTransferConvertFileCreateFlags(uint32_t fShClFlags, uint64_t *pfOpen)
     return VINF_SUCCESS;
 }
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
+/**
+ * Reads a root list header from the guest, asynchronous version.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client to read from.
+ * @param   pTransfer           Transfer to read root list header for.
+ * @param   ppEvent             Where to return the event to wait for.
+ *                              Must be released by the caller with ShClEventRelease().
+ */
+static int ShClSvcTransferGHRootListReadHdrAsync(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, PSHCLEVENT *ppEvent)
+{
+    LogFlowFuncEnter();
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsgHdr = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_ROOT_LIST_HDR_READ,
+                                                   VBOX_SHCL_CPARMS_ROOT_LIST_HDR_READ_REQ);
+    if (pMsgHdr)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            HGCMSvcSetU64(&pMsgHdr->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID,
+                                                                        ShClTransferGetID(pTransfer), pEvent->idEvent));
+            HGCMSvcSetU32(&pMsgHdr->aParms[1], 0 /* fRoots */);
+
+            ShClSvcClientLock(pClient);
+
+            ShClSvcClientMsgAdd(pClient, pMsgHdr, true /* fAppend */);
+            rc = ShClSvcClientWakeup(pClient);
+
+            ShClSvcClientUnlock(pClient);
+
+            /* Remove event from list if caller did not request event handle or in case
+             * of failure (in this case caller should not release event). */
+            if (   RT_FAILURE(rc)
+                || !ppEvent)
+            {
+                ShClEventRelease(pEvent);
+                pEvent = NULL;
+            }
+            else
+                *ppEvent = pEvent;
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsgHdr);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Reads a root list header from the guest.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client to read from.
+ * @param   pTransfer           Transfer to read root list header for.
+ * @param   pHdr                Where to store the root list header on succeess.
+ */
+int ShClSvcTransferGHRootListReadHdr(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, PSHCLLISTHDR pHdr)
+{
+    PSHCLEVENT pEvent;
+    int rc = ShClSvcTransferGHRootListReadHdrAsync(pClient, pTransfer, &pEvent);
+    if (RT_SUCCESS(rc))
+    {
+        int               rcEvent;
+        PSHCLEVENTPAYLOAD pPayload;
+        rc = ShClEventWaitEx(pEvent, pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+        if (RT_SUCCESS(rc))
+        {
+            Assert(pPayload->cbData == sizeof(SHCLLISTHDR));
+
+            memcpy(pHdr, (PSHCLLISTHDR)pPayload->pvData, sizeof(SHCLLISTHDR));
+
+            LogFlowFunc(("cRoots=%RU32, fFeatures=0x%x\n", pHdr->cEntries, pHdr->fFeatures));
+
+            ShClPayloadFree(pPayload);
+        }
+        else
+            rc = rcEvent;
+
+        ShClEventRelease(pEvent);
+        pEvent = NULL;
+    }
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Reads a root list entry from the guest, asynchronous version.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client to read from.
+ * @param   pTransfer           Transfer to read root list header for.
+ * @param   idxEntry            Index of entry to read.
+ * @param   ppEvent             Where to return the event to wait for.
+ *                              Must be released by the caller with ShClEventRelease().
+ */
+static int ShClSvcTransferGHRootListReadEntryAsync(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, uint64_t idxEntry,
+                                                   PSHCLEVENT *ppEvent)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENTMSG pMsgEntry = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_ROOT_LIST_ENTRY_READ,
+                                                     VBOX_SHCL_CPARMS_ROOT_LIST_ENTRY_READ_REQ);
+    PSHCLEVENT pEvent;
+    int rc = ShClEventSourceGenerateAndRegisterEvent(&pTransfer->Events, &pEvent);
+    if (RT_SUCCESS(rc))
+    {
+        HGCMSvcSetU64(&pMsgEntry->aParms[0],
+                      VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uClientID, ShClTransferGetID(pTransfer), pEvent->idEvent));
+        HGCMSvcSetU32(&pMsgEntry->aParms[1], 0 /* fFeatures */);
+        HGCMSvcSetU64(&pMsgEntry->aParms[2], idxEntry /* uIndex */);
+
+        ShClSvcClientLock(pClient);
+
+        ShClSvcClientMsgAdd(pClient, pMsgEntry, true /* fAppend */);
+        rc = ShClSvcClientWakeup(pClient);
+
+        ShClSvcClientUnlock(pClient);
+
+        /* Remove event from list if caller did not request event handle or in case
+         * of failure (in this case caller should not release event). */
+        if (   RT_FAILURE(rc)
+            || !ppEvent)
+        {
+            ShClEventRelease(pEvent);
+            pEvent = NULL;
+        }
+        else if (ppEvent)
+            *ppEvent = pEvent;
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeave();
+    return rc;
+}
+
+/**
+ * Reads a root list entry from the guest.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client to read from.
+ * @param   pTransfer           Transfer to read root list header for.
+ * @param   idxEntry            Index of entry to read.
+ * @param   ppListEntry         Where to return the allocated root list entry.
+ */
+int ShClSvcTransferGHRootListReadEntry(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, uint64_t idxEntry,
+                                       PSHCLLISTENTRY *ppListEntry)
+{
+    AssertPtrReturn(ppListEntry, VERR_INVALID_POINTER);
+
+    PSHCLEVENT pEvent;
+    int rc = ShClSvcTransferGHRootListReadEntryAsync(pClient, pTransfer, idxEntry, &pEvent);
+    if (RT_SUCCESS(rc))
+    {
+        int               rcEvent;
+        PSHCLEVENTPAYLOAD pPayload;
+        rc = ShClEventWaitEx(pEvent, pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+        if (RT_SUCCESS(rc))
+        {
+            *ppListEntry = (PSHCLLISTENTRY)pPayload->pvData; /* ppLisEntry own pPayload-pvData now. */
+        }
+        else
+            rc = rcEvent;
+
+        ShClEventRelease(pEvent);
+        pEvent = NULL;
+    }
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+
+/*********************************************************************************************************************************
+*   Provider interface implementation                                                                                            *
+*********************************************************************************************************************************/
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnRootListRead */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHRootListRead(PSHCLTXPROVIDERCTX pCtx)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    SHCLLISTHDR Hdr;
+    int rc = ShClSvcTransferGHRootListReadHdr(pClient, pCtx->pTransfer, &Hdr);
+    if (RT_SUCCESS(rc))
+    {
+        for (uint64_t i = 0; i < Hdr.cEntries; i++)
+        {
+            PSHCLLISTENTRY pEntry;
+            rc = ShClSvcTransferGHRootListReadEntry(pClient, pCtx->pTransfer, i, &pEntry);
+            if (RT_SUCCESS(rc))
+                rc = ShClTransferListAddEntry(&pCtx->pTransfer->lstRoots, pEntry, true /* fAppend */);
+
+            if (RT_FAILURE(rc))
+                break;
+        }
+    }
+
+    LogFlowFuncLeave();
+    return rc;
+}
+
+/**
+ * Sets a transfer list open request to HGCM service parameters.
+ *
+ * @returns VBox status code.
+ * @param   cParms              Number of HGCM parameters supplied in \a aParms.
+ * @param   aParms              Array of HGCM parameters.
+ * @param   idCtx               Context ID to use.
+ * @param   pOpenParms          List open parameters to set.
+ */
+static int shClSvcTransferMsgSetListOpen(uint32_t cParms, VBOXHGCMSVCPARM aParms[],
+                                         uint64_t idCtx, PSHCLLISTOPENPARMS pOpenParms)
+{
+    int rc;
+
+    if (cParms == VBOX_SHCL_CPARMS_LIST_OPEN)
+    {
+        HGCMSvcSetU64(&aParms[0], idCtx);
+        HGCMSvcSetU32(&aParms[1], pOpenParms->fList);
+        HGCMSvcSetPv (&aParms[2], pOpenParms->pszFilter, pOpenParms->cbFilter);
+        HGCMSvcSetPv (&aParms[3], pOpenParms->pszPath, pOpenParms->cbPath);
+        HGCMSvcSetU64(&aParms[4], 0); /* OUT: uHandle */
+
+        rc = VINF_SUCCESS;
+    }
+    else
+        rc = VERR_INVALID_PARAMETER;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnListOpen */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHListOpen(PSHCLTXPROVIDERCTX pCtx,
+                                                 PSHCLLISTOPENPARMS pOpenParms, PSHCLLISTHANDLE phList)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_LIST_OPEN,
+                                                VBOX_SHCL_CPARMS_LIST_OPEN);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            pMsg->idCtx = VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID, pCtx->pTransfer->State.uID,
+                                                   pEvent->idEvent);
+
+            rc = ShClTransferTransformPath(pOpenParms->pszPath, pOpenParms->cbPath);
+            if (RT_SUCCESS(rc))
+                rc = shClSvcTransferMsgSetListOpen(pMsg->cParms, pMsg->aParms, pMsg->idCtx, pOpenParms);
+            if (RT_SUCCESS(rc))
+            {
+                ShClSvcClientLock(pClient);
+
+                ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+                rc = ShClSvcClientWakeup(pClient);
+
+                ShClSvcClientUnlock(pClient);
+
+                if (RT_SUCCESS(rc))
+                {
+                    int               rcEvent;
+                    PSHCLEVENTPAYLOAD pPayload;
+                    rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                    if (RT_SUCCESS(rc))
+                    {
+                        Assert(pPayload->cbData == sizeof(SHCLREPLY));
+
+                        PSHCLREPLY pReply = (PSHCLREPLY)pPayload->pvData;
+                        AssertPtr(pReply);
+
+                        Assert(pReply->uType == VBOX_SHCL_TX_REPLYMSGTYPE_LIST_OPEN);
+
+                        LogFlowFunc(("hList=%RU64\n", pReply->u.ListOpen.uHandle));
+
+                        *phList = pReply->u.ListOpen.uHandle;
+
+                        ShClPayloadFree(pPayload);
+                    }
+                    else
+                        rc = rcEvent;
+                }
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Sets a transfer list close request to HGCM service parameters.
+ *
+ * @returns VBox status code.
+ * @param   cParms              Number of HGCM parameters supplied in \a aParms.
+ * @param   aParms              Array of HGCM parameters.
+ * @param   idCtx               Context ID to use.
+ * @param   hList               Handle of list to close.
+ */
+static int shClSvcTransferMsgSetListClose(uint32_t cParms, VBOXHGCMSVCPARM aParms[],
+                                          uint64_t idCtx, SHCLLISTHANDLE hList)
+{
+    int rc;
+
+    if (cParms == VBOX_SHCL_CPARMS_LIST_CLOSE)
+    {
+        HGCMSvcSetU64(&aParms[0], idCtx);
+        HGCMSvcSetU64(&aParms[1], hList);
+
+        rc = VINF_SUCCESS;
+    }
+    else
+        rc = VERR_INVALID_PARAMETER;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnListClose */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHListClose(PSHCLTXPROVIDERCTX pCtx, SHCLLISTHANDLE hList)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_LIST_CLOSE,
+                                                VBOX_SHCL_CPARMS_LIST_CLOSE);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            pMsg->idCtx = VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID, pCtx->pTransfer->State.uID,
+                                                   pEvent->idEvent);
+
+            rc = shClSvcTransferMsgSetListClose(pMsg->cParms, pMsg->aParms, pMsg->idCtx, hList);
+            if (RT_SUCCESS(rc))
+            {
+                ShClSvcClientLock(pClient);
+
+                ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+                rc = ShClSvcClientWakeup(pClient);
+
+                ShClSvcClientUnlock(pClient);
+
+                if (RT_SUCCESS(rc))
+                {
+                    int               rcEvent;
+                    PSHCLEVENTPAYLOAD pPayload;
+                    rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                    if (RT_SUCCESS(rc))
+                    {
+                        ShClPayloadFree(pPayload);
+                    }
+                    else
+                        rc = rcEvent;
+                }
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnListHdrRead */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHListHdrRead(PSHCLTXPROVIDERCTX pCtx,
+                                                    SHCLLISTHANDLE hList, PSHCLLISTHDR pListHdr)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_LIST_HDR_READ,
+                                                VBOX_SHCL_CPARMS_LIST_HDR_READ_REQ);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            HGCMSvcSetU64(&pMsg->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID,
+                                                                     pCtx->pTransfer->State.uID, pEvent->idEvent));
+            HGCMSvcSetU64(&pMsg->aParms[1], hList);
+            HGCMSvcSetU32(&pMsg->aParms[2], 0 /* fFlags */);
+
+            ShClSvcClientLock(pClient);
+
+            ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+            rc = ShClSvcClientWakeup(pClient);
+
+            ShClSvcClientUnlock(pClient);
+
+            if (RT_SUCCESS(rc))
+            {
+                int               rcEvent;
+                PSHCLEVENTPAYLOAD pPayload;
+                rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                if (RT_SUCCESS(rc))
+                {
+                    Assert(pPayload->cbData == sizeof(SHCLLISTHDR));
+
+                    *pListHdr = *(PSHCLLISTHDR)pPayload->pvData;
+
+                    ShClPayloadFree(pPayload);
+                }
+                else
+                    rc = rcEvent;
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnListEntryRead */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHListEntryRead(PSHCLTXPROVIDERCTX pCtx,
+                                                      SHCLLISTHANDLE hList, PSHCLLISTENTRY pListEntry)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_LIST_ENTRY_READ,
+                                                VBOX_SHCL_CPARMS_LIST_ENTRY_READ);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            HGCMSvcSetU64(&pMsg->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID,
+                                                                     pCtx->pTransfer->State.uID, pEvent->idEvent));
+            HGCMSvcSetU64(&pMsg->aParms[1], hList);
+            HGCMSvcSetU32(&pMsg->aParms[2], 0 /* fInfo */);
+
+            ShClSvcClientLock(pClient);
+
+            ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+            rc = ShClSvcClientWakeup(pClient);
+
+            ShClSvcClientUnlock(pClient);
+
+            if (RT_SUCCESS(rc))
+            {
+                int               rcEvent;
+                PSHCLEVENTPAYLOAD pPayload;
+                rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                if (RT_SUCCESS(rc))
+                {
+                    Assert(pPayload->cbData == sizeof(SHCLLISTENTRY));
+
+                    rc = ShClTransferListEntryCopy(pListEntry, (PSHCLLISTENTRY)pPayload->pvData);
+
+                    ShClPayloadFree(pPayload);
+                }
+                else
+                    rc = rcEvent;
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnObjOpen */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHObjOpen(PSHCLTXPROVIDERCTX pCtx, PSHCLOBJOPENCREATEPARMS pCreateParms, PSHCLOBJHANDLE phObj)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_OBJ_OPEN,
+                                                VBOX_SHCL_CPARMS_OBJ_OPEN);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            LogFlowFunc(("pszPath=%s, fCreate=0x%x\n", pCreateParms->pszPath, pCreateParms->fCreate));
+
+            rc = ShClTransferTransformPath(pCreateParms->pszPath, pCreateParms->cbPath);
+            if (RT_SUCCESS(rc))
+            {
+                const uint32_t cbPath = (uint32_t)strlen(pCreateParms->pszPath) + 1; /* Include terminating zero */
+
+                HGCMSvcSetU64(&pMsg->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID,
+                                                                         pCtx->pTransfer->State.uID, pEvent->idEvent));
+                HGCMSvcSetU64(&pMsg->aParms[1], 0); /* uHandle */
+                HGCMSvcSetPv (&pMsg->aParms[2], pCreateParms->pszPath, cbPath);
+                HGCMSvcSetU32(&pMsg->aParms[3], pCreateParms->fCreate);
+
+                ShClSvcClientLock(pClient);
+
+                ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+                rc = ShClSvcClientWakeup(pClient);
+
+                ShClSvcClientUnlock(pClient);
+
+                if (RT_SUCCESS(rc))
+                {
+                    int               rcEvent;
+                    PSHCLEVENTPAYLOAD pPayload;
+                    rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                    if (RT_SUCCESS(rc))
+                    {
+                        Assert(pPayload->cbData == sizeof(SHCLREPLY));
+
+                        PSHCLREPLY pReply = (PSHCLREPLY)pPayload->pvData;
+                        AssertPtr(pReply);
+
+                        Assert(pReply->uType == VBOX_SHCL_TX_REPLYMSGTYPE_OBJ_OPEN);
+
+                        LogFlowFunc(("hObj=%RU64\n", pReply->u.ObjOpen.uHandle));
+
+                        *phObj = pReply->u.ObjOpen.uHandle;
+
+                        ShClPayloadFree(pPayload);
+                    }
+                    else
+                        rc = rcEvent;
+                }
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnObjClose */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHObjClose(PSHCLTXPROVIDERCTX pCtx, SHCLOBJHANDLE hObj)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_OBJ_CLOSE,
+                                                VBOX_SHCL_CPARMS_OBJ_CLOSE);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            HGCMSvcSetU64(&pMsg->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID,
+                                                                     pCtx->pTransfer->State.uID, pEvent->idEvent));
+            HGCMSvcSetU64(&pMsg->aParms[1], hObj);
+
+            ShClSvcClientLock(pClient);
+
+            ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+            rc = ShClSvcClientWakeup(pClient);
+
+            ShClSvcClientUnlock(pClient);
+
+            if (RT_SUCCESS(rc))
+            {
+                int               rcEvent;
+                PSHCLEVENTPAYLOAD pPayload;
+                rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                if (RT_SUCCESS(rc))
+                {
+                    Assert(pPayload->cbData == sizeof(SHCLREPLY));
+#ifdef VBOX_STRICT
+                    PSHCLREPLY pReply = (PSHCLREPLY)pPayload->pvData;
+                    AssertPtr(pReply);
+
+                    Assert(pReply->uType == VBOX_SHCL_TX_REPLYMSGTYPE_OBJ_CLOSE);
+
+                    LogFlowFunc(("hObj=%RU64\n", pReply->u.ObjClose.uHandle));
+#endif
+                    ShClPayloadFree(pPayload);
+                }
+                else
+                    rc = rcEvent;
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/** @copydoc SHCLTXPROVIDERIFACE::pfnObjRead */
+DECLCALLBACK(int) ShClSvcTransferIfaceGHObjRead(PSHCLTXPROVIDERCTX pCtx, SHCLOBJHANDLE hObj,
+                                                void *pvData, uint32_t cbData, uint32_t fFlags, uint32_t *pcbRead)
+{
+    LogFlowFuncEnter();
+
+    PSHCLCLIENT pClient = (PSHCLCLIENT)pCtx->pvUser;
+    AssertPtr(pClient);
+
+    int rc;
+
+    PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_OBJ_READ,
+                                                VBOX_SHCL_CPARMS_OBJ_READ_REQ);
+    if (pMsg)
+    {
+        PSHCLEVENT pEvent;
+        rc = ShClEventSourceGenerateAndRegisterEvent(&pCtx->pTransfer->Events, &pEvent);
+        if (RT_SUCCESS(rc))
+        {
+            HGCMSvcSetU64(&pMsg->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID,
+                                                                     pCtx->pTransfer->State.uID, pEvent->idEvent));
+            HGCMSvcSetU64(&pMsg->aParms[1], hObj);
+            HGCMSvcSetU32(&pMsg->aParms[2], cbData);
+            HGCMSvcSetU32(&pMsg->aParms[3], fFlags);
+
+            ShClSvcClientLock(pClient);
+
+            ShClSvcClientMsgAdd(pClient, pMsg, true /* fAppend */);
+            rc = ShClSvcClientWakeup(pClient);
+
+            ShClSvcClientUnlock(pClient);
+
+            if (RT_SUCCESS(rc))
+            {
+                PSHCLEVENTPAYLOAD pPayload;
+                int               rcEvent;
+                rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
+                if (RT_SUCCESS(rc))
+                {
+                    Assert(pPayload->cbData == sizeof(SHCLOBJDATACHUNK));
+
+                    PSHCLOBJDATACHUNK pDataChunk = (PSHCLOBJDATACHUNK)pPayload->pvData;
+                    AssertPtr(pDataChunk);
+
+                    const uint32_t cbRead = RT_MIN(cbData, pDataChunk->cbData);
+
+                    memcpy(pvData, pDataChunk->pvData, cbRead);
+
+                    if (pcbRead)
+                        *pcbRead = cbRead;
+
+                    ShClPayloadFree(pPayload);
+                }
+                else
+                    rc = rcEvent;
+            }
+
+            ShClEventRelease(pEvent);
+        }
+        else
+        {
+            ShClSvcClientMsgFree(pClient, pMsg);
+            rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+        }
+    }
+    else
+        rc = VERR_NO_MEMORY;
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Reports a transfer status to the guest.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client that owns the transfer.
+ * @param   idTransfer          Transfer ID to report status for.
+ * @param   enmDir              Transfer direction to report status for.
+ * @param   enmSts              Status to report.
+ * @param   rcTransfer          Result code to report. Optional and depending on status.
+ * @param   ppEvent             Where to return the wait event on success. Optional.
+ *                              Must be released by the caller with ShClEventRelease().
+ *
+ * @note    Caller must enter the client's critical section.
+ */
+static int shClSvcTransferSendStatusExAsync(PSHCLCLIENT pClient, SHCLTRANSFERID idTransfer,
+                                            SHCLTRANSFERDIR enmDir, SHCLTRANSFERSTATUS enmSts, int rcTransfer,
+                                            PSHCLEVENT *ppEvent)
+{
+    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
+    AssertReturn(idTransfer != NIL_SHCLTRANSFERID, VERR_INVALID_PARAMETER);
+    /* ppEvent is optional. */
+
+    Assert(RTCritSectIsOwner(&pClient->CritSect));
+
+    PSHCLCLIENTMSG pMsgReadData = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_TRANSFER_STATUS,
+                                                        VBOX_SHCL_CPARMS_TRANSFER_STATUS);
+    if (!pMsgReadData)
+        return VERR_NO_MEMORY;
+
+    PSHCLEVENT pEvent;
+    int rc = ShClEventSourceGenerateAndRegisterEvent(&pClient->EventSrc, &pEvent);
+    if (RT_SUCCESS(rc))
+    {
+        HGCMSvcSetU64(&pMsgReadData->aParms[0], VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID, idTransfer, pEvent->idEvent));
+        HGCMSvcSetU32(&pMsgReadData->aParms[1], enmDir);
+        HGCMSvcSetU32(&pMsgReadData->aParms[2], enmSts);
+        HGCMSvcSetU32(&pMsgReadData->aParms[3], (uint32_t)rcTransfer); /** @todo uint32_t vs. int. */
+        HGCMSvcSetU32(&pMsgReadData->aParms[4], 0 /* fFlags, unused */);
+
+        ShClSvcClientMsgAdd(pClient, pMsgReadData, true /* fAppend */);
+
+        rc = ShClSvcClientWakeup(pClient);
+        if (RT_SUCCESS(rc))
+        {
+            LogRel2(("Shared Clipboard: Reported status %s (rc=%Rrc) of transfer %RU16 to guest\n",
+                     ShClTransferStatusToStr(enmSts), rcTransfer, idTransfer));
+
+            if (ppEvent)
+            {
+                *ppEvent = pEvent; /* Takes ownership. */
+            }
+            else /* If event is not consumed by the caller, release the event again. */
+                ShClEventRelease(pEvent);
+        }
+        else
+            ShClEventRelease(pEvent);
+    }
+    else
+        rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
+
+    if (RT_FAILURE(rc))
+        LogRelMax(64, ("Shared Clipboard: Reporting status %s (%Rrc) for transfer %RU16 to guest failed with %Rrc\n",
+                       ShClTransferStatusToStr(enmSts), rcTransfer, idTransfer, rc));
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Reports a transfer status to the guest, internal version.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client that owns the transfer.
+ * @param   pTransfer           Transfer to report status for.
+ * @param   enmSts              Status to report.
+ * @param   rcTransfer          Result code to report. Optional and depending on status.
+ * @param   ppEvent             Where to return the wait event on success. Optional.
+ *                              Must be released by the caller with ShClEventRelease().
+ *
+ * @note    Caller must enter the client's critical section.
+ */
+int shClSvcTransferSendStatusAsync(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, SHCLTRANSFERSTATUS enmSts,
+                                   int rcTransfer, PSHCLEVENT *ppEvent)
+{
+    AssertPtrReturn(pClient,   VERR_INVALID_POINTER);
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    /* ppEvent is optional. */
+
+   return shClSvcTransferSendStatusExAsync(pClient, ShClTransferGetID(pTransfer), ShClTransferGetDir(pTransfer),
+                                           enmSts, rcTransfer, ppEvent);
+}
+
+/**
+ * Cleans up (unregisters and destroys) all transfers not in started state (anymore).
+ *
+ * @param   pClient             Client to clean up transfers for.
+ *
+ * @note    Caller needs to take the critical section.
+ */
+static void shClSvcTransferCleanupAllUnused(PSHCLCLIENT pClient)
+{
+    Assert(RTCritSectIsOwner(&pClient->CritSect));
+
+    LogFlowFuncEnter();
+
+    PSHCLTRANSFERCTX pTxCtx = &pClient->Transfers.Ctx;
+
+    PSHCLTRANSFER pTransfer, pTransferNext;
+    RTListForEachSafe(&pTxCtx->List, pTransfer, pTransferNext, SHCLTRANSFER, Node)
+    {
+        SHCLTRANSFERSTATUS const enmSts = ShClTransferGetStatus(pTransfer);
+        if (enmSts != SHCLTRANSFERSTATUS_STARTED)
+        {
+            /* Let the guest know. */
+            int rc2 = shClSvcTransferSendStatusAsync(pClient, pTransfer,
+                                                     SHCLTRANSFERSTATUS_UNINITIALIZED, VINF_SUCCESS, NULL /* ppEvent */);
+            AssertRC(rc2);
+
+            ShClTransferCtxUnregisterById(pTxCtx, pTransfer->State.uID);
+            ShClTransferDestroy(pTransfer);
+        }
+    }
+}
+
+
+/**
+ * Creates a new transfer on the host.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client that owns the transfer.
+ * @param   enmDir              Transfer direction to create.
+ * @param   enmSource           Transfer source to create.
+ * @param   idTransfer          Transfer ID to use for creation.
+ *                              If set to NIL_SHCLTRANSFERID, a new transfer ID will be created.
+ * @param   ppTransfer          Where to return the created transfer on success. Optional and can be NULL.
+ */
+int ShClSvcTransferCreate(PSHCLCLIENT pClient, SHCLTRANSFERDIR enmDir, SHCLSOURCE enmSource, SHCLTRANSFERID idTransfer, PSHCLTRANSFER *ppTransfer)
+{
+    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
+    /* ppTransfer is optional. */
+
+    LogFlowFuncEnter();
+
+    ShClSvcClientLock(pClient);
+
+    /* When creating a new transfer, this is a good time to clean up old stuff we don't need anymore. */
+    shClSvcTransferCleanupAllUnused(pClient);
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreate(enmDir, enmSource, &pClient->Transfers.Callbacks, &pTransfer);
+    if (RT_SUCCESS(rc))
+    {
+        if (idTransfer == NIL_SHCLTRANSFERID)
+            rc = ShClTransferCtxRegister(&pClient->Transfers.Ctx, pTransfer, &idTransfer);
+        else
+            rc = ShClTransferCtxRegisterById(&pClient->Transfers.Ctx, pTransfer, idTransfer);
+        if (RT_SUCCESS(rc))
+        {
+            if (ppTransfer)
+                *ppTransfer = pTransfer;
+        }
+    }
+
+    ShClSvcClientUnlock(pClient);
+
+    if (RT_FAILURE(rc))
+        ShClTransferDestroy(pTransfer);
+
+    if (RT_FAILURE(rc))
+       LogRel(("Shared Clipboard: Creating transfer failed with %Rrc\n", rc));
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Destroys a transfer on the host.
+ *
+ * @param   pClient             Client to destroy transfer for.
+ * @param   pTransfer           Transfer to destroy.
+ *                              The pointer will be invalid after return.
+ */
+void ShClSvcTransferDestroy(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
+{
+    if (!pTransfer)
+        return;
+
+    LogFlowFuncEnter();
+
+    ShClSvcClientLock(pClient);
+
+    PSHCLTRANSFERCTX pTxCtx = &pClient->Transfers.Ctx;
+
+    ShClTransferCtxUnregisterById(pTxCtx, pTransfer->State.uID);
+
+    /* Make sure to let the guest know. */
+    int rc = shClSvcTransferSendStatusAsync(pClient, pTransfer,
+                                            SHCLTRANSFERSTATUS_UNINITIALIZED, VINF_SUCCESS, NULL /* ppEvent */);
+    AssertRC(rc);
+
+    ShClTransferDestroy(pTransfer);
+    pTransfer = NULL;
+
+    ShClSvcClientUnlock(pClient);
+
+    LogFlowFuncLeave();
+}
+#endif
+
+/**
+ * Initializes a clipboard transfer.
+ *
+ * @returns VBox status code.
+ * @param   pTransfer           Transfer to initialize.
+ */
+int ShClTransferInit(PSHCLTRANSFER pTransfer)
+{
+    shClTransferLock(pTransfer);
+
+    AssertMsgReturnStmt(pTransfer->State.enmStatus < SHCLTRANSFERSTATUS_INITIALIZED,
+                        ("Wrong status (currently is %s)\n", ShClTransferStatusToStr(pTransfer->State.enmStatus)),
+                        shClTransferUnlock(pTransfer), VERR_WRONG_ORDER);
+
+    pTransfer->cRefs = 0;
+
+    LogFlowFunc(("uID=%RU32, enmDir=%RU32, enmSource=%RU32\n",
+                 pTransfer->State.uID, pTransfer->State.enmDir, pTransfer->State.enmSource));
+
+    pTransfer->cListHandles    = 0;
+    pTransfer->uListHandleNext = 1;
+
+    pTransfer->cObjHandles     = 0;
+    pTransfer->uObjHandleNext  = 1;
+
+    pTransfer->Thread.fStarted   = false;
+    pTransfer->Thread.fStop      = false;
+    pTransfer->Thread.fCancelled = false;
+
+    int rc = VINF_SUCCESS;
+
+    if (pTransfer->Callbacks.pfnOnInitialize)
+        rc = pTransfer->Callbacks.pfnOnInitialize(&pTransfer->CallbackCtx);
+    if (RT_SUCCESS(rc))
+    {
+        /* Sanity: Make sure that the transfer we're gonna report as INITIALIZED
+         *         actually has some root entries set, as the other side can query for those at any time then. */
+        if (pTransfer->State.enmDir == SHCLTRANSFERDIR_TO_REMOTE)
+            AssertMsgStmt(ShClTransferRootsCount(pTransfer), ("Transfer has no root entries set (yet)\n"), rc = VERR_WRONG_ORDER);
+
+        if (RT_SUCCESS(rc))
+            rc = shClTransferSetStatus(pTransfer, SHCLTRANSFERSTATUS_INITIALIZED);
+    }
+
+    shClTransferUnlock(pTransfer);
+
+    /* Note: Callback will be called after we unlocked the transfer, as the caller might access the transfer right away. */
+    if (   RT_SUCCESS(rc)
+        && pTransfer->Callbacks.pfnOnInitialized)
+        pTransfer->Callbacks.pfnOnInitialized(&pTransfer->CallbackCtx);
+
+    if (RT_FAILURE(rc))
+        LogRel(("Shared Clipboard: Initialziation of transfer failed with %Rrc\n", rc));
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
+/**
+ * Initializes a (created) transfer on the host.
+ *
+ * @returns VBox status code.
+ * @param   pClient             Client that owns the transfer.
+ * @param   pTransfer           Transfer to initialize.
+ */
+int ShClSvcTransferInit(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
+{
+    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
+
+    LogFlowFuncEnter();
+
+    ShClSvcClientLock(pClient);
+
+    Assert(ShClTransferGetStatus(pTransfer) == SHCLTRANSFERSTATUS_NONE);
+
+    PSHCLTRANSFERCTX pTxCtx = &pClient->Transfers.Ctx;
+
+    int rc;
+
+    if (!ShClTransferCtxIsMaximumReached(pTxCtx))
+    {
+        SHCLTRANSFERDIR const enmDir = ShClTransferGetDir(pTransfer);
+
+        LogRel2(("Shared Clipboard: Initializing %s transfer ...\n",
+                 enmDir == SHCLTRANSFERDIR_FROM_REMOTE ? "guest -> host" : "host -> guest"));
+
+        rc = ShClTransferInit(pTransfer);
+    }
+    else
+        rc = VERR_SHCLPB_MAX_TRANSFERS_REACHED;
+
+    /* Tell the guest the outcome. */
+    int rc2 = shClSvcTransferSendStatusAsync(pClient, pTransfer,
+                                               RT_SUCCESS(rc)
+                                             ? SHCLTRANSFERSTATUS_INITIALIZED : SHCLTRANSFERSTATUS_ERROR, rc,
+                                             NULL /* ppEvent */);
+    if (RT_SUCCESS(rc))
+        rc2 = rc;
+
+    if (RT_FAILURE(rc))
+        LogRel(("Shared Clipboard: Initializing transfer failed with %Rrc\n", rc));
+
+    ShClSvcClientUnlock(pClient);
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+#endif

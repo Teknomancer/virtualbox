@@ -1,4 +1,4 @@
-/* $Id: ClipboardDataObjectImpl-win.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: ClipboardDataObjectImpl-win.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
 /** @file
  * ClipboardDataObjectImpl-win.cpp - Shared Clipboard IDataObject implementation.
  */
@@ -689,6 +689,18 @@ int ShClWinDataObject::createFileGroupDescriptorFromTransfer(PSHCLTRANSFER pTran
         pszFileSpec = RTStrDup(pszFile);
         AssertBreakStmt(pszFileSpec != NULL, rc = VERR_NO_MEMORY);
 
+#ifdef UNICODE
+        PRTUTF16 pwszFileSpec;
+        rc = RTStrToUtf16(pszFileSpec, &pwszFileSpec);
+        if (RT_SUCCESS(rc))
+        {
+            rc = RTUtf16CopyEx((PRTUTF16 )pFD->cFileName, sizeof(pFD->cFileName) / sizeof(WCHAR),
+                               pwszFileSpec, RTUtf16Len(pwszFileSpec));
+            RTUtf16Free(pwszFileSpec);
+
+            LogFlowFunc(("pFD->cFileNameW=%ls\n", pFD->cFileName));
+        }
+#else
         if (fUnicode)
         {
             PRTUTF16 pwszFileSpec;
@@ -707,6 +719,7 @@ int ShClWinDataObject::createFileGroupDescriptorFromTransfer(PSHCLTRANSFER pTran
             rc = RTStrCopy(pFD->cFileName, sizeof(pFD->cFileName), pszFileSpec);
             LogFlowFunc(("pFD->cFileNameA=%s\n", pFD->cFileName));
         }
+#endif
 
         RTStrFree(pszFileSpec);
         pszFileSpec = NULL;
@@ -715,8 +728,10 @@ int ShClWinDataObject::createFileGroupDescriptorFromTransfer(PSHCLTRANSFER pTran
             break;
 
         pFD->dwFlags          = FD_PROGRESSUI | FD_ATTRIBUTES;
-        if (fUnicode) /** @todo Only >= Vista. */
+#if _WIN32_WINNT >= 0x0600 /* Windows Vista */
+        if (fUnicode)
             pFD->dwFlags     |= FD_UNICODE;
+#endif
         pFD->dwFileAttributes = FILE_ATTRIBUTE_NORMAL;
 
         const SHCLFSOBJINFO *pObjInfo = &itRoot->objInfo;
@@ -1227,7 +1242,7 @@ int ShClWinDataObject::SetStatus(Status enmStatus, int rcSts /* = VINF_SUCCESS *
 /* static */
 void ShClWinDataObject::logFormat(CLIPFORMAT fmt)
 {
-    char szFormat[128];
+    TCHAR szFormat[128];
     if (GetClipboardFormatName(fmt, szFormat, sizeof(szFormat)))
     {
         LogFlowFunc(("clipFormat=%RI16 -> %s\n", fmt, szFormat));
