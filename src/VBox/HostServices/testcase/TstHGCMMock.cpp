@@ -1,4 +1,4 @@
-/* $Id: TstHGCMMock.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: TstHGCMMock.cpp 114158 2026-05-20 15:21:01Z andreas.loeffler@oracle.com $ */
 /** @file
  * TstHGCMMock.cpp - Mocking framework for testing HGCM-based host services.
  *
@@ -296,7 +296,7 @@ static DECLCALLBACK(int) tstHgcmMockSvcCallComplete(VBOXHGCMCALLHANDLE callHandl
 DECLCALLBACK(int) tstHgcmMockSvcDispatcher(void *pvExtension, uint32_t u32Function,
                                            void *pvParms, uint32_t cbParms)
 {
-    RT_NOREF(pvExtension);
+    RT_NOREF(pvExtension, cbParms);
     int rc = VINF_SUCCESS;
 
     PSHCLEXTPARMS pParms = (PSHCLEXTPARMS)pvParms; /* pParms might be NULL, depending on the message. */
@@ -783,4 +783,3 @@ VBGLR3DECL(int) VbglR3HGCMCall(PVBGLIOCHGCMCALL pInfo, size_t cbInfo)
 
     return rc2;
 }
-
