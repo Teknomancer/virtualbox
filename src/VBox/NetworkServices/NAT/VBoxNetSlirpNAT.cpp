@@ -1,4 +1,4 @@
-/* $Id: VBoxNetSlirpNAT.cpp 114144 2026-05-15 15:47:41Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxNetSlirpNAT.cpp 114171 2026-05-21 14:31:05Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxNetNAT - NAT Service for connecting to IntNet.
  */
@@ -190,13 +190,14 @@ class VBoxNetSlirpNAT
 
     uint16_t m_u16Mtu;
 
+    /** Number of valid descriptors in m_paPollFd. */
     unsigned int nsock;
 
     Slirp *m_pSlirp;
 
     /** Array of poll descriptors. */
     struct pollfd *m_paPollFd;
-    /** Number of poll descriptors in m_paPollFd. */
+    /** Allocated size of m_paPollFd (in entries). */
     unsigned int m_cPollFd = 0;
 
     /** List of timers (in reverse creation order).
