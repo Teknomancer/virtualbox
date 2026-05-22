@@ -126,7 +126,8 @@ struc X86FXSTATE
         .xmm13          resd 4
         .xmm14          resd 4
         .xmm15          resd 4
-        .au32RsrvdRest  resd 24
+        .au32RsrvdRest  resd 12
+        .au32RsrvdForSoftware resd 12
 endstruc
 
 
