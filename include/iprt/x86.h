@@ -3525,6 +3525,36 @@ typedef X86FSTENV32P *PX86FSTENV32P;
 /** Pointer to a const 32-bit protected mode FSTENV image. */
 typedef X86FSTENV32P const *PCX86FSTENV32P;
 
+/**
+ * 32-bit realmode FSTENV image.
+ */
+typedef struct X86FSTENV32RM
+{
+    uint16_t    FCW;                /**< 0x00 */
+    uint16_t    padding1;           /**< 0x02 */
+    uint16_t    FSW;                /**< 0x04 */
+    uint16_t    padding2;           /**< 0x06 */
+    uint16_t    FTW;                /**< 0x08 */
+    uint16_t    padding3;           /**< 0x0a */
+    uint16_t    FPUIPLo;            /**< 0x0c */
+    uint16_t    padding4;           /**< 0x0e */
+    uint32_t    FOP         : 12;   /**< 0x10[11:0] - bit 11 is zero... */
+    uint32_t    FPUIPHi     : 16;   /**< 0x10[27:12] */
+    uint32_t    FPUIPHiZero : 4;    /**< 0x18[31:28] - zero. */
+    uint16_t    FPUDPLo;            /**< 0x14 */
+    uint16_t    padding5;           /**< 0x0e */
+    uint32_t    FPUDPHiZero1 : 12;  /**< 0x18[11:0]  - zero. */
+    uint32_t    FPUDPHi      : 16;  /**< 0x18[12:27] - top [31:28] is zero. */
+    uint32_t    FPUDPHiZero2 : 4;   /**< 0x18[31:28] - zero. */
+} X86FSTENV32RM;
+# ifndef VBOX_FOR_DTRACE_LIB
+AssertCompileSize(X86FSTENV32RM, 0x1c);
+# endif
+/** Pointer to a 32-bit protected mode FSTENV image. */
+typedef X86FSTENV32RM *PX86FSTENV32RM;
+/** Pointer to a const 32-bit protected mode FSTENV image. */
+typedef X86FSTENV32RM const *PCX86FSTENV32RM;
+
 
 /**
  * 80-bit MMX/FPU register type.
