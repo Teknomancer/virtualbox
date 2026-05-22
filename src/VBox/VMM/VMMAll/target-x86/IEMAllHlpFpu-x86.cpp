@@ -1,4 +1,4 @@
-/* $Id: IEMAllHlpFpu-x86.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: IEMAllHlpFpu-x86.cpp 114181 2026-05-22 12:07:39Z knut.osmundsen@oracle.com $ */
 /** @file
  * IEM - Interpreted Execution Manager - x86 target, FPU helpers.
  */
@@ -411,6 +411,8 @@ void iemFpuStoreResultWithMemOp(PVMCPUCC pVCpu, PIEMFPURESULT pResult, uint8_t i
                                 uint8_t iEffSeg, RTGCPTR GCPtrEff, uint16_t uFpuOpcode) RT_NOEXCEPT
 {
     PX86FXSTATE pFpuCtx = &pVCpu->cpum.GstCtx.XState.x87;
+    /** @todo We don't respect X86_CPUID_STEXT_FEATURE_EBX_FDP_EXCPTN_ONLY
+     * anywhere here... */
     iemFpuUpdateDP(pVCpu, pFpuCtx, iEffSeg, GCPtrEff);
     iemFpuUpdateOpcodeAndIpWorkerEx(pVCpu, pFpuCtx, uFpuOpcode);
     iemFpuStoreResultOnly(pVCpu, pFpuCtx, pResult, iStReg);
