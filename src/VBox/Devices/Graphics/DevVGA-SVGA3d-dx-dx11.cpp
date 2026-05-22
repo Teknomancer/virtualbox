@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114159 2026-05-20 15:36:00Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114178 2026-05-22 11:37:42Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -211,7 +211,6 @@ typedef struct VMSVGAHWSCREEN
     ID3D11Texture2D            *pScreenTexture;        /* Texture for the screen content. Possibly scaled. */
     ID3D11RenderTargetView     *pScreenTextureRTV;     /* Render target view of pScreenTexture. */
     ID3D11ShaderResourceView   *pScreenTextureSRV;     /* Shader resource view of pScreenTexture. */
-    ID3D11Texture2D            *pStagingTexture;       /* Same resolution as pScreenTexture for async copy to system memory. */
 
     ID3D11Texture2D            *pScreenObjectTextureBGRA; /* Target texture for a screen object BlitToScreen.
                                                            * NULL if a screen target is used by the guest (rather than screen object). */
@@ -3455,14 +3454,6 @@ static int vmsvga3dHwScreenCreate(PVMSVGA3DSTATE pState, uint32_t cWidth, uint32
     hr = pDXDevice->pDevice->CreateTexture2D(&td, 0, &p->pScreenTexture);
     AssertReturn(SUCCEEDED(hr), VERR_NO_MEMORY);
 
-    /* Staging texture for downloading the screen content to the system memory. */
-    td.Usage              = D3D11_USAGE_STAGING;
-    td.BindFlags          = 0;
-    td.CPUAccessFlags     = D3D11_CPU_ACCESS_READ;
-
-    hr = pDXDevice->pDevice->CreateTexture2D(&td, 0, &p->pStagingTexture);
-    AssertReturn(SUCCEEDED(hr), VERR_NO_MEMORY);
-
     /* Render target view for the screen texture. */
     RT_ZERO(rtvDesc);
     rtvDesc.Format             = td.Format;
@@ -3638,7 +3629,6 @@ static void vmsvga3dHwScreenDestroy(PVMSVGA3DSTATE pState, VMSVGAHWSCREEN *p)
     D3D_RELEASE(p->pScreenObjectTextureBGRA);
     D3D_RELEASE(p->pScreenTextureSRV);
     D3D_RELEASE(p->pScreenTextureRTV);
-    D3D_RELEASE(p->pStagingTexture);
     D3D_RELEASE(p->pScreenTexture);
     D3D_RELEASE(p->pScreenReadbackQuery);
 }
@@ -3892,8 +3882,6 @@ static void dxStartScreenReadback(VMSVGASCREENOBJECT *pScreen, DXDEVICE *pDXDevi
 {
     /* Get the screen data to the system memory. */
     VMSVGAHWSCREEN *p = pScreen->pHwScreen;
-
-    pDXDevice->pImmediateContext->CopySubresourceRegion(p->pStagingTexture, 0, 0, 0, 0, p->pScreenTexture, 0, NULL);
 
     /* Check targets. Targets are created and deleted on FIFO thread so it is ok to access them without a lock. */
     VMSVGAOUTPUTTARGET *pOutputTarget;
