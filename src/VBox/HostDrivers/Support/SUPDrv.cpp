@@ -1,4 +1,4 @@
-/* $Id: SUPDrv.cpp 114185 2026-05-26 16:27:11Z knut.osmundsen@oracle.com $ */
+/* $Id: SUPDrv.cpp 114187 2026-05-26 23:30:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxDrv - The VirtualBox Support Driver - Common code.
  */
@@ -4444,7 +4444,7 @@ SUPR0DECL(int) SUPR0EnableHwvirtForVm(bool fEnable, void **ppvState)
 # if defined(RT_OS_LINUX) && (defined(RT_ARCH_AMD64) || defined(RT_ARCH_X86))
     return supdrvOSEnableHwvirtForVm(fEnable, ppvState);
 # else
-    RT_NOREF1(fEnable, ppvState);
+    RT_NOREF2(fEnable, ppvState);
     return VINF_SUCCESS;
 # endif
 }
