@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114189 2026-05-27 12:24:10Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the Shared Clipboard Host Service testcases.
 #
@@ -172,7 +172,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
 
  if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
   #
-  #
+  # File transfer tests.
   #
   PROGRAMS += tstClipboardTransfers
   tstClipboardTransfers_TEMPLATE = VBoxR3TstExe
@@ -182,6 +182,23 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp \
   	tstClipboardTransfers.cpp
+
+  #
+  # Windows IDataObject tests.
+  #
+  PROGRAMS.win += tstClipboardDataObjectWin
+  tstClipboardDataObjectWin_TEMPLATE = VBoxR3TstExe
+  tstClipboardDataObjectWin_DEFS    += UNICODE VBOX_WITH_HGCM UNIT_TEST VBOX_WITH_SHARED_CLIPBOARD VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+  tstClipboardDataObjectWin_SOURCES  = \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-win.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardDataObjectImpl-win.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardEnumFormatEtcImpl-win.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardStreamImpl-win.cpp \
+  	tstClipboardDataObjectWin.cpp
+  tstClipboardDataObjectWin_LIBS     = $(LIB_RUNTIME)
  endif
 endif
 
