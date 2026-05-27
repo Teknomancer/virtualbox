@@ -1,4 +1,4 @@
-/* $Id: SUPDrv-linux.c 114185 2026-05-26 16:27:11Z knut.osmundsen@oracle.com $ */
+/* $Id: SUPDrv-linux.c 114188 2026-05-27 06:59:16Z knut.osmundsen@oracle.com $ */
 /** @file
  * VBoxDrv - The VirtualBox Support Driver - Linux specifics.
  */
@@ -87,6 +87,9 @@
 # define vtime_account_guest_exit()  do { } while(0)
 #endif
 
+#ifndef IS_ENABLED
+# define IS_ENABLED(a) 0
+#endif
 #if RTLNX_VER_MIN(6,16,0) && IS_ENABLED(CONFIG_KVM_X86) && (defined(RT_ARCH_AMD64) || defined(RT_ARCH_X86)) && defined(VBOX_WITH_HOST_VMX)
 /*
  * Open /dev/kvm and create a dummy VM for each VBox VM process, to ensure that
