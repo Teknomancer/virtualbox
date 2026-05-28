@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114183 2026-05-22 17:03:33Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114197 2026-05-28 22:13:09Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -16,6 +16,7 @@
  *  - LogRel2 for cursor.
  *  - LogRel3 for 3D performance data.
  *  - LogRel4 for HW accelerated graphics output.
+ *  - LogRel5 for testing.
  */
 
 /*
