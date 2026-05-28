@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-savedstate.cpp 114162 2026-05-20 16:14:07Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-savedstate.cpp 114196 2026-05-28 12:01:52Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevSVGA3d - VMWare SVGA device, 3D parts - DX backend saved state.
  */
@@ -232,7 +232,7 @@ static int vmsvga3dDXLoadContext(PCPDMDEVHLPR3 pHlp, PVGASTATECC pThisCC, PSSMHA
 
         if (cEntries)
         {
-            rc = pSvgaR3State->pFuncsDX->pfnDXSetCOTable(pThisCC, pDXContext, cot[i].COTableType, cEntries);
+            rc = pSvgaR3State->pFuncsDX->pfnDXSetCOTable(pThisCC, pDXContext, cot[i].COTableType, cEntries, false);
             AssertLogRelRCReturn(rc, rc);
         }
     }

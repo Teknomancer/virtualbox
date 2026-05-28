@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx.cpp 114162 2026-05-20 16:14:07Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx.cpp 114196 2026-05-28 12:01:52Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevSVGA3d - VMWare SVGA device, 3D parts - Common code for DX backend interface.
  */
@@ -171,6 +171,13 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     rc = vmsvga3dDXContextFromCid(p3dState, cid, &pDXContext);
     AssertRCReturn(rc, rc);
 
+#ifdef DX_STATE_TRACKER
+    pDXContext->u64ContextFlags |= DX_CTX_F_STATE_INPUTLAYOUT
+                                 | DX_CTX_F_STATE_TOPOLOGY
+                                 | DX_CTX_F_STATE_RENDERTARGET
+                                 | DX_CTX_F_STATE_CSTARGET;
+#endif
+
     /* Notify the host backend that context is about to be switched. */
     rc = pSvgaR3State->pFuncsDX->pfnDXSwitchContext(pThisCC, pDXContext);
     if (rc == VINF_NOT_IMPLEMENTED || RT_FAILURE(rc))
@@ -181,8 +188,10 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
      * because they are applied by the backend before each Draw call.
      */
     #define DX_STATE_SAMPLERS          0x00000004
+#ifndef DX_STATE_TRACKER
     #define DX_STATE_INPUTLAYOUT       0x00000008
     #define DX_STATE_TOPOLOGY          0x00000010
+#endif
     #define DX_STATE_BLENDSTATE        0x00000080
     #define DX_STATE_DEPTHSTENCILSTATE 0x00000100
     #define DX_STATE_SOTARGETS         0x00000200
@@ -191,8 +200,10 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     #define DX_STATE_RASTERIZERSTATE   0x00001000
     uint32_t u32TrackedState = 0
         | DX_STATE_SAMPLERS
+#ifndef DX_STATE_TRACKER
         | DX_STATE_INPUTLAYOUT
         | DX_STATE_TOPOLOGY
+#endif
         | DX_STATE_BLENDSTATE
         | DX_STATE_DEPTHSTENCILSTATE
         | DX_STATE_SOTARGETS
@@ -222,6 +233,7 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     }
 
 
+#ifndef DX_STATE_TRACKER
     if (u32TrackedState & DX_STATE_INPUTLAYOUT)
     {
         u32TrackedState &= ~DX_STATE_INPUTLAYOUT;
@@ -243,6 +255,7 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
             rc = pSvgaR3State->pFuncsDX->pfnDXSetTopology(pThisCC, pDXContext, topology);
         AssertRC(rc);
     }
+#endif
 
 
     if (u32TrackedState & DX_STATE_BLENDSTATE)
@@ -744,7 +757,15 @@ int vmsvga3dDXSetInputLayout(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dEl
                         || elementLayoutId < pDXContext->cot.cElementLayout, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifndef DX_STATE_TRACKER
     pDXContext->svgaDXContext.inputAssembly.layoutId = elementLayoutId;
+#else
+    if (pDXContext->svgaDXContext.inputAssembly.layoutId != elementLayoutId)
+    {
+        pDXContext->svgaDXContext.inputAssembly.layoutId = elementLayoutId;
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_INPUTLAYOUT;
+    }
+#endif
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetInputLayout(pThisCC, pDXContext, elementLayoutId);
     return rc;
@@ -816,7 +837,15 @@ int vmsvga3dDXSetTopology(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dPrimi
 
     ASSERT_GUEST_RETURN(topology >= SVGA3D_PRIMITIVE_MIN && topology < SVGA3D_PRIMITIVE_MAX, VERR_INVALID_PARAMETER);
 
+#ifndef DX_STATE_TRACKER
     pDXContext->svgaDXContext.inputAssembly.topology = topology;
+#else
+    if (pDXContext->svgaDXContext.inputAssembly.topology != (uint32)topology)
+    {
+        pDXContext->svgaDXContext.inputAssembly.topology = topology;
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_TOPOLOGY;
+    }
+#endif
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetTopology(pThisCC, pDXContext, topology);
     return rc;
@@ -843,6 +872,7 @@ int vmsvga3dDXSetRenderTargets(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3d
                             || paRenderTargetViewId[i] == SVGA_ID_INVALID, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifndef DX_STATE_TRACKER
     pDXContext->svgaDXContext.renderState.depthStencilViewId = depthStencilViewId;
     for (uint32_t i = 0; i < cRenderTargetViewId; ++i)
         pDXContext->svgaDXContext.renderState.renderTargetViewIds[i] = paRenderTargetViewId[i];
@@ -852,6 +882,37 @@ int vmsvga3dDXSetRenderTargets(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3d
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetRenderTargets(pThisCC, pDXContext, depthStencilViewId, cRenderTargetViewId, paRenderTargetViewId);
     return rc;
+#else
+    bool fModified = false;
+    if (pDXContext->svgaDXContext.renderState.depthStencilViewId != depthStencilViewId)
+    {
+        pDXContext->svgaDXContext.renderState.depthStencilViewId = depthStencilViewId;
+        fModified = true;
+    }
+
+    uint32_t cRenderTargets = 0;
+    for (uint32_t i = 0; i < RT_ELEMENTS(pDXContext->svgaDXContext.renderState.renderTargetViewIds); ++i)
+    {
+        SVGA3dRenderTargetViewId const rtvid = i < cRenderTargetViewId ? paRenderTargetViewId[i] : SVGA3D_INVALID_ID;
+        if (pDXContext->svgaDXContext.renderState.renderTargetViewIds[i] != rtvid)
+        {
+            pDXContext->svgaDXContext.renderState.renderTargetViewIds[i] = rtvid;
+            fModified = true;
+        }
+
+        if (rtvid != SVGA3D_INVALID_ID)
+            cRenderTargets = i + 1;
+    }
+
+    if (fModified)
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_RENDERTARGET;
+
+    /* Micro-optimization, remember how many slot the context actually uses. */
+    pDXContext->cRenderTargets = cRenderTargets;
+
+    rc = pSvgaR3State->pFuncsDX->pfnDXSetRenderTargets(pThisCC, pDXContext, depthStencilViewId, cRenderTargetViewId, paRenderTargetViewId);
+    return rc;
+#endif
 }
 
 
@@ -1640,6 +1701,15 @@ int vmsvga3dDXDefineElementLayout(PVGASTATECC pThisCC, uint32_t idDXContext, SVG
     ASSERT_GUEST_RETURN(elementLayoutId < pDXContext->cot.cElementLayout, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifdef DX_STATE_TRACKER
+    /* Cleanup the element layout. */
+    pSvgaR3State->pFuncsDX->pfnDXDestroyElementLayout(pThisCC, pDXContext, elementLayoutId);
+
+    /* If the current element layout is redefined, then tell the backend to re-apply it. */
+    if (pDXContext->svgaDXContext.inputAssembly.layoutId == elementLayoutId)
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_INPUTLAYOUT;
+#endif
+
     SVGACOTableDXElementLayoutEntry *pEntry = &pDXContext->cot.paElementLayout[elementLayoutId];
     pEntry->elid = elementLayoutId;
     pEntry->numDescs = RT_MIN(cDesc, RT_ELEMENTS(pEntry->descs));
@@ -1690,6 +1760,14 @@ int vmsvga3dDXDestroyElementLayout(PVGASTATECC pThisCC, uint32_t idDXContext, SV
     RT_ZERO(*pEntry);
     pEntry->elid = SVGA3D_INVALID_ID;
 
+#ifdef DX_STATE_TRACKER
+    /* If the current element layout is destroyed, then unset it. */
+    if (pDXContext->svgaDXContext.inputAssembly.layoutId == elementLayoutId)
+    {
+        pDXContext->svgaDXContext.inputAssembly.layoutId = SVGA3D_INVALID_ID;
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_INPUTLAYOUT;
+    }
+#endif
     return rc;
 }
 
@@ -2370,6 +2448,15 @@ static int dxSetOrGrowCOTable(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext
             AssertRC(rc2);
             if (RT_FAILURE(rc2))
                 memset(pvCOT, 0, validSizeInBytes);
+#ifdef DX_STATE_TRACKER
+            if (enmType == SVGA_COTABLE_ELEMENTLAYOUT)
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_INPUTLAYOUT;
+            else if (   enmType == SVGA_COTABLE_RTVIEW
+                     || enmType == SVGA_COTABLE_DSVIEW)
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_RENDERTARGET;
+            else if (enmType == SVGA_COTABLE_UAVIEW)
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_RENDERTARGET | DX_CTX_F_STATE_CSTARGET;
+#endif
         }
     }
 
@@ -2377,7 +2464,7 @@ static int dxSetOrGrowCOTable(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext
 
     pDXContext->aCOTMobs[idxCOTable] = vmsvgaR3MobId(pMob);
 
-    rc = pSvgaR3State->pFuncsDX->pfnDXSetCOTable(pThisCC, pDXContext, enmType, cValidEntries);
+    rc = pSvgaR3State->pFuncsDX->pfnDXSetCOTable(pThisCC, pDXContext, enmType, cValidEntries, fGrow);
 
     return rc;
 }
@@ -2948,12 +3035,34 @@ int vmsvga3dDXSetUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDXS
                             || paUAViewId[i] == SVGA3D_INVALID_ID, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifndef DX_STATE_TRACKER
     for (uint32_t i = 0; i < cUAViewId; ++i)
     {
         SVGA3dUAViewId const uaViewId = paUAViewId[i];
         pDXContext->svgaDXContext.uaViewIds[i] = uaViewId;
     }
     pDXContext->svgaDXContext.uavSpliceIndex = pCmd->uavSpliceIndex;
+#else
+    bool fModified = false;
+    for (uint32_t i = 0; i < cUAViewId; ++i)
+    {
+        SVGA3dUAViewId const uaViewId = paUAViewId[i];
+        if (pDXContext->svgaDXContext.uaViewIds[i] != uaViewId)
+        {
+            pDXContext->svgaDXContext.uaViewIds[i] = uaViewId;
+            fModified = true;
+        }
+    }
+
+    if (pDXContext->svgaDXContext.uavSpliceIndex != pCmd->uavSpliceIndex)
+    {
+        pDXContext->svgaDXContext.uavSpliceIndex = pCmd->uavSpliceIndex;
+        fModified = true;
+    }
+
+    if (fModified)
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_RENDERTARGET;
+#endif
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetUAViews(pThisCC, pDXContext, pCmd->uavSpliceIndex, cUAViewId, paUAViewId);
     return rc;
@@ -3225,11 +3334,27 @@ int vmsvga3dDXSetCSUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdD
                             || paUAViewId[i] == SVGA3D_INVALID_ID, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifndef DX_STATE_TRACKER
     for (uint32_t i = 0; i < cUAViewId; ++i)
     {
         SVGA3dUAViewId const uaViewId = paUAViewId[i];
         pDXContext->svgaDXContext.csuaViewIds[pCmd->startIndex + i] = uaViewId;
     }
+#else
+    bool fModified = false;
+    for (uint32_t i = 0; i < cUAViewId; ++i)
+    {
+        SVGA3dUAViewId const uaViewId = paUAViewId[i];
+        if (pDXContext->svgaDXContext.csuaViewIds[pCmd->startIndex + i] != uaViewId)
+        {
+            pDXContext->svgaDXContext.csuaViewIds[pCmd->startIndex + i] = uaViewId;
+            fModified = true;
+        }
+    }
+
+    if (fModified)
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_CSTARGET;
+#endif
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetCSUAViews(pThisCC, pDXContext, pCmd->startIndex, cUAViewId, paUAViewId);
     return rc;

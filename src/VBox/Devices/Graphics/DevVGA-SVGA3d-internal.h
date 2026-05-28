@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-internal.h 114162 2026-05-20 16:14:07Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-internal.h 114196 2026-05-28 12:01:52Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device - 3D part, internal header.
  */
@@ -980,6 +980,24 @@ static SSMFIELD const g_aVMSVGA3DCONTEXTFields[] =
 
 
 #ifdef VMSVGA3D_DX
+
+/** @todo Temporary development define. */
+#define DX_STATE_TRACKER
+
+/* VMSVGA3DDXCONTEXT::u64ContextFlags */
+#define DX_CTX_F_STATE_RENDERTARGET      0x00000001
+#define DX_CTX_F_STATE_CSTARGET          0x00000002
+#define DX_CTX_F_STATE_SHADERRESOURCE    0x00000004
+#define DX_CTX_F_STATE_INPUTLAYOUT       0x00000008
+#define DX_CTX_F_STATE_TOPOLOGY          0x00000010
+//#define DX_CTX_F_STATE_SAMPLERS          0x00000040
+//#define DX_CTX_F_STATE_BLENDSTATE        0x00000080
+//#define DX_CTX_F_STATE_DEPTHSTENCILSTATE 0x00000100
+//#define DX_CTX_F_STATE_SOTARGETS         0x00000200
+//#define DX_CTX_F_STATE_VIEWPORTS         0x00000400
+//#define DX_CTX_F_STATE_SCISSORRECTS      0x00000800
+//#define DX_CTX_F_STATE_RASTERIZERSTATE   0x00001000
+
 /* The 3D backend DX context. The actual structure is 3D API specific. */
 typedef struct VMSVGA3DBACKENDDXCONTEXT *PVMSVGA3DBACKENDDXCONTEXT;
 
@@ -991,9 +1009,9 @@ typedef struct VMSVGA3DDXCONTEXT
     /** The DX context id. */
     uint32_t                  cid;
     /** . */
-    uint32_t                  u32Reserved;
-    /** . */
     uint32_t                  cRenderTargets;
+    /** Which state has been modified and needs updating, etc. DX_CTX_F_* */
+    uint64_t                  u64ContextFlags;
     /** Backend specific data. */
     PVMSVGA3DBACKENDDXCONTEXT pBackendDXContext;
     /** Copy of the guest memory for this context. The guest will be updated on unbind. */
