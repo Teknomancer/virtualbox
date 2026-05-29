@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114196 2026-05-28 12:01:52Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114220 2026-05-29 20:52:57Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -63,6 +63,10 @@
 
 /* Always flush after submitting a draw call for debugging. */
 //#define DX_FLUSH_AFTER_DRAW
+/* Enable detailed checks (they use AssertRelease):
+ *  - compare the actual state of D3D11 pipeline with what the guest expects in setupPipeline.
+ */
+//#define DX_STRICT
 
 #define D3D_RELEASE_ARRAY(a_Count, a_papArray) do { \
     for (uint32_t i = 0; i < (a_Count); ++i) \
@@ -1652,9 +1656,21 @@ static ID3D11Resource *dxResource(PVMSVGA3DSURFACE pSurface)
 }
 
 
+DECLINLINE(SVGA3dBlendStateId) svgaBlendId(PVMSVGA3DDXCONTEXT pDXContext, SVGA3dBlendStateId blendId)
+{
+    return vmsvga3dDXContextObjectId(blendId, pDXContext->cot.cBlendState);
+}
+
+
 DECLINLINE(SVGA3dBlendStateId) dxBlendId(PVMSVGA3DDXCONTEXT pDXContext, SVGA3dBlendStateId blendId)
 {
     return vmsvga3dDXContextObjectId(blendId, pDXContext->pBackendDXContext->cBlendState);
+}
+
+
+DECLINLINE(SVGA3dDepthStencilStateId) svgaDepthStencilId(PVMSVGA3DDXCONTEXT pDXContext, SVGA3dDepthStencilStateId depthStencilId)
+{
+    return vmsvga3dDXContextObjectId(depthStencilId, pDXContext->cot.cDepthStencil);
 }
 
 
@@ -1667,6 +1683,12 @@ DECLINLINE(SVGA3dDepthStencilStateId) dxDepthStencilId(PVMSVGA3DDXCONTEXT pDXCon
 DECLINLINE(SVGA3dSamplerId) dxSamplerId(PVMSVGA3DDXCONTEXT pDXContext, SVGA3dSamplerId samplerId)
 {
     return vmsvga3dDXContextObjectId(samplerId, pDXContext->pBackendDXContext->cSamplerState);
+}
+
+
+DECLINLINE(SVGA3dRasterizerStateId) svgaRasterizerId(PVMSVGA3DDXCONTEXT pDXContext, SVGA3dRasterizerStateId rasterizerId)
+{
+    return vmsvga3dDXContextObjectId(rasterizerId, pDXContext->cot.cRasterizerState);
 }
 
 
@@ -7769,6 +7791,260 @@ static void dxBindRenderTargetViews(PVMSVGA3DDXCONTEXT pDXContext, DXDEVICE *pDX
                                                    apUnorderedAccessViews,
                                                    aUAVInitialCounts);
 }
+
+
+static void dxUpdateInputLayout(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    ID3D11InputLayout *pInputLayout;
+
+    SVGA3dElementLayoutId const elementLayoutId = dxElementLayoutId(pDXContext, pDXContext->svgaDXContext.inputAssembly.layoutId);
+    if (elementLayoutId != SVGA3D_INVALID_ID)
+    {
+        DXELEMENTLAYOUT *pDXElementLayout = &pDXContext->pBackendDXContext->paElementLayout[elementLayoutId];
+        if (pDXElementLayout->pElementLayout == NULL)
+        {
+            uint32_t const idxShaderState = SVGA3D_SHADERTYPE_VS - SVGA3D_SHADERTYPE_MIN;
+            uint32_t const shid = pDXContext->svgaDXContext.shaderState[idxShaderState].shaderId;
+            if (shid < pDXContext->pBackendDXContext->cShader)
+            {
+                DXSHADER *pDXShader = &pDXContext->pBackendDXContext->paShader[shid];
+                if (pDXShader->pvDXBC)
+                    dxCreateInputLayout(pThisCC, pDXContext, elementLayoutId, pDXShader);
+                else
+                    LogRelMax(16, ("VMSVGA: DX shader bytecode is not available in DXSetInputLayout: shid = %u\n", shid));
+            }
+            else
+                LogRelMax(16, ("VMSVGA: DX shader is not set in DXSetInputLayout: shid = %u\n", shid));
+        }
+
+        pInputLayout = pDXElementLayout->pElementLayout;
+    }
+    else
+        pInputLayout = NULL;
+
+    pDXDevice->pImmediateContext->IASetInputLayout(pInputLayout);
+}
+
+
+static void dxUpdateTopology(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    SVGA3dPrimitiveType const enmPrimitiveType = (SVGA3dPrimitiveType)pDXContext->svgaDXContext.inputAssembly.topology;
+    D3D11_PRIMITIVE_TOPOLOGY const enmTopology = dxTopology(enmPrimitiveType);
+    pDXDevice->pImmediateContext->IASetPrimitiveTopology(enmTopology);
+}
+
+
+static void dxUpdateBlendState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    ID3D11BlendState *pBlendState = NULL;
+    const FLOAT *BlendFactor = NULL;
+    UINT SampleMask = 0;
+
+    SVGA3dBlendStateId blendId = dxBlendId(pDXContext, pDXContext->svgaDXContext.renderState.blendStateId);
+    blendId = svgaBlendId(pDXContext, blendId);
+    if (blendId != SVGA3D_INVALID_ID)
+    {
+        ID3D11BlendState1 **ppBlendState = &pDXContext->pBackendDXContext->papBlendState[blendId];
+        if (*ppBlendState == NULL)
+        {
+            SVGACOTableDXBlendStateEntry const *pEntry = &pDXContext->cot.paBlendState[blendId];
+            dxBlendStateCreate(pDXDevice, pEntry, ppBlendState);
+        }
+
+        if (*ppBlendState)
+        {
+            pBlendState = *ppBlendState;
+            BlendFactor = (float *)&pDXContext->svgaDXContext.renderState.blendFactor[0];
+            SampleMask = pDXContext->svgaDXContext.renderState.sampleMask;
+        }
+    }
+
+    pDXDevice->pImmediateContext->OMSetBlendState(pBlendState, BlendFactor, SampleMask);
+}
+
+
+static void dxUpdateDepthStencilState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    ID3D11DepthStencilState *pDepthStencilState = NULL;
+    UINT StencilRef = 0;
+
+    SVGA3dDepthStencilStateId depthStencilId = dxDepthStencilId(pDXContext, pDXContext->svgaDXContext.renderState.depthStencilStateId);
+    depthStencilId = svgaDepthStencilId(pDXContext, depthStencilId);
+    if (depthStencilId != SVGA3D_INVALID_ID)
+    {
+        ID3D11DepthStencilState **ppDepthStencilState = &pDXContext->pBackendDXContext->papDepthStencilState[depthStencilId];
+        if (*ppDepthStencilState == NULL)
+        {
+             SVGACOTableDXDepthStencilEntry const *pEntry = &pDXContext->cot.paDepthStencil[depthStencilId];
+             dxDepthStencilStateCreate(pDXDevice, pEntry, ppDepthStencilState);
+        }
+
+        if (*ppDepthStencilState)
+        {
+            pDepthStencilState = *ppDepthStencilState;
+            StencilRef = pDXContext->svgaDXContext.renderState.stencilRef;
+        }
+    }
+
+    pDXDevice->pImmediateContext->OMSetDepthStencilState(pDepthStencilState, StencilRef);
+}
+
+
+static void dxUpdateViewports(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    UINT NumViewports = pDXContext->svgaDXContext.numViewports;
+    /* D3D11_VIEWPORT is identical to SVGA3dViewport. */
+    D3D11_VIEWPORT *pViewports = NumViewports ? (D3D11_VIEWPORT *)pDXContext->svgaDXContext.viewports : NULL;
+
+    pDXDevice->pImmediateContext->RSSetViewports(NumViewports, pViewports);
+}
+
+
+static void dxUpdateScissorRects(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    UINT NumRects = pDXContext->svgaDXContext.numScissorRects;
+    /* D3D11_RECT is identical to SVGASignedRect. */
+    D3D11_RECT *pRects = (D3D11_RECT *)pDXContext->svgaDXContext.scissorRects;
+
+    pDXDevice->pImmediateContext->RSSetScissorRects(NumRects, pRects);
+}
+
+
+static void dxUpdateRasterizerState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    ID3D11RasterizerState1 *pRasterizerState = NULL;
+
+    SVGA3dRasterizerStateId rasterizerId = dxRasterizerId(pDXContext, pDXContext->svgaDXContext.renderState.rasterizerStateId);
+    rasterizerId = svgaRasterizerId(pDXContext, rasterizerId);
+    if (rasterizerId != SVGA3D_INVALID_ID)
+    {
+        ID3D11RasterizerState1 **ppRasterizerState = &pDXContext->pBackendDXContext->papRasterizerState[rasterizerId];
+        if (*ppRasterizerState == NULL)
+        {
+            SVGACOTableDXRasterizerStateEntry const *pEntry = &pDXContext->cot.paRasterizerState[rasterizerId];
+            dxRasterizerStateCreate(pDXDevice, pEntry, ppRasterizerState);
+        }
+
+        if (*ppRasterizerState)
+            pRasterizerState = *ppRasterizerState;
+    }
+
+    pDXDevice->pImmediateContext->RSSetState(pRasterizerState);
+}
+
+
+# ifdef DX_STRICT
+static void dxCheckState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+    struct
+    {
+        D3D11_PRIMITIVE_TOPOLOGY    Topology;
+        ID3D11InputLayout          *pInputLayout;
+        ID3D11Buffer               *pConstantBuffer;
+        ID3D11VertexShader         *pVertexShader;
+        ID3D11HullShader           *pHullShader;
+        ID3D11DomainShader         *pDomainShader;
+        ID3D11GeometryShader       *pGeometryShader;
+        ID3D11ShaderResourceView   *pShaderResourceView;
+        ID3D11PixelShader          *pPixelShader;
+        ID3D11SamplerState         *pSamplerState;
+        ID3D11RasterizerState      *pRasterizerState;
+        ID3D11BlendState           *pBlendState;
+        ID3D11DepthStencilState    *pDepthStencilState;
+        UINT                        StencilRef;
+        FLOAT                       BlendFactor[4];
+        UINT                        SampleMask;
+        ID3D11RenderTargetView     *apRenderTargetView[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
+        ID3D11DepthStencilView     *pDepthStencilView;
+        UINT                        NumViewports;
+        D3D11_VIEWPORT              aViewport[D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE];
+    } p; /* pipeline */
+    RT_ZERO(p);
+
+    ID3D11DeviceContext1 *pImmediateContext = pDXDevice->pImmediateContext;
+
+    pImmediateContext->IAGetPrimitiveTopology(&p.Topology);
+    pImmediateContext->IAGetInputLayout(&p.pInputLayout);
+    pImmediateContext->VSGetConstantBuffers(0, 1, &p.pConstantBuffer);
+    pImmediateContext->VSGetShader(&p.pVertexShader, NULL, NULL);
+    pImmediateContext->HSGetShader(&p.pHullShader, NULL, NULL);
+    pImmediateContext->DSGetShader(&p.pDomainShader, NULL, NULL);
+    pImmediateContext->GSGetShader(&p.pGeometryShader, NULL, NULL);
+    pImmediateContext->PSGetShaderResources(0, 1, &p.pShaderResourceView);
+    pImmediateContext->PSGetShader(&p.pPixelShader, NULL, NULL);
+    pImmediateContext->PSGetSamplers(0, 1, &p.pSamplerState);
+    pImmediateContext->RSGetState(&p.pRasterizerState);
+    pImmediateContext->OMGetBlendState(&p.pBlendState, p.BlendFactor, &p.SampleMask);
+    pImmediateContext->OMGetDepthStencilState(&p.pDepthStencilState, &p.StencilRef);
+    pImmediateContext->OMGetRenderTargets(RT_ELEMENTS(p.apRenderTargetView), p.apRenderTargetView, &p.pDepthStencilView);
+    p.NumViewports = RT_ELEMENTS(p.aViewport);
+    pImmediateContext->RSGetViewports(&p.NumViewports, &p.aViewport[0]);
+
+    SVGA3dElementLayoutId elementLayoutId = dxElementLayoutId(pDXContext, pDXContext->svgaDXContext.inputAssembly.layoutId);
+    if (elementLayoutId != SVGA3D_INVALID_ID)
+    {
+        DXELEMENTLAYOUT *pDXElementLayout = &pDXContext->pBackendDXContext->paElementLayout[elementLayoutId];
+        AssertRelease(p.pInputLayout == pDXElementLayout->pElementLayout);
+    }
+    else
+        AssertRelease(p.pInputLayout == NULL);
+
+    D3D11_PRIMITIVE_TOPOLOGY enmTopology = dxTopology((SVGA3dPrimitiveType)pDXContext->svgaDXContext.inputAssembly.topology);
+    AssertRelease(p.Topology == enmTopology);
+
+    SVGA3dBlendStateId blendId = dxBlendId(pDXContext, pDXContext->svgaDXContext.renderState.blendStateId);
+    if (blendId != SVGA3D_INVALID_ID)
+        AssertRelease(p.pBlendState == pDXContext->pBackendDXContext->papBlendState[blendId]);
+    else
+        AssertRelease(p.pBlendState == NULL);
+
+    SVGA3dDepthStencilStateId depthStencilId = dxDepthStencilId(pDXContext, pDXContext->svgaDXContext.renderState.depthStencilStateId);
+    if (depthStencilId != SVGA3D_INVALID_ID)
+        AssertRelease(p.pDepthStencilState == pDXContext->pBackendDXContext->papDepthStencilState[depthStencilId]);
+    else
+        AssertRelease(p.pDepthStencilState == NULL);
+
+    UINT NumViewports = pDXContext->svgaDXContext.numViewports;
+    /* D3D11_VIEWPORT is identical to SVGA3dViewport. */
+    D3D11_VIEWPORT *pViewports = NumViewports ? (D3D11_VIEWPORT *)pDXContext->svgaDXContext.viewports : NULL;
+    AssertRelease(p.NumViewports == NumViewports);
+    for (UINT i = 0; i < NumViewports; ++i)
+    {
+        D3D11_VIEWPORT const *v1 = &p.aViewport[i];
+        D3D11_VIEWPORT const *v2 = &pViewports[i];
+        AssertRelease(   v1->TopLeftX == v2->TopLeftX
+                      && v1->TopLeftY == v2->TopLeftY
+                      && v1->Width == v2->Width
+                      && v1->Height == v2->Height
+                      && v1->MinDepth == v2->MinDepth
+                      && v1->MaxDepth == v2->MaxDepth
+                     );
+    }
+
+    SVGA3dRasterizerStateId rasterizerId = dxRasterizerId(pDXContext, pDXContext->svgaDXContext.renderState.rasterizerStateId);
+    if (rasterizerId != SVGA3D_INVALID_ID)
+        AssertRelease(p.pRasterizerState == pDXContext->pBackendDXContext->papRasterizerState[rasterizerId]);
+    else
+        AssertRelease(p.pRasterizerState == NULL);
+
+    D3D_RELEASE(p.pInputLayout);
+    D3D_RELEASE(p.pConstantBuffer);
+    D3D_RELEASE(p.pVertexShader);
+
+    D3D_RELEASE(p.pHullShader);
+    D3D_RELEASE(p.pDomainShader);
+    D3D_RELEASE(p.pGeometryShader);
+
+    D3D_RELEASE(p.pShaderResourceView);
+    D3D_RELEASE(p.pPixelShader);
+    D3D_RELEASE(p.pSamplerState);
+    D3D_RELEASE(p.pRasterizerState);
+    D3D_RELEASE(p.pBlendState);
+    D3D_RELEASE(p.pDepthStencilState);
+    D3D_RELEASE_ARRAY(RT_ELEMENTS(p.apRenderTargetView), p.apRenderTargetView);
+    D3D_RELEASE(p.pDepthStencilView);
+}
+# endif /* DX_STRICT */
 #endif /* DX_STATE_TRACKER */
 
 
@@ -8137,42 +8413,7 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
     if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_INPUTLAYOUT)
     {
         pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_INPUTLAYOUT;
-
-        ID3D11InputLayout *pInputLayout;
-
-        SVGA3dElementLayoutId const elementLayoutId = dxElementLayoutId(pDXContext, pDXContext->svgaDXContext.inputAssembly.layoutId);
-        if (elementLayoutId != SVGA3D_INVALID_ID)
-        {
-            DXELEMENTLAYOUT *pDXElementLayout = &pDXContext->pBackendDXContext->paElementLayout[elementLayoutId];
-            if (!pDXElementLayout->pElementLayout)
-            {
-                uint32_t const idxShaderState = SVGA3D_SHADERTYPE_VS - SVGA3D_SHADERTYPE_MIN;
-                uint32_t const shid = pDXContext->svgaDXContext.shaderState[idxShaderState].shaderId;
-                if (shid < pDXContext->pBackendDXContext->cShader)
-                {
-                    DXSHADER *pDXShader = &pDXContext->pBackendDXContext->paShader[shid];
-                    if (pDXShader->pvDXBC)
-                        dxCreateInputLayout(pThisCC, pDXContext, elementLayoutId, pDXShader);
-                    else
-                        LogRelMax(16, ("VMSVGA: DX shader bytecode is not available in DXSetInputLayout: shid = %u\n", shid));
-                }
-                else
-                    LogRelMax(16, ("VMSVGA: DX shader is not set in DXSetInputLayout: shid = %u\n", shid));
-            }
-
-            pInputLayout = pDXElementLayout->pElementLayout;
-            AssertPtr(pInputLayout);
-
-            LogFunc(("Input layout id %u\n", elementLayoutId));
-        }
-        else
-            pInputLayout = NULL;
-
-        pDevice->pImmediateContext->IASetInputLayout(pInputLayout);
-    }
-    else
-    {
-        LogFunc(("Skipped input layout id %u\n", dxElementLayoutId(pDXContext, pDXContext->svgaDXContext.inputAssembly.layoutId)));
+        dxUpdateInputLayout(pThisCC, pDXDevice, pDXContext);
     }
 #endif
 
@@ -8180,17 +8421,45 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
     if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_TOPOLOGY)
     {
         pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_TOPOLOGY;
-
-        SVGA3dPrimitiveType const enmPrimitiveType = (SVGA3dPrimitiveType)pDXContext->svgaDXContext.inputAssembly.topology;
-        D3D11_PRIMITIVE_TOPOLOGY const enmTopology = dxTopology(enmPrimitiveType);
-        pDevice->pImmediateContext->IASetPrimitiveTopology(enmTopology);
+        dxUpdateTopology(pDXDevice, pDXContext);
     }
-    else
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_BLENDSTATE)
     {
-        LogFunc(("Skipped topology %u\n", pDXContext->svgaDXContext.inputAssembly.topology));
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_BLENDSTATE;
+        dxUpdateBlendState(pDXDevice, pDXContext);
     }
-#endif
 
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_DEPTHSTENCILSTATE)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_DEPTHSTENCILSTATE;
+        dxUpdateDepthStencilState(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_VIEWPORT)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_VIEWPORT;
+        dxUpdateViewports(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SCISSORRECT)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SCISSORRECT;
+        dxUpdateScissorRects(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_RASTERIZERSTATE)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_RASTERIZERSTATE;
+        dxUpdateRasterizerState(pDXDevice, pDXContext);
+    }
+
+# ifdef DX_STRICT
+    dxCheckState(pDXDevice, pDXContext);
+# endif
+#endif /* DX_STATE_TRACKER */
+
+    LogFunc(("Input layout id %u\n", pDXContext->svgaDXContext.inputAssembly.layoutId));
     LogFunc(("Topology %u\n", pDXContext->svgaDXContext.inputAssembly.topology));
     LogFunc(("Blend id %u\n", pDXContext->svgaDXContext.renderState.blendStateId));
 }
@@ -8771,6 +9040,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetRenderTargets(PVGASTATECC pThisCC, PVM
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetBlendState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dBlendStateId blendId, float const blendFactor[4], uint32_t sampleMask)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend);
 
@@ -8786,6 +9056,9 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetBlendState(PVGASTATECC pThisCC, PVMSVG
     }
     else
         pDevice->pImmediateContext->OMSetBlendState(NULL, NULL, 0);
+#else
+    RT_NOREF(pThisCC, pDXContext, blendId, blendFactor, sampleMask);
+#endif
 
     return VINF_SUCCESS;
 }
@@ -8793,6 +9066,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetBlendState(PVGASTATECC pThisCC, PVMSVG
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetDepthStencilState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dDepthStencilStateId depthStencilId, uint32_t stencilRef)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend);
 
@@ -8808,6 +9082,9 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetDepthStencilState(PVGASTATECC pThisCC,
     }
     else
         pDevice->pImmediateContext->OMSetDepthStencilState(NULL, 0);
+#else
+    RT_NOREF(pThisCC, pDXContext, depthStencilId, stencilRef);
+#endif
 
     return VINF_SUCCESS;
 }
@@ -8815,6 +9092,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetDepthStencilState(PVGASTATECC pThisCC,
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetRasterizerState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dRasterizerStateId rasterizerId)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     DXDEVICE *pDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturn(pDevice->pDevice, VERR_INVALID_STATE);
@@ -8830,6 +9108,9 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetRasterizerState(PVGASTATECC pThisCC, P
     }
     else
         pDevice->pImmediateContext->RSSetState(NULL);
+#else
+    RT_NOREF(pThisCC, pDXContext, rasterizerId);
+#endif
 
     return VINF_SUCCESS;
 }
@@ -9238,6 +9519,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetSOTargets(PVGASTATECC pThisCC, PVMSVGA
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetViewports(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, uint32_t cViewport, SVGA3dViewport const *paViewport)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     DXDEVICE *pDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturn(pDevice->pDevice, VERR_INVALID_STATE);
@@ -9248,12 +9530,16 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetViewports(PVGASTATECC pThisCC, PVMSVGA
     D3D11_VIEWPORT *pViewports = (D3D11_VIEWPORT *)paViewport;
 
     pDevice->pImmediateContext->RSSetViewports(cViewport, pViewports);
+#else
+    RT_NOREF(pThisCC, pDXContext, cViewport, paViewport);
+#endif
     return VINF_SUCCESS;
 }
 
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetScissorRects(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, uint32_t cRect, SVGASignedRect const *paRect)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend, pDXContext);
 
@@ -9264,6 +9550,9 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetScissorRects(PVGASTATECC pThisCC, PVMS
     D3D11_RECT *pRects = (D3D11_RECT *)paRect;
 
     pDevice->pImmediateContext->RSSetScissorRects(cRect, pRects);
+#else
+    RT_NOREF(pThisCC, pDXContext, cRect, paRect);
+#endif
     return VINF_SUCCESS;
 }
 
@@ -9911,6 +10200,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyElementLayout(PVGASTATECC pThisCC,
 }
 
 
+#ifndef DX_STATE_TRACKER
 static int dxDefineBlendState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext,
                               SVGA3dBlendStateId blendId, SVGACOTableDXBlendStateEntry const *pEntry)
 {
@@ -9926,15 +10216,21 @@ static int dxDefineBlendState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext
         return VINF_SUCCESS;
     return VERR_INVALID_STATE;
 }
+#endif
 
 
 static DECLCALLBACK(int) vmsvga3dBackDXDefineBlendState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext,
                                                         SVGA3dBlendStateId blendId, SVGACOTableDXBlendStateEntry const *pEntry)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend);
 
     return dxDefineBlendState(pThisCC, pDXContext, blendId, pEntry);
+#else
+    RT_NOREF(pThisCC, pDXContext, blendId, pEntry);
+    return VINF_SUCCESS;
+#endif
 }
 
 
@@ -9952,6 +10248,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyBlendState(PVGASTATECC pThisCC, PV
 }
 
 
+#ifndef DX_STATE_TRACKER
 static int dxDefineDepthStencilState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dDepthStencilStateId depthStencilId, SVGACOTableDXDepthStencilEntry const *pEntry)
 {
     DXDEVICE *pDevice = dxDeviceGet(pThisCC->svga.p3dState);
@@ -9966,14 +10263,20 @@ static int dxDefineDepthStencilState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDX
         return VINF_SUCCESS;
     return VERR_INVALID_STATE;
 }
+#endif
 
 
 static DECLCALLBACK(int) vmsvga3dBackDXDefineDepthStencilState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dDepthStencilStateId depthStencilId, SVGACOTableDXDepthStencilEntry const *pEntry)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend);
 
     return dxDefineDepthStencilState(pThisCC, pDXContext, depthStencilId, pEntry);
+#else
+    RT_NOREF(pThisCC, pDXContext, depthStencilId, pEntry);
+    return VINF_SUCCESS;
+#endif
 }
 
 
@@ -9991,6 +10294,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyDepthStencilState(PVGASTATECC pThi
 }
 
 
+#ifndef DX_STATE_TRACKER
 static int dxDefineRasterizerState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dRasterizerStateId rasterizerId, SVGACOTableDXRasterizerStateEntry const *pEntry)
 {
     DXDEVICE *pDevice = dxDeviceGet(pThisCC->svga.p3dState);
@@ -10005,14 +10309,20 @@ static int dxDefineRasterizerState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXCo
         return VINF_SUCCESS;
     return VERR_INVALID_STATE;
 }
+#endif
 
 
 static DECLCALLBACK(int) vmsvga3dBackDXDefineRasterizerState(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dRasterizerStateId rasterizerId, SVGACOTableDXRasterizerStateEntry const *pEntry)
 {
+#ifndef DX_STATE_TRACKER
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend);
 
     return dxDefineRasterizerState(pThisCC, pDXContext, rasterizerId, pEntry);
+#else
+    RT_NOREF(pThisCC, pDXContext, rasterizerId, pEntry);
+    return VINF_SUCCESS;
+#endif
 }
 
 
@@ -10437,6 +10747,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCOTable(PVGASTATECC pThisCC, PVMSVGA3D
 #endif
             break;
         case SVGA_COTABLE_BLENDSTATE:
+#ifndef DX_STATE_TRACKER
             if (pBackendDXContext->papBlendState)
             {
                 for (uint32_t i = cValidEntries; i < pBackendDXContext->cBlendState; ++i)
@@ -10455,8 +10766,24 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCOTable(PVGASTATECC pThisCC, PVMSVGA3D
 
                 dxDefineBlendState(pThisCC, pDXContext, i, pEntry);
             }
+#else
+            if (!fGrow)
+                cValidEntries = 0;
+
+            /* Clear current entries, they will be re-created in setupPipeline. */
+            if (pBackendDXContext->papBlendState)
+            {
+                for (uint32_t i = cValidEntries; i < pBackendDXContext->cBlendState; ++i)
+                    D3D_RELEASE(pBackendDXContext->papBlendState[i]);
+            }
+
+            rc = dxCOTableRealloc((void **)&pBackendDXContext->papBlendState, &pBackendDXContext->cBlendState,
+                                  sizeof(pBackendDXContext->papBlendState[0]), pDXContext->cot.cBlendState, cValidEntries);
+            AssertRCBreak(rc);
+#endif
             break;
         case SVGA_COTABLE_DEPTHSTENCIL:
+#ifndef DX_STATE_TRACKER
             if (pBackendDXContext->papDepthStencilState)
             {
                 for (uint32_t i = cValidEntries; i < pBackendDXContext->cDepthStencilState; ++i)
@@ -10475,8 +10802,24 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCOTable(PVGASTATECC pThisCC, PVMSVGA3D
 
                 dxDefineDepthStencilState(pThisCC, pDXContext, i, pEntry);
             }
+#else
+            if (!fGrow)
+                cValidEntries = 0;
+
+            /* Clear current entries, they will be re-created in setupPipeline. */
+            if (pBackendDXContext->papDepthStencilState)
+            {
+                for (uint32_t i = cValidEntries; i < pBackendDXContext->cDepthStencilState; ++i)
+                    D3D_RELEASE(pBackendDXContext->papDepthStencilState[i]);
+            }
+
+            rc = dxCOTableRealloc((void **)&pBackendDXContext->papDepthStencilState, &pBackendDXContext->cDepthStencilState,
+                                  sizeof(pBackendDXContext->papDepthStencilState[0]), pDXContext->cot.cDepthStencil, cValidEntries);
+            AssertRCBreak(rc);
+#endif
             break;
         case SVGA_COTABLE_RASTERIZERSTATE:
+#ifndef DX_STATE_TRACKER
             if (pBackendDXContext->papRasterizerState)
             {
                 for (uint32_t i = cValidEntries; i < pBackendDXContext->cRasterizerState; ++i)
@@ -10495,6 +10838,21 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCOTable(PVGASTATECC pThisCC, PVMSVGA3D
 
                 dxDefineRasterizerState(pThisCC, pDXContext, i, pEntry);
             }
+#else
+            if (!fGrow)
+                cValidEntries = 0;
+
+            /* Clear current entries, they will be re-created in setupPipeline. */
+            if (pBackendDXContext->papRasterizerState)
+            {
+                for (uint32_t i = cValidEntries; i < pBackendDXContext->cRasterizerState; ++i)
+                    D3D_RELEASE(pBackendDXContext->papRasterizerState[i]);
+            }
+
+            rc = dxCOTableRealloc((void **)&pBackendDXContext->papRasterizerState, &pBackendDXContext->cRasterizerState,
+                                  sizeof(pBackendDXContext->papRasterizerState[0]), pDXContext->cot.cRasterizerState, cValidEntries);
+            AssertRCBreak(rc);
+#endif
             break;
         case SVGA_COTABLE_SAMPLER:
             if (pBackendDXContext->papSamplerState)
