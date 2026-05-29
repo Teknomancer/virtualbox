@@ -1,4 +1,4 @@
-/* $Id: xml.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: xml.cpp 114212 2026-05-29 14:34:26Z alexander.eichner@oracle.com $ */
 /** @file
  * IPRT - XML Manipulation API.
  *
@@ -2015,9 +2015,21 @@ int XmlStringWriter::write(const Document &rDoc, RTCString *pStrDst)
 
     GlobalLock lock;
 
+#if RT_CLANG_PREREQ(3, 4) /* Needs to come first because clang also triggers on RT_GNUC_PREREQ() but doesn't work there. */
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif RT_GNUC_PREREQ(4, 6)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     xmlIndentTreeOutput = 1;
     xmlTreeIndentString = "  ";
     xmlSaveNoEmptyTags  = 0;
+#if RT_CLANG_PREREQ(3, 4)
+# pragma clang diagnostic pop
+#elif RT_GNUC_PREREQ(4, 6)
+# pragma GCC diagnostic pop
+#endif
 
     /*
      * Do a pass to calculate the size.
@@ -2278,10 +2290,22 @@ void XmlFileWriter::writeInternal(const char *pcszFilename, bool fSafe)
 
     GlobalLock lock;
 
+#if RT_CLANG_PREREQ(3, 4) /* Needs to come first because clang also triggers on RT_GNUC_PREREQ() but doesn't work there. */
+# pragma clang diagnostic push
+# pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif RT_GNUC_PREREQ(4, 6)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     /* serialize to the stream */
     xmlIndentTreeOutput = 1;
     xmlTreeIndentString = "  ";
     xmlSaveNoEmptyTags = 0;
+#if RT_CLANG_PREREQ(3, 4)
+# pragma clang diagnostic pop
+#elif RT_GNUC_PREREQ(4, 6)
+# pragma GCC diagnostic pop
+#endif
 
     xmlSaveCtxtPtr saveCtxt;
     if (!(saveCtxt = xmlSaveToIO(WriteCallback,
