@@ -1,4 +1,4 @@
-/* $Id: RecordingStream.h 113708 2026-04-02 09:19:01Z andreas.loeffler@oracle.com $ */
+/* $Id: RecordingStream.h 114204 2026-05-29 13:36:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Recording stream code header.
  */
@@ -44,12 +44,6 @@
 #include <iprt/critsect.h>
 #include <iprt/req.h>
 #include <iprt/semaphore.h>
-
-#ifdef LOG_GROUP
-# undef LOG_GROUP
-#endif
-#define LOG_GROUP LOG_GROUP_RECORDING
-#include "LoggingNew.h"
 
 #include "RecordingInternals.h"
 #include "RecordingRender.h"
