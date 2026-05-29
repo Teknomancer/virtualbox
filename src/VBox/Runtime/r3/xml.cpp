@@ -1,4 +1,4 @@
-/* $Id: xml.cpp 114217 2026-05-29 18:07:15Z alexander.eichner@oracle.com $ */
+/* $Id: xml.cpp 114218 2026-05-29 18:14:12Z alexander.eichner@oracle.com $ */
 /** @file
  * IPRT - XML Manipulation API.
  *
@@ -2038,7 +2038,7 @@ int XmlStringWriter::write(const Document &rDoc, RTCString *pStrDst)
 
 #if LIBXML_VERSION >= 21400
     int rcXml2 = xmlSaveSetIndentString(pSaveCtx, "  ");
-    Assert(rcXml2 == 0); /* This shouldn't fail, unless the indent string is invalid. */
+    Assert(rcXml2 == 0); RT_NOREF(rcXml2); /* This shouldn't fail, unless the indent string is invalid. */
 #endif
 
     long rcXml = xmlSaveDoc(pSaveCtx, rDoc.m->plibDocument);
@@ -2313,7 +2313,7 @@ void XmlFileWriter::writeInternal(const char *pcszFilename, bool fSafe)
 
 #if LIBXML_VERSION >= 21400
     int rcXml2 = xmlSaveSetIndentString(saveCtxt, "  ");
-    Assert(rcXml2 == 0); /* This shouldn't fail, unless the indent string is invalid. */
+    Assert(rcXml2 == 0); RT_NOREF(rcXml2); /* This shouldn't fail, unless the indent string is invalid. */
 #endif
 
     long rc = xmlSaveDoc(saveCtxt, m->pDoc->m->plibDocument);
