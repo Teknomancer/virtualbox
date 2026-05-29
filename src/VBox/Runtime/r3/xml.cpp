@@ -1,4 +1,4 @@
-/* $Id: xml.cpp 114212 2026-05-29 14:34:26Z alexander.eichner@oracle.com $ */
+/* $Id: xml.cpp 114217 2026-05-29 18:07:15Z alexander.eichner@oracle.com $ */
 /** @file
  * IPRT - XML Manipulation API.
  *
@@ -2015,20 +2015,10 @@ int XmlStringWriter::write(const Document &rDoc, RTCString *pStrDst)
 
     GlobalLock lock;
 
-#if RT_CLANG_PREREQ(3, 4) /* Needs to come first because clang also triggers on RT_GNUC_PREREQ() but doesn't work there. */
-# pragma clang diagnostic push
-# pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif RT_GNUC_PREREQ(4, 6)
-# pragma GCC diagnostic push
-# pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
+#if LIBXML_VERSION < 21400
     xmlIndentTreeOutput = 1;
     xmlTreeIndentString = "  ";
     xmlSaveNoEmptyTags  = 0;
-#if RT_CLANG_PREREQ(3, 4)
-# pragma clang diagnostic pop
-#elif RT_GNUC_PREREQ(4, 6)
-# pragma GCC diagnostic pop
 #endif
 
     /*
@@ -2036,9 +2026,20 @@ int XmlStringWriter::write(const Document &rDoc, RTCString *pStrDst)
      */
     size_t cbOutput = 1; /* zero term */
 
-    xmlSaveCtxtPtr pSaveCtx= xmlSaveToIO(WriteCallbackForSize, CloseCallback, &cbOutput, NULL /*pszEncoding*/, XML_SAVE_FORMAT);
+    xmlSaveCtxtPtr pSaveCtx= xmlSaveToIO(WriteCallbackForSize, CloseCallback, &cbOutput, NULL /*pszEncoding*/,
+                                           XML_SAVE_FORMAT
+#if LIBXML_VERSION >= 21400
+                                         | XML_SAVE_EMPTY
+                                         | XML_SAVE_INDENT
+#endif
+                                        );
     if (!pSaveCtx)
         return VERR_NO_MEMORY;
+
+#if LIBXML_VERSION >= 21400
+    int rcXml2 = xmlSaveSetIndentString(pSaveCtx, "  ");
+    Assert(rcXml2 == 0); /* This shouldn't fail, unless the indent string is invalid. */
+#endif
 
     long rcXml = xmlSaveDoc(pSaveCtx, rDoc.m->plibDocument);
     xmlSaveClose(pSaveCtx);
@@ -2290,21 +2291,11 @@ void XmlFileWriter::writeInternal(const char *pcszFilename, bool fSafe)
 
     GlobalLock lock;
 
-#if RT_CLANG_PREREQ(3, 4) /* Needs to come first because clang also triggers on RT_GNUC_PREREQ() but doesn't work there. */
-# pragma clang diagnostic push
-# pragma clang diagnostic ignored "-Wdeprecated-declarations"
-#elif RT_GNUC_PREREQ(4, 6)
-# pragma GCC diagnostic push
-# pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
     /* serialize to the stream */
+#if LIBXML_VERSION < 21400
     xmlIndentTreeOutput = 1;
     xmlTreeIndentString = "  ";
-    xmlSaveNoEmptyTags = 0;
-#if RT_CLANG_PREREQ(3, 4)
-# pragma clang diagnostic pop
-#elif RT_GNUC_PREREQ(4, 6)
-# pragma GCC diagnostic pop
+    xmlSaveNoEmptyTags  = 0;
 #endif
 
     xmlSaveCtxtPtr saveCtxt;
@@ -2312,8 +2303,18 @@ void XmlFileWriter::writeInternal(const char *pcszFilename, bool fSafe)
                                  CloseCallback,
                                  &context,
                                  NULL,
-                                 XML_SAVE_FORMAT)))
+                                 XML_SAVE_FORMAT
+#if LIBXML_VERSION >= 21400
+                               | XML_SAVE_EMPTY
+                               | XML_SAVE_INDENT
+#endif
+                                )))
         throw xml::LogicError(RT_SRC_POS);
+
+#if LIBXML_VERSION >= 21400
+    int rcXml2 = xmlSaveSetIndentString(saveCtxt, "  ");
+    Assert(rcXml2 == 0); /* This shouldn't fail, unless the indent string is invalid. */
+#endif
 
     long rc = xmlSaveDoc(saveCtxt, m->pDoc->m->plibDocument);
     if (rc == -1)
