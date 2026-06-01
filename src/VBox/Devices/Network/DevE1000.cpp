@@ -1,4 +1,4 @@
-/* $Id: DevE1000.cpp 114029 2026-04-27 06:35:05Z alexander.eichner@oracle.com $ */
+/* $Id: DevE1000.cpp 114234 2026-06-01 15:36:39Z alexander.eichner@oracle.com $ */
 /** @file
  * DevE1000 - Intel 82540EM Ethernet Controller Emulation.
  *
@@ -7363,14 +7363,17 @@ static DECLCALLBACK(VBOXSTRICTRC) e1kIOPortIn(PPDMDEVINS pDevIns, void *pvUser, 
                     rc = e1kRegReadUnaligned(pDevIns, pThis, pThis->uSelectedReg, pu32, cb);
                 if (rc == VINF_IOM_R3_MMIO_READ)
                     rc = VINF_IOM_R3_IOPORT_READ;
+                else if (rc == VINF_IOM_MMIO_UNUSED_00)
+                {
+                    *pu32 = 0;
+                    rc = VINF_SUCCESS;
+                }
                 Log9(("%s e1kIOPortIn: IODATA(4), reading from selected register %#010x, val=%#010x\n", pThis->szPrf, pThis->uSelectedReg, *pu32));
                 break;
 
             default:
                 E1kLog(("%s e1kIOPortIn: invalid port %#010x\n", pThis->szPrf, offPort));
-                /** @todo r=bird: Check what real hardware returns here. */
-                //rc = VERR_IOM_IOPORT_UNUSED; /* Why not? */
-                rc = VINF_IOM_MMIO_UNUSED_00;  /* used to return VINF_SUCCESS and not touch *pu32, which amounted to this. */
+                rc = VERR_IOM_IOPORT_UNUSED;  /* used to return VINF_SUCCESS and not touch *pu32, which amounted to this. */
                 break;
         }
     else
