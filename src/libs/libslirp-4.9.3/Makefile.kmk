@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 172109 2026-01-11 19:29:08Z bird $
+# $Id: Makefile.kmk 114242 2026-06-01 19:39:37Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the libslirp library.
 #
