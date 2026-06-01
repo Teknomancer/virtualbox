@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx.cpp 114220 2026-05-29 20:52:57Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx.cpp 114232 2026-06-01 12:50:35Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevSVGA3d - VMWare SVGA device, 3D parts - Common code for DX backend interface.
  */
@@ -172,16 +172,7 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     AssertRCReturn(rc, rc);
 
 #ifdef DX_STATE_TRACKER
-    pDXContext->u64ContextFlags |= DX_CTX_F_STATE_INPUTLAYOUT
-                                 | DX_CTX_F_STATE_TOPOLOGY
-                                 | DX_CTX_F_STATE_RENDERTARGET
-                                 | DX_CTX_F_STATE_CSTARGET
-                                 | DX_CTX_F_STATE_BLENDSTATE
-                                 | DX_CTX_F_STATE_DEPTHSTENCILSTATE
-                                 | DX_CTX_F_STATE_VIEWPORT
-                                 | DX_CTX_F_STATE_SCISSORRECT
-                                 | DX_CTX_F_STATE_RASTERIZERSTATE
-                                 ;
+    pDXContext->u64ContextFlags |= DX_CTX_F_STATE_ALL;
 #endif
 
     /* Notify the host backend that context is about to be switched. */
@@ -193,8 +184,8 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     /* It is not necessary to restore SVGADXContextMobFormat::shaderState::shaderResources
      * because they are applied by the backend before each Draw call.
      */
-    #define DX_STATE_SAMPLERS          0x00000004
 #ifndef DX_STATE_TRACKER
+    #define DX_STATE_SAMPLERS          0x00000004
     #define DX_STATE_INPUTLAYOUT       0x00000008
     #define DX_STATE_TOPOLOGY          0x00000010
     #define DX_STATE_BLENDSTATE        0x00000080
@@ -207,8 +198,8 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     #define DX_STATE_RASTERIZERSTATE   0x00001000
 #endif
     uint32_t u32TrackedState = 0
-        | DX_STATE_SAMPLERS
 #ifndef DX_STATE_TRACKER
+        | DX_STATE_SAMPLERS
         | DX_STATE_INPUTLAYOUT
         | DX_STATE_TOPOLOGY
         | DX_STATE_BLENDSTATE
@@ -224,6 +215,7 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
 
     LogFunc(("cid = %d, state = 0x%08X\n", cid, u32TrackedState));
 
+#ifndef DX_STATE_TRACKER
     if (u32TrackedState & DX_STATE_SAMPLERS)
     {
         u32TrackedState &= ~DX_STATE_SAMPLERS;
@@ -243,7 +235,6 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     }
 
 
-#ifndef DX_STATE_TRACKER
     if (u32TrackedState & DX_STATE_INPUTLAYOUT)
     {
         u32TrackedState &= ~DX_STATE_INPUTLAYOUT;
@@ -400,6 +391,15 @@ int vmsvga3dDXDefineContext(PVGASTATECC pThisCC, uint32_t cid)
 
     vmsvga3dDXInitContextMobData(&pDXContext->svgaDXContext);
     pDXContext->cid = cid;
+#ifdef DX_STATE_TRACKER
+    /* Make sure to apply the initially empty state of the new context because the backend pipeline state
+     * could still be from another context. For example: switch context is called from an old context,
+     * the new context is deleted before it draws anything (u64ContextFlags are lost here), another new context
+     * is created, its state is partially updated, the next draw on the new context will have remains from the
+     * old context.
+     */
+    pDXContext->u64ContextFlags |= DX_CTX_F_STATE_ALL;
+#endif
 
     /* Init the backend specific data. */
     rc = pSvgaR3State->pFuncsDX->pfnDXDefineContext(pThisCC, pDXContext);
@@ -609,6 +609,7 @@ int vmsvga3dDXSetSamplers(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDX
     RT_UNTRUSTED_VALIDATED_FENCE();
 
     uint32_t const idxShaderState = pCmd->type - SVGA3D_SHADERTYPE_MIN;
+#ifndef DX_STATE_TRACKER
     for (uint32_t i = 0; i < cSamplerId; ++i)
     {
         SVGA3dSamplerId const samplerId = paSamplerId[i];
@@ -617,6 +618,24 @@ int vmsvga3dDXSetSamplers(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDX
         pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[pCmd->startSampler + i] = samplerId;
     }
     RT_UNTRUSTED_VALIDATED_FENCE();
+#else
+    bool fModified = false;
+    for (uint32_t i = 0; i < cSamplerId; ++i)
+    {
+        SVGA3dSamplerId const samplerId = paSamplerId[i];
+        ASSERT_GUEST_RETURN(   samplerId < pDXContext->cot.cSampler
+                            || samplerId == SVGA_ID_INVALID, VERR_INVALID_PARAMETER);
+        if (pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[pCmd->startSampler + i] != samplerId)
+        {
+            pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[pCmd->startSampler + i] = samplerId;
+            fModified = true;
+        }
+    }
+    RT_UNTRUSTED_VALIDATED_FENCE();
+
+    if (fModified)
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SAMPLER_VS << idxShaderState;
+#endif
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetSamplers(pThisCC, pDXContext, pCmd->startSampler, pCmd->type, cSamplerId, paSamplerId);
     return rc;
@@ -2148,6 +2167,26 @@ int vmsvga3dDXDefineSamplerState(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA
     ASSERT_GUEST_RETURN(samplerId < pDXContext->cot.cSampler, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifdef DX_STATE_TRACKER
+    /* Cleanup the sampler. */
+    pSvgaR3State->pFuncsDX->pfnDXDestroySamplerState(pThisCC, pDXContext, samplerId);
+
+    /* If a currently set sampler is redefined, then tell the backend to re-apply samplers. */
+    bool fFound = false;
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE && !fFound; ++idxShaderState)
+    {
+        for (uint32_t i = 0; i < SVGA3D_DX_MAX_SAMPLERS; ++i)
+        {
+            if (pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[i] == samplerId)
+            {
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SAMPLER_VS << idxShaderState;
+                fFound = true;
+                break;
+            }
+        }
+    }
+#endif
+
     SVGACOTableDXSamplerEntry *pEntry = &pDXContext->cot.paSampler[samplerId];
     pEntry->filter         = pCmd->filter;
     pEntry->addressU       = pCmd->addressU;
@@ -2188,6 +2227,23 @@ int vmsvga3dDXDestroySamplerState(PVGASTATECC pThisCC, uint32_t idDXContext, SVG
     SVGACOTableDXSamplerEntry *pEntry = &pDXContext->cot.paSampler[samplerId];
     RT_ZERO(*pEntry);
 
+#ifdef DX_STATE_TRACKER
+    /* If a currently set sampler is destroyed, then unset it. */
+    bool fFound = false;
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE && !fFound; ++idxShaderState)
+    {
+        for (uint32_t i = 0; i < SVGA3D_DX_MAX_SAMPLERS; ++i)
+        {
+            if (pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[i] == samplerId)
+            {
+                pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[i] = SVGA3D_INVALID_ID;
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SAMPLER_VS << idxShaderState;
+                fFound = true;
+                break;
+            }
+        }
+    }
+#endif
     return rc;
 }
 
@@ -2626,6 +2682,13 @@ static int dxSetOrGrowCOTable(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext
                 pDXContext->u64ContextFlags |= DX_CTX_F_STATE_DEPTHSTENCILSTATE;
             else if (enmType == SVGA_COTABLE_RASTERIZERSTATE)
                 pDXContext->u64ContextFlags |= DX_CTX_F_STATE_RASTERIZERSTATE;
+            else if (enmType == SVGA_COTABLE_SAMPLER)
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SAMPLER_VS
+                                             | DX_CTX_F_STATE_SAMPLER_PS
+                                             | DX_CTX_F_STATE_SAMPLER_GS
+                                             | DX_CTX_F_STATE_SAMPLER_HS
+                                             | DX_CTX_F_STATE_SAMPLER_DS
+                                             | DX_CTX_F_STATE_SAMPLER_CS;
 #endif
         }
     }

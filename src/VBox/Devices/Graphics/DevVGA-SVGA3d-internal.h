@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-internal.h 114220 2026-05-29 20:52:57Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-internal.h 114232 2026-06-01 12:50:35Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device - 3D part, internal header.
  */
@@ -991,12 +991,34 @@ static SSMFIELD const g_aVMSVGA3DCONTEXTFields[] =
 #define DX_CTX_F_STATE_SHADERRESOURCE    0x00000008
 #define DX_CTX_F_STATE_INPUTLAYOUT       0x00000010
 #define DX_CTX_F_STATE_TOPOLOGY          0x00000020
-//#define DX_CTX_F_STATE_SAMPLER           0x00000040
 #define DX_CTX_F_STATE_BLENDSTATE        0x00000080
 #define DX_CTX_F_STATE_DEPTHSTENCILSTATE 0x00000100
 #define DX_CTX_F_STATE_VIEWPORT          0x00000400
 #define DX_CTX_F_STATE_SCISSORRECT       0x00000800
 #define DX_CTX_F_STATE_RASTERIZERSTATE   0x00001000
+#define DX_CTX_F_STATE_SAMPLER_VS        0x00010000 /* Sampler bits must be in this order without gaps for '<<'. */
+#define DX_CTX_F_STATE_SAMPLER_PS        0x00020000
+#define DX_CTX_F_STATE_SAMPLER_GS        0x00040000
+#define DX_CTX_F_STATE_SAMPLER_HS        0x00080000
+#define DX_CTX_F_STATE_SAMPLER_DS        0x00100000
+#define DX_CTX_F_STATE_SAMPLER_CS        0x00200000
+
+#define DX_CTX_F_STATE_ALL ( DX_CTX_F_STATE_INPUTLAYOUT \
+                           | DX_CTX_F_STATE_TOPOLOGY \
+                           | DX_CTX_F_STATE_RENDERTARGET \
+                           | DX_CTX_F_STATE_CSTARGET \
+                           | DX_CTX_F_STATE_BLENDSTATE \
+                           | DX_CTX_F_STATE_DEPTHSTENCILSTATE \
+                           | DX_CTX_F_STATE_VIEWPORT \
+                           | DX_CTX_F_STATE_SCISSORRECT \
+                           | DX_CTX_F_STATE_RASTERIZERSTATE \
+                           | DX_CTX_F_STATE_SAMPLER_VS \
+                           | DX_CTX_F_STATE_SAMPLER_PS \
+                           | DX_CTX_F_STATE_SAMPLER_GS \
+                           | DX_CTX_F_STATE_SAMPLER_HS \
+                           | DX_CTX_F_STATE_SAMPLER_DS \
+                           | DX_CTX_F_STATE_SAMPLER_CS \
+                           )
 
 /* The 3D backend DX context. The actual structure is 3D API specific. */
 typedef struct VMSVGA3DBACKENDDXCONTEXT *PVMSVGA3DBACKENDDXCONTEXT;
