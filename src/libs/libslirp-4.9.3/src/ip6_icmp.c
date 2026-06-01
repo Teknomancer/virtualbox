@@ -189,7 +189,7 @@ void icmp6_forward_error(struct mbuf *m, uint8_t type, uint8_t code, struct in6_
         ricmp->icmp6_err.mtu = htonl(slirp->if_mtu_v6);
 #else
         ricmp->icmp6_err.mtu = htonl(slirp->if_mtu);
-#else
+#endif
         break;
     case ICMP6_PARAMPROB:
         /* TODO: Handle this case */
