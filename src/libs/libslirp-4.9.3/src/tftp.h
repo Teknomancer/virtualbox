@@ -48,10 +48,10 @@ struct tftp_t {
 struct tftp_session {
     Slirp *slirp;
     char *filename;
-#ifndef VBOX
-    int fd;
-#else
+#ifdef VBOX
     RTFILE hFile;
+#else
+    int fd;
 #endif
     uint16_t block_size;
 

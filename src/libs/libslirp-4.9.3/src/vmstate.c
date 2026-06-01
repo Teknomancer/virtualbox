@@ -240,15 +240,13 @@ const VMStateInfo slirp_vmstate_info_tmp = {
 static int get_buffer(SlirpIStream *f, void *pv, size_t size,
                       const VMStateField *field)
 {
-    slirp_istream_read(f, pv, size);
-    return 0;
+    return !slirp_istream_read(f, pv, size);
 }
 
 static int put_buffer(SlirpOStream *f, void *pv, size_t size,
                       const VMStateField *field)
 {
-    slirp_ostream_write(f, pv, size);
-    return 0;
+    return !slirp_ostream_write(f, pv, size);
 }
 
 const VMStateInfo slirp_vmstate_info_buffer = {
@@ -295,7 +293,11 @@ static int vmstate_size(char *opaque, const VMStateField *field)
     int size = field->size;
 
     if (field->flags & VMS_VBUFFER) {
-        size = *(int32_t *)((/*VBOX*/char *)opaque + field->size_offset);
+#ifdef VBOX
+        size = *(int32_t *)((char *)opaque + field->size_offset);
+#else
+        size = *(int32_t *)(opaque + field->size_offset);
+#endif
         if (field->flags & VMS_MULTIPLY) {
             size *= field->size;
         }
@@ -331,7 +333,7 @@ static int vmstate_save_state_v(SlirpOStream *f, const VMStateDescription *vmsd,
             }
             for (i = 0; i < n_elems; i++) {
 #ifdef VBOX
-                void *curr_elem = (/*VBOX*/char *)first_elem + size * i;
+                void *curr_elem = (char *)first_elem + size * i;
 #else
                 void *curr_elem = first_elem + size * i;
 #endif
@@ -403,10 +405,10 @@ int slirp_vmstate_load_state(SlirpIStream *f, const VMStateDescription *vmsd,
         return -EINVAL;
     }
     if (vmsd->pre_load) {
-#ifndef VBOX /* warning C4456: declaration of 'ret' hides previous local declaration */
-        int ret = vmsd->pre_load(opaque);
-#else
+#ifdef VBOX
         ret = vmsd->pre_load(opaque);
+#else /* warning C4456: declaration of 'ret' hides previous local declaration */
+        int ret = vmsd->pre_load(opaque);
 #endif
         if (ret) {
             return ret;
@@ -426,7 +428,7 @@ int slirp_vmstate_load_state(SlirpIStream *f, const VMStateDescription *vmsd,
             }
             for (i = 0; i < n_elems; i++) {
 #ifdef VBOX
-                void *curr_elem = (/*VBOX*/ char *)first_elem + size * i;
+                void *curr_elem = (char *)first_elem + size * i;
 #else
                 void *curr_elem = first_elem + size * i;
 #endif

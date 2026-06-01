@@ -30,7 +30,6 @@
 #include <stdio.h>
 #include <assert.h>
 #include <errno.h>
-
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <inttypes.h>
@@ -74,7 +73,7 @@
 # endif
 #endif
 
-#ifndef G_SIZEOF_MEMBER 
+#ifndef G_SIZEOF_MEMBER
 #define G_SIZEOF_MEMBER(type, member) sizeof(((type *)0)->member)
 #endif
 

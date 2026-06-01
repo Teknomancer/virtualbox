@@ -288,7 +288,6 @@ int slirp_listen_wrap(slirp_os_socket sockfd, int backlog)
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();
     }
-
     return ret;
 }
 
@@ -300,7 +299,6 @@ int slirp_bind_wrap(slirp_os_socket sockfd, const struct sockaddr *addr, int add
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();
     }
-
     return ret;
 }
 
@@ -334,7 +332,6 @@ int slirp_shutdown_wrap(slirp_os_socket sockfd, int how)
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();
     }
-
     return ret;
 }
 
@@ -347,7 +344,6 @@ int slirp_getsockopt_wrap(slirp_os_socket sockfd, int level, int optname, void *
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();
     }
-
     return ret;
 }
 
@@ -360,7 +356,6 @@ int slirp_setsockopt_wrap(slirp_os_socket sockfd, int level, int optname,
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();
     }
-
     return ret;
 }
 
@@ -372,7 +367,6 @@ int slirp_getpeername_wrap(slirp_os_socket sockfd, struct sockaddr *addr, int *a
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();
     }
-
     return ret;
 }
 
@@ -391,6 +385,7 @@ int slirp_getsockname_wrap(slirp_os_socket sockfd, struct sockaddr *addr, int *a
 slirp_ssize_t slirp_send_wrap(slirp_os_socket sockfd, const void *buf, size_t len, int flags)
 {
     int ret;
+
     ret = send(sockfd, buf, len, flags);
     if (ret == SOCKET_ERROR) {
         errno = win32_socket_error();

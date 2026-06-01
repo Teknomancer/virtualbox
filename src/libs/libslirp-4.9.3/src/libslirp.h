@@ -15,7 +15,9 @@
 #include <errno.h>
 
 typedef SSIZE_T slirp_ssize_t;
-#ifndef VBOX
+#ifdef VBOX
+# define SLIRP_EXPORT
+#else
 #ifdef LIBSLIRP_STATIC
 # define SLIRP_EXPORT
 #elif defined(BUILDING_LIBSLIRP)
@@ -23,8 +25,6 @@ typedef SSIZE_T slirp_ssize_t;
 #else
 # define SLIRP_EXPORT __declspec(dllimport)
 #endif
-#else /* VBOX */
-# define SLIRP_EXPORT
 #endif
 #else
 #include <sys/types.h>
@@ -34,15 +34,15 @@ typedef ssize_t slirp_ssize_t;
 #define SLIRP_EXPORT
 #endif
 
-#ifndef VBOX
-#include "libslirp-version.h"
-#else
+#ifdef VBOX
 # include <slirp/libslirp-version.h>    /* VBox: it's in the wrapper directory now. */
 
 # include <iprt/types.h>                /* for ssize_t on windows */
 # include <iprt/net.h>                  /* for RTNETADDRIPV4 in slirp_set_vnameserver */
 # define __STDC_LIMIT_MACROS            /** @todo r=bird: These two are surely defined too late, since they apply to stdint.h  */
 # define __STDC_CONSTANT_MACROS         /** @todo r=bird: ... So presumably, they're not required. */
+#else
+#include "libslirp-version.h"
 #endif
 
 #ifdef __cplusplus
@@ -250,7 +250,6 @@ typedef struct SlirpConfig {
     /* MRU when receiving packets from the guest */
     /* Default: IF_MRU_DEFAULT */
     size_t if_mru;
-
 #ifdef VBOX
     /* MTU for IPv6 */
     /* Default: IF_MTU_DEFAULT */
@@ -260,7 +259,6 @@ typedef struct SlirpConfig {
     /* Default: IF_MRU_DEFAULT */
     size_t if_mru_v6;
 #endif
-
     /* Prohibit connecting to 127.0.0.1:* */
     bool disable_host_loopback;
     /*

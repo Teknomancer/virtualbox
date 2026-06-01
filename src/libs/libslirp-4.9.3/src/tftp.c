@@ -25,14 +25,14 @@
 
 #include "slirp.h"
 
-#ifndef VBOX
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#else
+#ifdef VBOX
 # include <iprt/file.h>
 # include <iprt/string.h>
 # define g_ascii_strcasecmp(str1, str2) RTStrICmpAscii(str1, str2)
+#else
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #endif
 
 #if defined(_WIN32)
@@ -52,15 +52,15 @@ static inline void tftp_session_update(struct tftp_session *spt)
 
 static void tftp_session_terminate(struct tftp_session *spt)
 {
-#ifndef VBOX
-    if (spt->fd >= 0) {
-        close(spt->fd);
-        spt->fd = -1;
-    }
-#else
+#ifdef VBOX
     if (spt->hFile != NIL_RTFILE) {
         RTFileClose(spt->hFile);
         spt->hFile = NIL_RTFILE;
+    }
+#else
+    if (spt->fd >= 0) {
+        close(spt->fd);
+        spt->fd = -1;
     }
 #endif
     g_free(spt->filename);
@@ -91,10 +91,10 @@ static int tftp_session_allocate(Slirp *slirp, struct sockaddr_storage *srcsas,
 found:
     memset(spt, 0, sizeof(*spt));
     memcpy(&spt->client_addr, srcsas, sockaddr_size(srcsas));
-#ifndef VBOX
-    spt->fd = -1;
-#else
+#ifdef VBOX
     spt->hFile = NIL_RTFILE;
+#else
+    spt->fd = -1;
 #endif
     spt->block_size = 512;
     spt->client_port = hdr->udp.uh_sport;
@@ -143,7 +143,24 @@ void tftp_cleanup(Slirp *slirp)
 static int tftp_read_data(struct tftp_session *spt, uint32_t block_nr,
                           uint8_t *buf, int len)
 {
-#ifndef VBOX
+#ifdef VBOX
+    if (spt->hFile == NIL_RTFILE) {
+        int rc = RTFileOpen(&spt->hFile, spt->filename, RTFILE_O_READ | RTFILE_O_OPEN | RTFILE_O_DENY_WRITE);
+        if (RT_FAILURE(rc)) {
+            spt->hFile = NIL_RTFILE; /* paranoia */
+            return -1;
+        }
+    }
+
+    size_t cbRead = 0;
+    if (len) {
+        int rc = RTFileReadAt(spt->hFile, block_nr * spt->block_size, buf, len, &cbRead);
+        if (RT_FAILURE(rc))
+            return -1;
+    }
+
+    return (int)cbRead;
+#else
     int bytes_read = 0;
 
     if (spt->fd < 0) {
@@ -163,25 +180,7 @@ static int tftp_read_data(struct tftp_session *spt, uint32_t block_nr,
     }
 
     return bytes_read;
-
-#else /* VBOX */
-    if (spt->hFile == NIL_RTFILE) {
-        int rc = RTFileOpen(&spt->hFile, spt->filename, RTFILE_O_READ | RTFILE_O_OPEN | RTFILE_O_DENY_WRITE);
-        if (RT_FAILURE(rc)) {
-            spt->hFile = NIL_RTFILE; /* paranoia */
-            return -1;
-        }
-    }
-
-    size_t cbRead = 0;
-    if (len) {
-        int rc = RTFileReadAt(spt->hFile, block_nr * spt->block_size, buf, len, &cbRead);
-        if (RT_FAILURE(rc))
-            return -1;
-    }
-
-    return (int)cbRead;
-#endif /* VBOX */
+#endif /* !VBOX */
 }
 
 static struct tftp_t *tftp_prep_mbuf_data(struct tftp_session *spt,

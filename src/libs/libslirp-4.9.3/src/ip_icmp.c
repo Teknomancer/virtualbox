@@ -329,10 +329,10 @@ void icmp_forward_error(struct mbuf *msrc, uint8_t type, uint8_t code, int minsi
     if (!msrc)
         goto end_error;
     ip = mtod(msrc, struct ip *);
-#ifndef VBOX
-    if (slirp_debug & SLIRP_DBG_MISC) {
-#else
+#ifdef VBOX
     if (DEBUG_IS_MISC_ENABLED()) {
+#else
+    if (slirp_debug & SLIRP_DBG_MISC) {
 #endif
         char addr_src[INET_ADDRSTRLEN];
         char addr_dst[INET_ADDRSTRLEN];

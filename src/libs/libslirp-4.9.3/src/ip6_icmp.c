@@ -298,6 +298,9 @@ static void ndp_send_ra(Slirp *slirp)
     struct mbuf *t = m_get(slirp);
     struct ip6 *rip = mtod(t, struct ip6 *);
     size_t pl_size = 0;
+    struct in6_addr addr;
+    uint16_t port;
+    uint32_t scope_id;
 
     rip->ip_src = (struct in6_addr)LINKLOCAL_ADDR;
     rip->ip_dst = (struct in6_addr)ALLNODES_MULTICAST;
@@ -389,7 +392,7 @@ static void ndp_send_ra(Slirp *slirp)
     }
 #else
     /* Prefix information (NDP option) */
-    if (get_dns6_addr(&addr, &scope_id) >= 0) {
+    if (get_dns6_addr(&addr, &port, &scope_id) >= 0) {
         /* Host system does have an IPv6 DNS server, announce our proxy.  */
         struct ndpopt *opt3 = mtod(t, struct ndpopt *);
         opt3->ndpopt_type = NDPOPT_RDNSS;
@@ -539,6 +542,7 @@ static void ndp_input(struct mbuf *m, Slirp *slirp, struct ip6 *ip,
             ntohs(ip->ip_pl) >= ICMP6_NDP_RS_MINLEN) {
             /* Gratuitous NDP */
             ndp_table_add(slirp, ip->ip_src, eth->h_source);
+
             ndp_send_ra(slirp);
         }
         break;
