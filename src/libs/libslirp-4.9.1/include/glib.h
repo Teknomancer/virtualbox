@@ -133,7 +133,7 @@ DECLINLINE(void) g_critical(const char *pszFmt, ...)
 #define g_warning(...)                  LogRelWarn((__VA_ARGS__))
 
 #define g_warn_if_fail(x) do { \
-        if (RT_LIKELY(!x)) { /* likely */ } \
+        if (RT_LIKELY(!(x))) { /* likely */ } \
         else g_warning("WARNING\n"); \
     } while (0)
 
