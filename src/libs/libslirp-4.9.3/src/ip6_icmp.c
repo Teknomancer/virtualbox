@@ -162,8 +162,13 @@ void icmp6_forward_error(struct mbuf *m, uint8_t type, uint8_t code, struct in6_
     DEBUG_ARG("target = %s", addrstr);
 
     rip->ip_nh = IPPROTO_ICMPV6;
+#ifdef VBOX
     const int error_data_len = MIN(
         m->m_len, slirp->if_mtu_v6 - (sizeof(struct ip6) + ICMP6_ERROR_MINLEN));
+#else
+    const int error_data_len = MIN(
+        m->m_len, slirp->if_mtu - (sizeof(struct ip6) + ICMP6_ERROR_MINLEN));
+#endif
     rip->ip_pl = htons(ICMP6_ERROR_MINLEN + error_data_len);
     t->m_len = sizeof(struct ip6) + ntohs(rip->ip_pl);
 
@@ -180,7 +185,11 @@ void icmp6_forward_error(struct mbuf *m, uint8_t type, uint8_t code, struct in6_
         ricmp->icmp6_err.unused = 0;
         break;
     case ICMP6_TOOBIG:
+#ifdef VBOX
         ricmp->icmp6_err.mtu = htonl(slirp->if_mtu_v6);
+#else
+        ricmp->icmp6_err.mtu = htonl(slirp->if_mtu);
+#else
         break;
     case ICMP6_PARAMPROB:
         /* TODO: Handle this case */

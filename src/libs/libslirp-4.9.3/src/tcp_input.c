@@ -1548,12 +1548,22 @@ int tcp_mss(struct tcpcb *tp, unsigned offer)
 
     switch (so->so_ffamily) {
     case AF_INET:
+#ifdef VBOX
         mss = MIN(so->slirp->if_mtu_v6, so->slirp->if_mru_v6) -
               sizeof(struct tcphdr) - sizeof(struct ip);
+#else
+        mss = MIN(so->slirp->if_mtu, so->slirp->if_mru) -
+              sizeof(struct tcphdr) - sizeof(struct ip);
+#endif
         break;
     case AF_INET6:
+#ifdef VBOX
         mss = MIN(so->slirp->if_mtu_v6, so->slirp->if_mru_v6) -
               sizeof(struct tcphdr) - sizeof(struct ip6);
+#else
+        mss = MIN(so->slirp->if_mtu, so->slirp->if_mru) -
+              sizeof(struct tcphdr) - sizeof(struct ip6);
+#endif
         break;
     default:
         g_assert_not_reached();

@@ -47,7 +47,11 @@ void ip6_input(struct mbuf *m)
         goto bad;
     }
 
+#ifdef VBOX
     if (ntohs(ip6->ip_pl) + sizeof(struct ip6) > slirp->if_mtu_v6) {
+#else
+    if (ntohs(ip6->ip_pl) + sizeof(struct ip6) > slirp->if_mtu) {
+#endif
         icmp6_send_error(m, ICMP6_TOOBIG, 0);
         goto bad;
     }
