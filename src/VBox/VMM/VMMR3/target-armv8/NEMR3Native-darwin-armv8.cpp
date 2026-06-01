@@ -1,4 +1,4 @@
-/* $Id: NEMR3Native-darwin-armv8.cpp 112691 2026-01-26 11:03:45Z alexander.eichner@oracle.com $ */
+/* $Id: NEMR3Native-darwin-armv8.cpp 114233 2026-06-01 13:59:08Z alexander.eichner@oracle.com $ */
 /** @file
  * NEM - Native execution manager, native ring-3 macOS backend using Hypervisor.framework, ARMv8 variant.
  *
@@ -2762,6 +2762,9 @@ static VBOXSTRICTRC nemR3DarwinRunGuestDebug(PVM pVM, PVMCPU pVCpu)
                                         pVCpu->idCpu, hrc), VERR_NEM_IPE_0);
         }
     } /* the run loop */
+
+    int rc = nemR3DarwinCopyStateFromHv(pVM, pVCpu, CPUMCTX_EXTRN_SYSREG_DEBUG | CPUMCTX_EXTRN_PSTATE);
+    AssertRCReturn(rc, rc);
 
     /* Restore single stepping state. */
     if (pVCpu->nem.s.fSingleInstruction)
