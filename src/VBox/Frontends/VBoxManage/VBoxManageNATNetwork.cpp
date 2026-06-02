@@ -1,4 +1,4 @@
-/* $Id: VBoxManageNATNetwork.cpp 114244 2026-06-02 15:56:02Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageNATNetwork.cpp 114247 2026-06-02 17:23:02Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of NAT Network command command.
  */
@@ -157,7 +157,7 @@ static HRESULT printNATNetwork(const ComPtr<INATNetwork> &pNATNet,
         strs.setNull();
 
         CHECK_ERROR(pNATNet, COMGETTER(LocalMappings)(ComSafeArrayAsOutParam(strs)));
-        PRINT_STRING_ARRAY(Nat::tr("loopback mappings (ipv4)\n"));
+        PRINT_STRING_ARRAY(Nat::tr("Loopback mappings (ipv4)\n"));
         strs.setNull();
 
 #undef PRINT_STRING_ARRAY
@@ -215,13 +215,13 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
     if (a->argc - 1 <= 1)
         return errorSyntax(Nat::tr("Not enough parameters"));
 
-    const char *pNetName = NULL;
-    const char *pPrefixIPv4 = NULL;
-    const char *pPrefixIPv6 = NULL;
-    int enable = -1;
-    int dhcp = -1;
-    int ipv6 = -1;
-    int ipv6_default = -1;
+    const char *pszNetName = NULL;
+    const char *pszPrefixIPv4 = NULL;
+    const char *pszPrefixIPv6 = NULL;
+    int iEnableNetwork = -1;          /* Tri-state: -1 on uninitialized, 0 = false, 1 = true. */
+    int iEnableDHCP = -1;             /* Ditto. */
+    int iEnableIPv6 = -1;             /* Ditto. */
+    int iEnableIPv6DefaultRoute = -1; /* Ditto. */
 
     VPF2DELETE vPfName2Delete;
     VPF2ADD vPf2Add;
@@ -267,51 +267,51 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
         switch (c)
         {
             case 't':   // --netname
-                if (pNetName)
+                if (pszNetName)
                     return errorSyntax(Nat::tr("You can specify --netname only once."));
-                pNetName = ValueUnion.psz;
+                pszNetName = ValueUnion.psz;
                 break;
 
             case 'n':   // --network
-                if (pPrefixIPv4)
+                if (pszPrefixIPv4)
                     return errorSyntax(Nat::tr("You can specify --network only once."));
-                pPrefixIPv4 = ValueUnion.psz;
+                pszPrefixIPv4 = ValueUnion.psz;
                 break;
 
             case 'e':   // --enable
-                if (enable >= 0)
+                if (iEnableNetwork >= 0)
                     return errorSyntax(Nat::tr("You can specify either --enable or --disable once."));
-                enable = 1;
+                iEnableNetwork = 1;
                 break;
 
             case 'd':   // --disable
-                if (enable >= 0)
+                if (iEnableNetwork >= 0)
                     return errorSyntax(Nat::tr("You can specify either --enable or --disable once."));
-                enable = 0;
+                iEnableNetwork = 0;
                 break;
 
             case 'h':
-                if (dhcp != -1)
+                if (iEnableDHCP != -1)
                     return errorSyntax(Nat::tr("You can specify --dhcp only once."));
-                dhcp = ValueUnion.f;
+                iEnableDHCP = ValueUnion.f;
                 break;
 
             case '6':
-                if (ipv6 != -1)
+                if (iEnableIPv6 != -1)
                     return errorSyntax(Nat::tr("You can specify --ipv6 only once."));
-                ipv6 = ValueUnion.f;
+                iEnableIPv6 = ValueUnion.f;
                 break;
 
             case kNATNetwork_IPv6Prefix:
-                if (pPrefixIPv6)
+                if (pszPrefixIPv6)
                     return errorSyntax(Nat::tr("You can specify --ipv6-prefix only once."));
-                pPrefixIPv6 = ValueUnion.psz;
+                pszPrefixIPv6 = ValueUnion.psz;
                 break;
 
             case kNATNetwork_IPv6Default: // XXX: uwe
-                if (ipv6_default != -1)
+                if (iEnableIPv6DefaultRoute != -1)
                     return errorSyntax(Nat::tr("You can specify --ipv6-default only once."));
-                ipv6_default = ValueUnion.f;
+                iEnableIPv6DefaultRoute = ValueUnion.f;
                 break;
 
             case 'L': /* ipv6 loopback */
@@ -388,14 +388,14 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
         }
     }
 
-    if (!pNetName)
-        return errorSyntax(Nat::tr("You need to specify the --netname option"));
+    if (!pszNetName)
+        return errorSyntax(Nat::tr("Argument --netname missing"));
     /* verification */
     switch (enmCode)
     {
         case OP_ADD:
-            if (!pPrefixIPv4)
-                return errorSyntax(Nat::tr("You need to specify the --network option"));
+            if (!pszPrefixIPv4)
+                return errorSyntax(Nat::tr("Argument --network missing"));
             break;
         case OP_MODIFY:
         case OP_REMOVE:
@@ -408,36 +408,36 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
 
     HRESULT hrc;
     Bstr NetName;
-    NetName = Bstr(pNetName);
+    NetName = Bstr(pszNetName);
 
     ComPtr<INATNetwork> net;
     hrc = a->virtualBox->FindNATNetworkByName(NetName.mutableRaw(), net.asOutParam());
     if (enmCode == OP_ADD)
     {
         if (SUCCEEDED(hrc))
-            return errorArgument(Nat::tr("NATNetwork server already exists"));
+            return errorArgument(Nat::tr("NAT network '%s' already exists"), pszNetName);
 
         CHECK_ERROR(a->virtualBox, CreateNATNetwork(NetName.raw(), net.asOutParam()));
         if (FAILED(hrc))
-            return errorArgument(Nat::tr("Failed to create the NAT network service"));
+            return errorArgument(Nat::tr("Failed to create NAT network '%s'"), pszNetName);
     }
     else if (FAILED(hrc))
-        return errorArgument(Nat::tr("NATNetwork server does not exist"));
+        return errorArgument(Nat::tr("NAT network '%s' not found"), pszNetName);
 
     switch (enmCode)
     {
         case OP_ADD:
         case OP_MODIFY:
         {
-            if (pPrefixIPv4)
+            if (pszPrefixIPv4)
             {
-                CHECK_ERROR(net, COMSETTER(Network)(Bstr(pPrefixIPv4).raw()));
+                CHECK_ERROR(net, COMSETTER(Network)(Bstr(pszPrefixIPv4).raw()));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
-            if (dhcp >= 0)
+            if (iEnableDHCP >= 0)
             {
-                CHECK_ERROR(net, COMSETTER(NeedDhcpServer) ((BOOL)dhcp));
+                CHECK_ERROR(net, COMSETTER(NeedDhcpServer)((BOOL)iEnableDHCP));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
@@ -447,16 +447,16 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
              * the same command can also set IPv6 prefix to empty if
              * it so wishes.
              */
-            if (ipv6 == 0)
+            if (iEnableIPv6 == 0)
             {
                 CHECK_ERROR(net, COMSETTER(IPv6Enabled)(FALSE));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
 
-            if (pPrefixIPv6)
+            if (pszPrefixIPv6)
             {
-                CHECK_ERROR(net, COMSETTER(IPv6Prefix)(Bstr(pPrefixIPv6).raw()));
+                CHECK_ERROR(net, COMSETTER(IPv6Prefix)(Bstr(pszPrefixIPv6).raw()));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
@@ -465,17 +465,16 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
              * If we are asked to enable IPv6, do it late, so that the
              * same command can also set IPv6 prefix.
              */
-            if (ipv6 > 0)
+            if (iEnableIPv6 > 0)
             {
                 CHECK_ERROR(net, COMSETTER(IPv6Enabled)(TRUE));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
 
-            if (ipv6_default != -1)
+            if (iEnableIPv6DefaultRoute != -1)
             {
-                BOOL fIPv6Default = RT_BOOL(ipv6_default);
-                CHECK_ERROR(net, COMSETTER(AdvertiseDefaultIPv6RouteEnabled)(fIPv6Default));
+                CHECK_ERROR(net, COMSETTER(AdvertiseDefaultIPv6RouteEnabled)(BOOL(iEnableIPv6DefaultRoute)));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
@@ -488,7 +487,7 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
                     CHECK_ERROR(net, RemovePortForwardRule((BOOL)(*it).fIPv6,
                                                            Bstr((*it).szName).raw()));
                     if (FAILED(hrc))
-                        return errorArgument(Nat::tr("Failed to delete pf"));
+                        return errorArgument(Nat::tr("Failed to delete port forwarding"));
                 }
             }
 
@@ -513,7 +512,7 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
                                                         Bstr((*it).szPfrGuestAddr).raw(),
                                                         (*it).u16PfrGuestPort));
                     if (FAILED(hrc))
-                        return errorArgument(Nat::tr("Failed to add pf"));
+                        return errorArgument(Nat::tr("Failed to add port forwarding"));
                 }
             }
 
@@ -539,13 +538,13 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
                     LONG lOffset = 0;
                     Bstr bstrAddress;
 
-                    AssertReturn(pos != std::string::npos, errorArgument(Nat::tr("invalid loopback string")));
+                    AssertReturn(pos != std::string::npos, errorArgument(Nat::tr("Invalid loopback string")));
 
                     address = it->substr(0, pos);
                     strOffset = it->substr(pos + 1);
 
                     lOffset = RTStrToUInt32(strOffset.c_str());
-                    AssertReturn(lOffset > 0, errorArgument(Nat::tr("invalid loopback string")));
+                    AssertReturn(lOffset > 0, errorArgument(Nat::tr("Invalid loopback string")));
 
                     bstrAddress = Bstr(address.c_str());
 
@@ -568,9 +567,9 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
                 }
             }
 
-            if (enable >= 0)
+            if (iEnableNetwork >= 0)
             {
-                CHECK_ERROR(net, COMSETTER(Enabled) ((BOOL)enable));
+                CHECK_ERROR(net, COMSETTER(Enabled)((BOOL)iEnableNetwork));
                 if (FAILED(hrc))
                     return errorArgument(Nat::tr("Failed to set configuration"));
             }
@@ -580,21 +579,21 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
         {
             CHECK_ERROR(a->virtualBox, RemoveNATNetwork(net));
             if (FAILED(hrc))
-                return errorArgument(Nat::tr("Failed to remove nat network"));
+                return errorArgument(Nat::tr("Failed to remove NAT network '%s'"), pszNetName);
             break;
         }
         case OP_START:
         {
             CHECK_ERROR(net, Start());
             if (FAILED(hrc))
-                return errorArgument(Nat::tr("Failed to start network"));
+                return errorArgument(Nat::tr("Failed to start NAT network '%s'"), pszNetName);
             break;
         }
         case OP_STOP:
         {
             CHECK_ERROR(net, Stop());
             if (FAILED(hrc))
-                return errorArgument(Nat::tr("Failed to stop network"));
+                return errorArgument(Nat::tr("Failed to stop NAT network '%s'"), pszNetName);
             break;
         }
         default:;
