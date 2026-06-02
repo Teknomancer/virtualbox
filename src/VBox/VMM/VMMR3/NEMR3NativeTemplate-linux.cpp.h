@@ -1,4 +1,4 @@
-/* $Id: NEMR3NativeTemplate-linux.cpp.h 113606 2026-03-27 07:25:58Z alexander.eichner@oracle.com $ */
+/* $Id: NEMR3NativeTemplate-linux.cpp.h 114243 2026-06-02 14:59:53Z andreas.loeffler@oracle.com $ */
 /** @file
  * NEM - Native execution manager, native ring-3 Linux backend, common bits for x86 and arm64.
  */
@@ -1050,7 +1050,7 @@ DECLHIDDEN(int) nemR3NativeInit(PVM pVM, bool fFallback, bool fForced)
     else if (errno == EACCES)
         rc = RTErrInfoSet(pErrInfo, VERR_ACCESS_DENIED, "Do not have access to open /dev/kvm for reading & writing.");
     else if (errno == ENOENT)
-        rc = RTErrInfoSet(pErrInfo, VERR_NOT_SUPPORTED, "KVM is not availble (/dev/kvm does not exist)");
+        rc = RTErrInfoSet(pErrInfo, VERR_NOT_SUPPORTED, "KVM is not available (/dev/kvm does not exist)");
     else
         rc = RTErrInfoSetF(pErrInfo, RTErrConvertFromErrno(errno), "Failed to open '/dev/kvm': %u", errno);
 
