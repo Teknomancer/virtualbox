@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114232 2026-06-01 12:50:35Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114253 2026-06-03 16:55:48Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -324,11 +324,41 @@ typedef struct DXBOUNDINDEXBUFFER
     uint32_t indexBufferOffset;
 } DXBOUNDINDEXBUFFER;
 
+/** @todo Temporary development define. */
+#define DX_CB
+
+#ifdef DX_CB
+/* Constant buffer management:
+ *   - allocate a large dynamic buffer
+ *   - update the buffer with constant data in SetSingleConstantBuffer using MAP_NO_OVERWRITE
+ *   - use xSSetConstantBuffers1 with offset in setupPipeline
+ *   - keep track of current offFree and when the buffer is full issue a query and get a new buffer
+ *   - when query finishes the buffer can be reused
+ */
+
+/* Constant buffer per shader type. */
+typedef struct DXCONSTANTBUFFERSTATE
+{
+    UINT           StartSlot;
+    UINT           NumBuffers;
+    ID3D11Buffer *apConstantBuffer[SVGA3D_DX_MAX_CONSTBUFFERS];
+    UINT           aFirstConstant[SVGA3D_DX_MAX_CONSTBUFFERS];
+    UINT           aNumConstants[SVGA3D_DX_MAX_CONSTBUFFERS];
+} DXCONSTANTBUFFERSTATE;
+
+/* 8 * maximum constant buffer size (4096 * 16) */
+#define DX_CONSTANT_UPLOAD_BUFFER_SIZE _512K
+#endif /* DX_CB */
+
 typedef struct DXBOUNDRESOURCES /* Currently bound resources. Mirror SVGADXContextMobFormat structure. */
 {
     struct
     {
+#ifndef DX_CB
         ID3D11Buffer *constantBuffers[SVGA3D_DX_MAX_CONSTBUFFERS];
+#else
+        DXCONSTANTBUFFERSTATE constantBuffers;
+#endif /* DX_CB */
     } shaderState[SVGA3D_NUM_SHADERTYPE];
 } DXBOUNDRESOURCES;
 
@@ -373,6 +403,10 @@ typedef struct VMSVGA3DBACKENDDXCONTEXT
     DXVIEW                    *paVideoProcessorOutputView;
 
     uint32_t                   cSOTarget;              /* How many SO targets are currently set (SetSOTargets) */
+
+#ifdef DX_CB
+    DXUPLOADBUFFERMANAGER      constantBufferManager;
+#endif
 
     DXBOUNDRESOURCES           resources;
 } VMSVGA3DBACKENDDXCONTEXT;
@@ -2573,6 +2607,7 @@ static void dxShaderSet(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA
 }
 
 
+#ifndef DX_CB
 static void dxConstantBufferSet(DXDEVICE *pDevice, uint32_t slot, SVGA3dShaderType type, ID3D11Buffer *pConstantBuffer)
 {
     switch (type)
@@ -2599,6 +2634,7 @@ static void dxConstantBufferSet(DXDEVICE *pDevice, uint32_t slot, SVGA3dShaderTy
             ASSERT_GUEST_FAILED_RETURN_VOID();
     }
 }
+#endif /* !DX_CB */
 
 
 static void dxSamplerSet(DXDEVICE *pDevice, SVGA3dShaderType type, uint32_t startSampler, uint32_t cSampler, ID3D11SamplerState * const *papSampler)
@@ -3724,6 +3760,8 @@ typedef struct DXPIPELINESTATE
     D3D11_PRIMITIVE_TOPOLOGY    Topology;
     ID3D11InputLayout          *pInputLayout;
     ID3D11Buffer               *pConstantBuffer;
+    UINT                        FirstConstant;
+    UINT                        NumConstants;
     ID3D11VertexShader         *pVertexShader;
     ID3D11HullShader           *pHullShader;
     ID3D11DomainShader         *pDomainShader;
@@ -3746,7 +3784,7 @@ static void dxSavePipelineState(ID3D11DeviceContext1 *pImmediateContext, DXPIPEL
 {
     pImmediateContext->IAGetPrimitiveTopology(&pSavedState->Topology);
     pImmediateContext->IAGetInputLayout(&pSavedState->pInputLayout);
-    pImmediateContext->VSGetConstantBuffers(0, 1, &pSavedState->pConstantBuffer);
+    pImmediateContext->VSGetConstantBuffers1(0, 1, &pSavedState->pConstantBuffer, &pSavedState->FirstConstant, &pSavedState->NumConstants);
     pImmediateContext->VSGetShader(&pSavedState->pVertexShader, NULL, NULL);
     pImmediateContext->HSGetShader(&pSavedState->pHullShader, NULL, NULL);
     pImmediateContext->DSGetShader(&pSavedState->pDomainShader, NULL, NULL);
@@ -3767,7 +3805,7 @@ static void dxRestorePipelineState(ID3D11DeviceContext1 *pImmediateContext, DXPI
     pImmediateContext->IASetPrimitiveTopology(SavedState.Topology);
     pImmediateContext->IASetInputLayout(SavedState.pInputLayout);
     D3D_RELEASE(SavedState.pInputLayout);
-    pImmediateContext->VSSetConstantBuffers(0, 1, &SavedState.pConstantBuffer);
+    pImmediateContext->VSSetConstantBuffers1(0, 1, &SavedState.pConstantBuffer, &SavedState.FirstConstant, &SavedState.NumConstants);
     D3D_RELEASE(SavedState.pConstantBuffer);
     pImmediateContext->VSSetShader(SavedState.pVertexShader, NULL, 0);
     D3D_RELEASE(SavedState.pVertexShader);
@@ -5121,7 +5159,7 @@ static DECLCALLBACK(int) vmsvga3dBackQueryCaps(PVGASTATECC pThisCC, SVGA3dDevCap
         break;
 
     case SVGA3D_DEVCAP_DX_MAX_CONSTANT_BUFFERS:
-        *pu32Val = D3D11_COMMONSHADER_CONSTANT_BUFFER_HW_SLOT_COUNT;
+        *pu32Val = D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
         break;
 
     case SVGA3D_DEVCAP_DX_PROVOKING_VERTEX:
@@ -6170,6 +6208,12 @@ static DECLCALLBACK(int) vmsvga3dBackDXDefineContext(PVGASTATECC pThisCC, PVMSVG
     AssertPtrReturn(pBackendDXContext, VERR_NO_MEMORY);
     pDXContext->pBackendDXContext = pBackendDXContext;
 
+#ifdef DX_CB
+    dxUploadBufferManagerInit(&pDXContext->pBackendDXContext->constantBufferManager,
+                              4096 * 16, /* cbMaxData = 4096 constant 16 bytes each */
+                              DX_CONSTANT_UPLOAD_BUFFER_SIZE, D3D11_BIND_CONSTANT_BUFFER);
+#endif
+
     LogFunc(("cid %d\n", pDXContext->cid));
     return VINF_SUCCESS;
 }
@@ -6189,11 +6233,15 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyContext(PVGASTATECC pThisCC, PVMSV
         /* Clean up context resources. */
         VMSVGA3DBACKENDDXCONTEXT *pBackendDXContext = pDXContext->pBackendDXContext;
 
+#ifndef DX_CB
         for (uint32_t idxShaderState = 0; idxShaderState < RT_ELEMENTS(pBackendDXContext->resources.shaderState); ++idxShaderState)
         {
             ID3D11Buffer **papConstantBuffer = &pBackendDXContext->resources.shaderState[idxShaderState].constantBuffers[0];
             D3D_RELEASE_ARRAY(RT_ELEMENTS(pBackendDXContext->resources.shaderState[idxShaderState].constantBuffers), papConstantBuffer);
         }
+#else
+        dxUploadBufferManagerUninit(&pDXContext->pBackendDXContext->constantBufferManager);
+#endif
 
         if (pBackendDXContext->paRenderTargetView)
         {
@@ -6328,6 +6376,13 @@ static DECLCALLBACK(int) vmsvga3dBackDXSwitchContext(PVGASTATECC pThisCC, PVMSVG
         SVGA3dShaderType const type = (SVGA3dShaderType)(idxShaderState + SVGA3D_SHADERTYPE_MIN);
         dxShaderResourceViewSet(pDXDevice, type, 0, SVGA3D_DX_MAX_SRVIEWS, papShaderResourceView);
     }
+
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
+    {
+        DXCONSTANTBUFFERSTATE *pCb = &pDXContext->pBackendDXContext->resources.shaderState[idxShaderState].constantBuffers;
+        pCb->StartSlot = 0;
+        pCb->NumBuffers = D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;
+    }
 #endif
     return VINF_SUCCESS;
 }
@@ -6353,6 +6408,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXInvalidateContext(PVGASTATECC pThisCC, PV
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetSingleConstantBuffer(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, uint32_t slot, SVGA3dShaderType type, SVGA3dSurfaceId sid, uint32_t offsetInBytes, uint32_t sizeInBytes)
 {
+#ifndef DX_CB
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     RT_NOREF(pBackend);
 
@@ -6444,6 +6500,108 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetSingleConstantBuffer(PVGASTATECC pThis
     }
 
     return VINF_SUCCESS;
+#else
+    DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
+    AssertReturn(pDXDevice->pDevice, VERR_INVALID_STATE);
+
+    uint32_t const idxShaderState = type - SVGA3D_SHADERTYPE_MIN;
+    DXCONSTANTBUFFERSTATE *pCb = &pDXContext->pBackendDXContext->resources.shaderState[idxShaderState].constantBuffers;
+
+    if (sid == SVGA3D_INVALID_ID)
+    {
+        /* Clear the constant buffer slot. */
+        pCb->apConstantBuffer[slot] = NULL;
+        pCb->aFirstConstant[slot] = 0;
+        pCb->aNumConstants[slot] = 0; /* <- this marks slot as empty. */
+    }
+    else
+    {
+        /* Buffer offset and sizes must be a multiple of 16 constants (16 bytes per constant).
+         * Number of constants must be <= 4096.
+         */
+        uint32_t cbConstantAligned = RT_ALIGN(sizeInBytes, 16 * 16);
+        cbConstantAligned = RT_MIN(cbConstantAligned, 4096 * 16);
+
+        /* Input size should not exceed the number of constants. */
+        sizeInBytes = RT_MIN(sizeInBytes, cbConstantAligned);
+
+        PVMSVGA3DSURFACE pSurface;
+        int rc = vmsvga3dSurfaceFromSid(pThisCC->svga.p3dState, sid, &pSurface);
+        AssertRCReturn(rc, rc);
+
+        PVMSVGA3DMIPMAPLEVEL pMipLevel;
+        rc = vmsvga3dMipmapLevel(pSurface, 0, 0, &pMipLevel);
+        AssertRCReturn(rc, rc);
+
+        AssertReturn(pMipLevel->pSurfaceData, VERR_INVALID_STATE); /* No data to upload. */
+
+        uint32_t const cbSurface = pMipLevel->cbSurface;
+        ASSERT_GUEST_RETURN(   offsetInBytes < cbSurface
+                            && sizeInBytes <= cbSurface - offsetInBytes, VERR_INVALID_PARAMETER);
+
+        /* Constant buffers use upload buffers (DXUPLOADBUFFERMANAGER). */
+        Assert(pSurface->pBackendSurface == NULL);
+
+        DXUPLOADBUFFERMANAGER *pMgr = &pDXContext->pBackendDXContext->constantBufferManager;
+        DXUPLOADBUFFER *pUploadBuffer = dxUploadBufferManagerGetBuffer(pMgr, pDXDevice->pDevice,
+                                                                       pDXDevice->pImmediateContext, cbConstantAligned);
+        AssertReturn(pUploadBuffer, VERR_NO_MEMORY);
+
+        D3D11_MAPPED_SUBRESOURCE mappedResource;
+        HRESULT hr = pDXDevice->pImmediateContext->Map(pUploadBuffer->pUploadBuffer, 0,
+                                                       D3D11_MAP_WRITE_NO_OVERWRITE, /* MapFlags = */ 0,
+                                                       &mappedResource);
+        AssertReturn(SUCCEEDED(hr), VERR_NO_MEMORY);
+
+        uint8_t *pu8Dst = (uint8_t *)mappedResource.pData + pUploadBuffer->offFree;
+        uint8_t const *pu8Src = (uint8_t *)pMipLevel->pSurfaceData + offsetInBytes;
+        memcpy(pu8Dst, pu8Src, sizeInBytes);
+        memset(&pu8Dst[sizeInBytes], 0, cbConstantAligned - sizeInBytes);
+
+        pDXDevice->pImmediateContext->Unmap(pUploadBuffer->pUploadBuffer, 0);
+
+        pCb->apConstantBuffer[slot] = pUploadBuffer->pUploadBuffer;
+        pCb->aFirstConstant[slot] = pUploadBuffer->offFree / 16;
+        pCb->aNumConstants[slot] = cbConstantAligned / 16;
+
+        pUploadBuffer->offFree += cbConstantAligned;
+
+#ifdef LOG_ENABLED
+        if (LogIs8Enabled())
+        {
+            float *pValuesF = (float *)pu8Src;
+            for (unsigned i = 0; i < sizeInBytes / sizeof(float) / 4; ++i)
+            {
+                Log8(("ConstF /*%d*/ " FLOAT_FMT_STR ", " FLOAT_FMT_STR ", " FLOAT_FMT_STR ", " FLOAT_FMT_STR ",\n",
+                      i, FLOAT_FMT_ARGS(pValuesF[i*4 + 0]), FLOAT_FMT_ARGS(pValuesF[i*4 + 1]), FLOAT_FMT_ARGS(pValuesF[i*4 + 2]), FLOAT_FMT_ARGS(pValuesF[i*4 + 3])));
+            }
+        }
+#endif
+
+        LogFunc(("constant buffer: [%u][%u]: sid = %u, %u, %u\n",
+                 idxShaderState, slot, sid, offsetInBytes, sizeInBytes));
+    }
+
+    /** @todo Maybe use a bit mask of modified slots instead of a range.
+     *  Unchanged slots between two changed slots will be set to values
+     *  which are already in pCb (which is fine though unnecessary).
+     */
+    if (pCb->NumBuffers == 0)
+    {
+        pCb->StartSlot = slot;
+        pCb->NumBuffers = 1;
+    }
+    else
+    {
+        UINT const NewStartSlot = RT_MIN(pCb->StartSlot, slot);
+        UINT NewEndSlot = pCb->StartSlot + pCb->NumBuffers;
+        NewEndSlot = RT_MAX(NewEndSlot, slot + 1);
+        pCb->StartSlot = NewStartSlot;
+        pCb->NumBuffers = NewEndSlot - NewStartSlot;
+    }
+
+    return VINF_SUCCESS;
+#endif /* DX_CB */
 }
 
 static int dxSetShaderResources(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dShaderType type)
@@ -6818,6 +6976,7 @@ static void dxCreateInputLayout(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXConte
 
 static void dxSetConstantBuffers(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
 {
+#ifndef DX_CB
 //DEBUG_BREAKPOINT_TEST();
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
     DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
@@ -6845,6 +7004,84 @@ static void dxSetConstantBuffers(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXCont
             }
         }
     }
+#else
+    DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
+    {
+        DXCONSTANTBUFFERSTATE *pCb = &pDXContext->pBackendDXContext->resources.shaderState[idxShaderState].constantBuffers;
+        if (pCb->NumBuffers == 0)
+            continue;
+
+        UINT                  StartSlot         = pCb->StartSlot;
+        UINT                  NumBuffers        = pCb->NumBuffers;
+        ID3D11Buffer        **papConstantBuffer = &pCb->apConstantBuffer[StartSlot];
+        UINT const           *pFirstConstant    = &pCb->aFirstConstant[StartSlot];
+        UINT const           *pNumConstants     = &pCb->aNumConstants[StartSlot];
+#ifdef LOG_ENABLED
+        for (UINT i = 0; i < NumBuffers; ++i)
+        {
+            uint32_t const idxSlot = StartSlot + i;
+            if (pNumConstants[idxSlot] == 0)
+                continue;
+
+            LogFunc(("constant buffer: [%u][%u]: %p @%u %u\n",
+                     idxShaderState, idxSlot, papConstantBuffer[idxSlot], pFirstConstant[idxSlot], pNumConstants[idxSlot]));
+        }
+#endif
+        /* Make sure that the range does not exceed API limit. */
+        if (RT_LIKELY(StartSlot + NumBuffers <= D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT))
+        { /* likely */ }
+        else
+        {
+            DEBUG_BREAKPOINT_TEST();
+            LogRelMax(1, ("VMSVGA: skipping constant buffer slot(s) @%u, range @%u %u\n",
+                      RT_MAX(StartSlot, D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT),
+                      StartSlot, NumBuffers));
+            if (StartSlot < D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT)
+                NumBuffers = D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT - StartSlot;
+            else
+                NumBuffers = 0;
+        }
+
+        if (NumBuffers > 0)
+        {
+            SVGA3dShaderType const shaderType = (SVGA3dShaderType)(idxShaderState + SVGA3D_SHADERTYPE_MIN);
+            switch (shaderType)
+            {
+                case SVGA3D_SHADERTYPE_VS:
+                    pDXDevice->pImmediateContext->VSSetConstantBuffers1(StartSlot, NumBuffers,
+                                                                        papConstantBuffer, pFirstConstant, pNumConstants);
+                    break;
+                case SVGA3D_SHADERTYPE_PS:
+                    pDXDevice->pImmediateContext->PSSetConstantBuffers1(StartSlot, NumBuffers,
+                                                                        papConstantBuffer, pFirstConstant, pNumConstants);
+                    break;
+                case SVGA3D_SHADERTYPE_GS:
+                    pDXDevice->pImmediateContext->GSSetConstantBuffers1(StartSlot, NumBuffers,
+                                                                        papConstantBuffer, pFirstConstant, pNumConstants);
+                    break;
+                case SVGA3D_SHADERTYPE_HS:
+                    pDXDevice->pImmediateContext->HSSetConstantBuffers1(StartSlot, NumBuffers,
+                                                                        papConstantBuffer, pFirstConstant, pNumConstants);
+                    break;
+                case SVGA3D_SHADERTYPE_DS:
+                    pDXDevice->pImmediateContext->DSSetConstantBuffers1(StartSlot, NumBuffers,
+                                                                        papConstantBuffer, pFirstConstant, pNumConstants);
+                    break;
+                case SVGA3D_SHADERTYPE_CS:
+                    pDXDevice->pImmediateContext->CSSetConstantBuffers1(StartSlot, NumBuffers,
+                                                                        papConstantBuffer, pFirstConstant, pNumConstants);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        /* Set the state to "not changed" */
+        pCb->StartSlot = 0;
+        pCb->NumBuffers = 0;
+    }
+#endif
 }
 
 static void dxSetVertexBuffers(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
@@ -8631,6 +8868,16 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
 }
 
 
+static void dxPostDraw(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+{
+#ifndef DX_CB
+    RT_NOREF(pDXDevice, pDXContext);
+#else
+    dxUploadBufferManagerProcessFull(&pDXContext->pBackendDXContext->constantBufferManager, pDXDevice->pImmediateContext);
+#endif
+}
+
+
 static DECLCALLBACK(int) vmsvga3dBackDXDraw(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, uint32_t vertexCount, uint32_t startVertexLocation)
 {
     PVMSVGA3DBACKEND pBackend = pThisCC->svga.p3dState->pBackend;
@@ -8716,6 +8963,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDraw(PVGASTATECC pThisCC, PVMSVGA3DDXCONT
         D3D_RELEASE(pIndexBuffer);
         RTMemFree(paIndices);
     }
+
+    dxPostDraw(pDevice, pDXContext);
 
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
@@ -8932,6 +9181,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDrawIndexed(PVGASTATECC pThisCC, PVMSVGA3
         dxDrawIndexedTriangleFan(pDevice, indexCount, startIndexLocation, baseVertexLocation);
     }
 
+    dxPostDraw(pDevice, pDXContext);
+
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
 #endif
@@ -8959,6 +9210,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDrawInstanced(PVGASTATECC pThisCC, PVMSVG
     Assert(pDXContext->svgaDXContext.inputAssembly.topology != SVGA3D_PRIMITIVE_TRIANGLEFAN);
 
     pDevice->pImmediateContext->DrawInstanced(vertexCountPerInstance, instanceCount, startVertexLocation, startInstanceLocation);
+
+    dxPostDraw(pDevice, pDXContext);
 
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
@@ -8988,6 +9241,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDrawIndexedInstanced(PVGASTATECC pThisCC,
 
     pDevice->pImmediateContext->DrawIndexedInstanced(indexCountPerInstance, instanceCount, startIndexLocation, baseVertexLocation, startInstanceLocation);
 
+    dxPostDraw(pDevice, pDXContext);
+
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
 #endif
@@ -9009,6 +9264,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDrawAuto(PVGASTATECC pThisCC, PVMSVGA3DDX
     Assert(pDXContext->svgaDXContext.inputAssembly.topology != SVGA3D_PRIMITIVE_TRIANGLEFAN);
 
     pDevice->pImmediateContext->DrawAuto();
+
+    dxPostDraw(pDevice, pDXContext);
 
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
@@ -11729,6 +11986,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDrawIndexedInstancedIndirect(PVGASTATECC 
 
     pDevice->pImmediateContext->DrawIndexedInstancedIndirect(pBufferForArgs, byteOffsetForArgs);
 
+    dxPostDraw(pDevice, pDXContext);
+
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
 #endif
@@ -11766,6 +12025,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDrawInstancedIndirect(PVGASTATECC pThisCC
 
     pDevice->pImmediateContext->DrawInstancedIndirect(pBufferForArgs, byteOffsetForArgs);
 
+    dxPostDraw(pDevice, pDXContext);
+
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
 #endif
@@ -11785,6 +12046,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDispatch(PVGASTATECC pThisCC, PVMSVGA3DDX
     dxSetupPipeline(pThisCC, pDXContext);
 
     pDevice->pImmediateContext->Dispatch(threadGroupCountX, threadGroupCountY, threadGroupCountZ);
+
+    dxPostDraw(pDevice, pDXContext);
 
 #ifdef DX_FLUSH_AFTER_DRAW
     dxDeviceFlush(pDevice);
