@@ -1,4 +1,4 @@
-/* $Id: VBoxManageNATNetwork.cpp 114248 2026-06-03 09:14:21Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageNATNetwork.cpp 114250 2026-06-03 13:21:48Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of NAT Network command command.
  */
@@ -34,6 +34,7 @@
 #include <VBox/com/ErrorInfo.h>
 #include <VBox/com/errorprint.h>
 #include <VBox/com/VirtualBox.h>
+#include <VBox/com/utils.h>
 
 #ifndef RT_OS_WINDOWS
 # include <netinet/in.h>
@@ -46,6 +47,7 @@
 
 #include <iprt/cdefs.h>
 #include <iprt/cidr.h>
+#include <iprt/file.h>
 #include <iprt/param.h>
 #include <iprt/path.h>
 #include <iprt/stream.h>
@@ -53,6 +55,7 @@
 #include <iprt/net.h>
 #include <iprt/getopt.h>
 #include <iprt/ctype.h>
+#include <iprt/thread.h>
 
 #include <VBox/log.h>
 
@@ -613,6 +616,165 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
     return RTEXITCODE_SUCCESS;
 }
 
+/**
+ * Writes all currently available log file data to stdout.
+ *
+ * @returns VBox status code.
+ * @param   hLogFile           The open log file handle.
+ * @param   hStdOut            The stdout file handle.
+ * @param   poffFile           The current log file offset, updated on
+ *                             successful writes.
+ */
+static int natNetworkLogWriteAvailable(RTFILE hLogFile, RTFILE hStdOut, uint64_t *poffFile)
+{
+    for (;;)
+    {
+        uint8_t abBuf[_64K];
+        size_t cbRead = 0;
+        int vrc = RTFileRead(hLogFile, abBuf, sizeof(abBuf), &cbRead);
+        if (RT_FAILURE(vrc))
+            return vrc;
+        if (!cbRead)
+            return VINF_SUCCESS;
+
+        vrc = RTFileWrite(hStdOut, abBuf, cbRead, NULL);
+        if (RT_FAILURE(vrc))
+            return vrc;
+        *poffFile += cbRead;
+    }
+}
+
+/**
+ * Writes a NAT network log file to stdout.
+ *
+ * @returns Suitable exit code.
+ * @param   pszLogFile         The log file path.
+ * @param   fFollow            Whether to keep watching for appended output.
+ */
+static RTEXITCODE natNetworkLogOutput(const char *pszLogFile, bool fFollow)
+{
+    RTFILE hLogFile;
+    int vrc = RTFileOpen(&hLogFile, pszLogFile, RTFILE_O_READ | RTFILE_O_OPEN | RTFILE_O_DENY_NONE);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, Nat::tr("Cannot open log file '%s': %Rrc"), pszLogFile, vrc);
+
+    RTFILE hStdOut;
+    vrc = RTFileFromNative(&hStdOut, 1);
+    if (RT_FAILURE(vrc))
+    {
+        RTFileClose(hLogFile);
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, Nat::tr("Cannot open standard output: %Rrc"), vrc);
+    }
+
+    uint64_t offFile = 0;
+    vrc = natNetworkLogWriteAvailable(hLogFile, hStdOut, &offFile);
+    if (RT_FAILURE(vrc))
+    {
+        RTFileClose(hLogFile);
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, Nat::tr("Cannot read log file '%s': %Rrc"), pszLogFile, vrc);
+    }
+
+    while (fFollow)
+    {
+        uint64_t cbFile = 0;
+        vrc = RTFileQuerySize(hLogFile, &cbFile);
+        if (RT_SUCCESS(vrc) && cbFile < offFile)
+        {
+            vrc = RTFileSeek(hLogFile, 0, RTFILE_SEEK_BEGIN, &offFile);
+            if (RT_FAILURE(vrc))
+                break;
+        }
+
+        vrc = natNetworkLogWriteAvailable(hLogFile, hStdOut, &offFile);
+        if (RT_FAILURE(vrc))
+            break;
+
+        RTThreadSleep(1000);
+    }
+
+    RTFileClose(hLogFile);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, Nat::tr("Cannot read log file '%s': %Rrc"), pszLogFile, vrc);
+    return RTEXITCODE_SUCCESS;
+}
+
+/**
+ * Handles the 'log' subcommand.
+ *
+ * @returns Suitable exit code.
+ * @param   a                  The handler arguments.
+ */
+static RTEXITCODE handleNATLog(HandlerArg *a)
+{
+    static const RTGETOPTDEF s_aOptions[] =
+    {
+        { "--follow",           'f', RTGETOPT_REQ_NOTHING }
+    };
+
+    const char *pszNetName = NULL;
+    bool fFollow = false;
+
+    RTGETOPTSTATE GetState;
+    int vrc = RTGetOptInit(&GetState, a->argc, a->argv, s_aOptions, RT_ELEMENTS(s_aOptions), 1,
+                           RTGETOPTINIT_FLAGS_NO_STD_OPTS);
+    AssertRCReturn(vrc, RTEXITCODE_FAILURE);
+
+    RTGETOPTUNION ValueUnion;
+    while ((vrc = RTGetOpt(&GetState, &ValueUnion)))
+    {
+        switch (vrc)
+        {
+            case 'f':   // -f / --follow
+                if (fFollow)
+                    return errorSyntax(Nat::tr("You can specify -f only once."));
+                fFollow = true;
+                break;
+
+            case VINF_GETOPT_NOT_OPTION:
+                if (pszNetName)
+                    return errorTooManyParameters(&a->argv[GetState.iNext - 1]);
+                pszNetName = ValueUnion.psz;
+                break;
+
+            default:
+                return errorGetOpt(vrc, &ValueUnion);
+        }
+    }
+
+    if (!pszNetName)
+        return errorSyntax(Nat::tr("Missing NAT network name"));
+
+    Bstr bstrNetName(pszNetName);
+    ComPtr<INATNetwork> ptrNATNetwork;
+    HRESULT hrc = a->virtualBox->FindNATNetworkByName(bstrNetName.raw(), ptrNATNetwork.asOutParam());
+    if (FAILED(hrc))
+        return errorArgument(Nat::tr("NAT network '%s' not found"), pszNetName);
+
+    CHECK_ERROR_RET(ptrNATNetwork, COMGETTER(NetworkName)(bstrNetName.asOutParam()), RTEXITCODE_FAILURE);
+    Utf8Str strNetName(bstrNetName);
+    const char *pszLogName = strNetName.c_str();
+    if (   strchr(pszLogName, '/')
+        || strchr(pszLogName, '\\'))
+        return errorArgument(Nat::tr("NAT network name '%s' cannot be used as a log file name"), pszLogName);
+
+    char szLogFile[RTPATH_MAX];
+    vrc = com::GetVBoxUserHomeDirectory(szLogFile, sizeof(szLogFile), false /* fCreateDir */);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE,
+                              Nat::tr("Cannot determine VirtualBox global configuration directory: %Rrc"), vrc);
+
+    char szLogFileName[RTPATH_MAX];
+    ssize_t cchLogFileName = RTStrPrintf2(szLogFileName, sizeof(szLogFileName), "%s.log", pszLogName);
+    if (cchLogFileName < 0 || (size_t)cchLogFileName >= sizeof(szLogFileName))
+        return errorArgument(Nat::tr("NAT network log file name is too long"));
+
+    vrc = RTPathAppend(szLogFile, sizeof(szLogFile), szLogFileName);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, Nat::tr("Cannot construct log file path: %Rrc"), vrc);
+
+    return natNetworkLogOutput(szLogFile, fFollow);
+}
+
 
 /*
  * VBoxManage natnetwork ...
@@ -647,6 +809,11 @@ RTEXITCODE handleNATNetwork(HandlerArg *a)
     {
         setCurrentSubcommand(HELP_SCOPE_NATNETWORK_STOP);
         rcExit = handleOp(a, OP_STOP);
+    }
+    else if (strcmp(a->argv[0], "log") == 0)
+    {
+        setCurrentSubcommand(HELP_SCOPE_NATNETWORK_LOG);
+        rcExit = handleNATLog(a);
     }
     else if (strcmp(a->argv[0], "list") == 0)
     {

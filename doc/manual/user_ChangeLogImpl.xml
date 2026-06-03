@@ -94,8 +94,8 @@ Rules for adding a changelog entry to make them look more uniform:
     <itemizedlist>
 
       <listitem>
-        <para>VBoxManage: Added dhcpserver log command to display DHCP
-          server log files</para>
+        <para>VBoxManage: Added natnetwork log and dhcpserver log commands
+          to display NAT network and DHCP server log files</para>
       </listitem>
 
       <listitem>

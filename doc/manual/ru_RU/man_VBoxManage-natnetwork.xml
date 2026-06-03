@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-natnetwork" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-06-03 11:14:21 +0200 (Wed, 03 Jun 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-03 15:21:48 +0200 (Wed, 03 Jun 2026) $</pubdate>
     <title>VBoxManage natnetwork</title>
   </refentryinfo>
 
@@ -66,6 +66,12 @@
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-list">
       <command>VBoxManage natnetwork list</command>
       <arg><replaceable>шаблон-фильтра</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-natnetwork-log">
+      <command>VBoxManage natnetwork log</command>
+      <arg choice="req"><replaceable>имя</replaceable></arg>
+      <arg>-f</arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-modify">
@@ -260,6 +266,29 @@
           <term><replaceable>шаблон-фильтра</replaceable></term>
           <listitem><para>
               Указывает необязательный шаблон фильтра.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+    </refsect2>
+    <refsect2 id="vboxmanage-natnetwork-log">
+      <title>Показать журнал службы сети NAT</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        Команда <command>VBoxManage natnetwork log</command> выводит
+        журнал указанной службы сети NAT в стандартный вывод. Файл журнала
+        считывается из глобального каталога конфигурации &product-name;.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><replaceable>имя</replaceable></term>
+          <listitem><para>
+              Задает имя службы сети NAT.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>-f</option></term>
+          <listitem><para>
+              Продолжает отображать добавляемые записи журнала.
             </para></listitem>
         </varlistentry>
       </variablelist>

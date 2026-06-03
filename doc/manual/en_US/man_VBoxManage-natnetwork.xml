@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-natnetwork" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-06-03 11:14:21 +0200 (Wed, 03 Jun 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-03 15:21:48 +0200 (Wed, 03 Jun 2026) $</pubdate>
     <title>VBoxManage natnetwork</title>
   </refentryinfo>
 
@@ -66,6 +66,12 @@
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-list">
       <command>VBoxManage natnetwork list</command>
       <arg><replaceable>filter-pattern</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-natnetwork-log">
+      <command>VBoxManage natnetwork log</command>
+      <arg choice="req"><replaceable>name</replaceable></arg>
+      <arg>-f</arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-modify">
@@ -260,6 +266,30 @@
           <term><replaceable>filter-pattern</replaceable></term>
           <listitem><para>
               Specifies an optional filtering pattern.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+    </refsect2>
+    <refsect2 id="vboxmanage-natnetwork-log">
+      <title>Show a NAT Network Service Log</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage natnetwork log</command> command writes
+        the specified NAT network service log to standard output. The log
+        file is read from the &product-name; global configuration
+        directory.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><replaceable>name</replaceable></term>
+          <listitem><para>
+              Specifies the NAT network service name.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>-f</option></term>
+          <listitem><para>
+              Continues to display appended log output.
             </para></listitem>
         </varlistentry>
       </variablelist>
