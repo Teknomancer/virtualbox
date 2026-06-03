@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-dhcpserver" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-06-03 15:06:39 +0200 (Wed, 03 Jun 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-03 15:50:32 +0200 (Wed, 03 Jun 2026) $</pubdate>
     <title>VBoxManage dhcpserver</title>
   </refentryinfo>
 
@@ -248,10 +248,8 @@
       <command>VBoxManage dhcpserver log</command>
       <group>
         <arg choice="plain"><replaceable>name</replaceable></arg>
-        <group choice="plain">
-          <arg choice="plain">--network=<replaceable>netname</replaceable></arg>
-          <arg choice="plain">--interface=<replaceable>ifname</replaceable></arg>
-        </group>
+        <arg choice="plain">--network=<replaceable>netname</replaceable></arg>
+        <arg choice="plain">--interface=<replaceable>ifname</replaceable></arg>
       </group>
       <arg>-f</arg>
     </cmdsynopsis>
