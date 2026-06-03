@@ -1,4 +1,4 @@
-/* $Id: VBoxManageNATNetwork.cpp 114247 2026-06-02 17:23:02Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageNATNetwork.cpp 114248 2026-06-03 09:14:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of NAT Network command command.
  */
@@ -212,10 +212,12 @@ static RTEXITCODE handleNATList(HandlerArg *a)
 
 static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
 {
-    if (a->argc - 1 <= 1)
-        return errorSyntax(Nat::tr("Not enough parameters"));
+    if (a->argc < 2)
+        return errorSyntax(Nat::tr("Missing NAT network name"));
 
-    const char *pszNetName = NULL;
+    const bool fNetNameSpecified = a->argv[1][0] != '-';
+    const char *pszNetName = fNetNameSpecified ? a->argv[1] : NULL;
+    bool fDeprecatedNetName = false;
     const char *pszPrefixIPv4 = NULL;
     const char *pszPrefixIPv6 = NULL;
     int iEnableNetwork = -1;          /* Tri-state: -1 on uninitialized, 0 = false, 1 = true. */
@@ -240,7 +242,7 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
 
     static const RTGETOPTDEF g_aNATNetworkIPOptions[] =
     {
-        { "--netname",          't',                            RTGETOPT_REQ_STRING  },
+        { "--netname",          't',                            RTGETOPT_REQ_STRING  }, /* deprecated, kept for backwards compatibility. */
         { "--network",          'n',                            RTGETOPT_REQ_STRING  }, /* old name */
         { "--ipv4-prefix",      'n',                            RTGETOPT_REQ_STRING  }, /* new name */
         { "--dhcp",             'h',                            RTGETOPT_REQ_BOOL    },
@@ -259,18 +261,24 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
     int c;
     RTGETOPTUNION ValueUnion;
     RTGETOPTSTATE GetState;
+    size_t cOptions = 1;
+    if (enmCode == OP_ADD || enmCode == OP_MODIFY)
+        cOptions = RT_ELEMENTS(g_aNATNetworkIPOptions);
     RTGetOptInit(&GetState, a->argc, a->argv, g_aNATNetworkIPOptions,
-                 enmCode != OP_REMOVE ? RT_ELEMENTS(g_aNATNetworkIPOptions) : 4, /* we use only --netname and --ifname for remove*/
-                 1, RTGETOPTINIT_FLAGS_NO_STD_OPTS);
+                 cOptions, fNetNameSpecified ? 2 : 1, RTGETOPTINIT_FLAGS_NO_STD_OPTS);
     while ((c = RTGetOpt(&GetState, &ValueUnion)) != 0)
     {
         switch (c)
         {
             case 't':   // --netname
                 if (pszNetName)
-                    return errorSyntax(Nat::tr("You can specify --netname only once."));
+                    return errorSyntax(Nat::tr("You can specify the NAT network name only once."));
                 pszNetName = ValueUnion.psz;
+                fDeprecatedNetName = true;
                 break;
+
+            case VINF_GETOPT_NOT_OPTION:
+                return errorTooManyParameters(&a->argv[GetState.iNext - 1]);
 
             case 'n':   // --network
                 if (pszPrefixIPv4)
@@ -389,7 +397,11 @@ static RTEXITCODE handleOp(HandlerArg *a, OPCODE enmCode)
     }
 
     if (!pszNetName)
-        return errorSyntax(Nat::tr("Argument --netname missing"));
+        return errorSyntax(Nat::tr("Missing NAT network name"));
+    if (fDeprecatedNetName)
+        RTMsgWarning(Nat::tr("The --netname option is deprecated and will be removed in a future version. "
+                             "Specify the NAT network name immediately after the command instead."));
+
     /* verification */
     switch (enmCode)
     {

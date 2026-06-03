@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-natnetwork" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-01-11 20:29:08 +0100 (Sun, 11 Jan 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-03 11:14:21 +0200 (Wed, 03 Jun 2026) $</pubdate>
     <title>VBoxManage natnetwork</title>
   </refentryinfo>
 
@@ -49,11 +49,11 @@
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-add">
 <!-- The 'id' is mandatory and must start with 'synopsis-'. -->
       <command>VBoxManage natnetwork add</command>
+      <arg choice="req"><replaceable>name</replaceable></arg>
       <group>
         <arg choice="plain">--disable</arg>
         <arg choice="plain">--enable</arg>
       </group>
-      <arg choice="req">--netname=<replaceable>name</replaceable></arg>
       <arg choice="req">--network=<replaceable>network</replaceable></arg>
       <arg>--dhcp=on|off</arg>
       <arg>--ipv6=on|off</arg>
@@ -70,12 +70,12 @@
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-modify">
       <command>VBoxManage natnetwork modify</command>
+      <arg choice="req"><replaceable>name</replaceable></arg>
       <arg>--dhcp=on|off</arg>
       <group>
         <arg choice="plain">--disable</arg>
         <arg choice="plain">--enable</arg>
       </group>
-      <arg choice="req">--netname=<replaceable>name</replaceable></arg>
       <arg choice="req">--network=<replaceable>network</replaceable></arg>
       <arg>--ipv6=on|off</arg>
       <arg>--loopback-4=<replaceable>rule</replaceable></arg>
@@ -86,17 +86,17 @@
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-remove">
       <command>VBoxManage natnetwork remove</command>
-      <arg choice="req">--netname=<replaceable>name</replaceable></arg>
+      <arg choice="req"><replaceable>name</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-start">
       <command>VBoxManage natnetwork start</command>
-      <arg choice="req">--netname=<replaceable>name</replaceable></arg>
+      <arg choice="req"><replaceable>name</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-stop">
       <command>VBoxManage natnetwork stop</command>
-      <arg choice="req">--netname=<replaceable>name</replaceable></arg>
+      <arg choice="req"><replaceable>name</replaceable></arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -127,10 +127,18 @@
       <para>
         The <command>VBoxManage natnetwork add</command> command creates
         a new internal network interface and adds a NAT network
-        service. You must use this command before you can attach the VM
-        to the NAT network.
+        service. Specify the network name immediately after the
+        <command>add</command> subcommand. You must use this command
+        before you can attach the VM to the NAT network.
       </para>
       <variablelist>
+        <varlistentry>
+          <term><replaceable>name</replaceable></term>
+          <listitem><para>
+              Specifies the name of the new internal network interface
+              on the host OS.
+            </para></listitem>
+        </varlistentry>
         <varlistentry>
           <term><option>--disable</option></term>
           <listitem><para>
@@ -144,13 +152,6 @@
             </para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><option>--netname=<replaceable>name</replaceable></option></term>
-          <listitem><para>
-              Specifies the name of the new internal network interface
-              on the host OS.
-            </para></listitem>
-        </varlistentry>
-        <varlistentry>
           <term><option>--network</option></term>
           <listitem><para>
               Specifies the static or DHCP network address and mask of
@@ -161,8 +162,8 @@
         <varlistentry>
           <term><option>--dhcp</option></term>
           <listitem><para>
-              Enables or disables the DHCP server specified with
-              the <option>--netname</option> option.
+              Enables or disables the DHCP server specified by
+              <replaceable>name</replaceable>.
             </para></listitem>
         </varlistentry>
         <varlistentry>
@@ -207,7 +208,7 @@
       </para>
       <variablelist>
         <varlistentry>
-          <term><option>--netname=<replaceable>name</replaceable></option></term>
+          <term><replaceable>name</replaceable></term>
           <listitem><para>
               Specifies the name of the NAT network service to remove.
             </para></listitem>
@@ -223,7 +224,7 @@
       </para>
       <variablelist>
         <varlistentry>
-          <term><option>--netname=<replaceable>name</replaceable></option></term>
+          <term><replaceable>name</replaceable></term>
           <listitem><para>
               Specifies the name of the NAT network service to start.
             </para></listitem>
@@ -239,7 +240,7 @@
       </para>
       <variablelist>
         <varlistentry>
-          <term><option>--netname=<replaceable>name</replaceable></option></term>
+          <term><replaceable>name</replaceable></term>
           <listitem><para>
               Specifies the name of the NAT network service to stop.
             </para></listitem>
@@ -269,8 +270,17 @@
       <para>
         The <command>VBoxManage natnetwork modify</command> command
         modifies the settings of an existing internal network interface.
+        Specify the network name immediately after the
+        <command>modify</command> subcommand.
       </para>
       <variablelist>
+        <varlistentry>
+          <term><replaceable>name</replaceable></term>
+          <listitem><para>
+              Specifies the name of the existing internal network
+              interface on the host OS.
+            </para></listitem>
+        </varlistentry>
         <varlistentry>
           <term><option>--disable</option></term>
           <listitem><para>
@@ -284,13 +294,6 @@
             </para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><option>--netname=<replaceable>name</replaceable></option></term>
-          <listitem><para>
-              Specifies the name of the new internal network interface
-              on the host OS.
-            </para></listitem>
-        </varlistentry>
-        <varlistentry>
           <term><option>--network</option></term>
           <listitem><para>
               Specifies the static or DHCP network address and mask of
@@ -301,8 +304,8 @@
         <varlistentry>
           <term><option>--dhcp</option></term>
           <listitem><para>
-              Enables or disables the DHCP server specified
-              with the <option>--netname</option> option.
+              Enables or disables the DHCP server specified by
+              <replaceable>name</replaceable>.
             </para></listitem>
         </varlistentry>
         <varlistentry>
@@ -353,11 +356,11 @@
       network address that you specify with the
       <option>--network</option> option.
     </para>
-<screen>$ VBoxManage natnetwork add --netname natnet1 --network "192.168.15.0/24" --enable</screen>
+<screen>$ VBoxManage natnetwork add natnet1 --network "192.168.15.0/24" --enable</screen>
     <para>
       The following command shows how to add a DHCP server to the
       <literal>natnet1</literal> NAT network after creation:
     </para>
-<screen>$ VBoxManage natnetwork modify --netname natnet1 --dhcp on</screen>
+<screen>$ VBoxManage natnetwork modify natnet1 --dhcp on</screen>
   </refsect1>
 </refentry>

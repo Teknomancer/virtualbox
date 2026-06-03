@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-natnetwork" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-01-11 20:29:08 +0100 (Sun, 11 Jan 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-03 11:14:21 +0200 (Wed, 03 Jun 2026) $</pubdate>
     <title>VBoxManage natnetwork</title>
   </refentryinfo>
 
@@ -49,11 +49,11 @@
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-add">
 <!-- The 'id' is mandatory and must start with 'synopsis-'. -->
       <command>VBoxManage natnetwork add</command>
+      <arg choice="req"><replaceable>имя</replaceable></arg>
       <group>
         <arg choice="plain">--disable</arg>
         <arg choice="plain">--enable</arg>
       </group>
-      <arg choice="req">--netname=<replaceable>имя</replaceable></arg>
       <arg choice="req">--network=<replaceable>сеть</replaceable></arg>
       <arg>--dhcp=on|off</arg>
       <arg>--ipv6=on|off</arg>
@@ -70,12 +70,12 @@
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-modify">
       <command>VBoxManage natnetwork modify</command>
+      <arg choice="req"><replaceable>имя</replaceable></arg>
       <arg>--dhcp=on|off</arg>
       <group>
         <arg choice="plain">--disable</arg>
         <arg choice="plain">--enable</arg>
       </group>
-      <arg choice="req">--netname=<replaceable>имя</replaceable></arg>
       <arg choice="req">--network=<replaceable>сеть</replaceable></arg>
       <arg>--ipv6=on|off</arg>
       <arg>--loopback-4=<replaceable>правило</replaceable></arg>
@@ -86,17 +86,17 @@
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-remove">
       <command>VBoxManage natnetwork remove</command>
-      <arg choice="req">--netname=<replaceable>имя</replaceable></arg>
+      <arg choice="req"><replaceable>имя</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-start">
       <command>VBoxManage natnetwork start</command>
-      <arg choice="req">--netname=<replaceable>имя</replaceable></arg>
+      <arg choice="req"><replaceable>имя</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-natnetwork-stop">
       <command>VBoxManage natnetwork stop</command>
-      <arg choice="req">--netname=<replaceable>имя</replaceable></arg>
+      <arg choice="req"><replaceable>имя</replaceable></arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -142,7 +142,7 @@
             </para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><option>--netname=<replaceable>имя</replaceable></option></term>
+          <term><replaceable>имя</replaceable></term>
           <listitem><para>
               Задает имя нового интерфейса внутренней сети в ОС хоста.
             </para></listitem>
@@ -159,7 +159,7 @@
           <term><option>--dhcp</option></term>
           <listitem><para>
               Включает или отключает сервер DHCP, который указывается
-              через опцию <option>--netname</option>.
+              именем <replaceable>имя</replaceable>.
             </para></listitem>
         </varlistentry>
         <varlistentry>
@@ -208,7 +208,7 @@
       </para>
       <variablelist>
         <varlistentry>
-          <term><option>--netname=<replaceable>имя</replaceable></option></term>
+          <term><replaceable>имя</replaceable></term>
           <listitem><para>
               Задает имя удаляемой службы сети NAT.
             </para></listitem>
@@ -224,7 +224,7 @@
       </para>
       <variablelist>
         <varlistentry>
-          <term><option>--netname=<replaceable>имя</replaceable></option></term>
+          <term><replaceable>имя</replaceable></term>
           <listitem><para>
               Задает имя запускаемой службы сети NAT.
             </para></listitem>
@@ -240,7 +240,7 @@
       </para>
       <variablelist>
         <varlistentry>
-          <term><option>--netname=<replaceable>имя</replaceable></option></term>
+          <term><replaceable>имя</replaceable></term>
           <listitem><para>
               Задает имя останавливаемой службы сети NAT.
             </para></listitem>
@@ -286,7 +286,7 @@
             </para></listitem>
         </varlistentry>
         <varlistentry>
-          <term><option>--netname=<replaceable>имя</replaceable></option></term>
+          <term><replaceable>имя</replaceable></term>
           <listitem><para>
               Задает имя нового интерфейса внутренней сети в ОС хоста.
             </para></listitem>
@@ -302,8 +302,8 @@
         <varlistentry>
           <term><option>--dhcp</option></term>
           <listitem><para>
-              Включает или отключает сервер DHCP, указанный через
-              опцию <option>--netname</option>.
+              Включает или отключает сервер DHCP, указанный именем
+              <replaceable>имя</replaceable>.
             </para></listitem>
         </varlistentry>
         <varlistentry>
@@ -357,11 +357,11 @@
       Заметим, что этот IP адрес - это следующий адрес после адреса,
       указанного опцией <option>--network</option>.
     </para>
-<screen>$ VBoxManage natnetwork add --netname natnet1 --network "192.168.15.0/24" --enable</screen>
+<screen>$ VBoxManage natnetwork add natnet1 --network "192.168.15.0/24" --enable</screen>
     <para>
       Следующая команда показывает как добавить сервер DHCP к
       сети NAT <literal>natnet1</literal> после создания:
     </para>
-<screen>$ VBoxManage natnetwork modify --netname natnet1 --dhcp on</screen>
+<screen>$ VBoxManage natnetwork modify natnet1 --dhcp on</screen>
   </refsect1>
 </refentry>
