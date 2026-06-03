@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-dhcpserver" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-01-11 20:29:08 +0100 (Sun, 11 Jan 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-03 15:06:39 +0200 (Wed, 03 Jun 2026) $</pubdate>
     <title>VBoxManage dhcpserver</title>
   </refentryinfo>
 
@@ -243,6 +243,17 @@
         <arg choice="plain">--network=<replaceable>имя-сети</replaceable></arg>
         <arg choice="plain">--interface=<replaceable>имя-интерфейса</replaceable></arg>
       </group>
+    </cmdsynopsis>
+    <cmdsynopsis id="synopsis-vboxmanage-dhcpserver-log">
+      <command>VBoxManage dhcpserver log</command>
+      <group>
+        <arg choice="plain"><replaceable>имя</replaceable></arg>
+        <group choice="plain">
+          <arg choice="plain">--network=<replaceable>имя-сети</replaceable></arg>
+          <arg choice="plain">--interface=<replaceable>имя-интерфейса</replaceable></arg>
+        </group>
+      </group>
+      <arg>-f</arg>
     </cmdsynopsis>
     <cmdsynopsis id="synopsis-vboxmanage-dhcpserver-findlease">
       <command>VBoxManage dhcpserver findlease</command>
@@ -583,6 +594,46 @@
       </para>
     </refsect2>
 
+    <refsect2 id="vboxmanage-dhcpserver-log">
+      <title>dhcpserver log</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        Выводит журнал указанного DHCP сервера в стандартный вывод.
+        Файл журнала считывается из глобального каталога конфигурации
+        &product-name;. DHCP сервер можно выбрать, указав имя сети NAT или
+        имя интерфейса host-only как <replaceable>имя</replaceable>. Если сеть NAT
+        и интерфейс имеют одинаковое имя, используйте <option>--network</option>
+        или <option>--interface</option>, чтобы явно выбрать DHCP сервер.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><replaceable>имя</replaceable></term>
+          <listitem><para>
+              Задает имя сети NAT DHCP сервера или интерфейса host-only.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--network=<replaceable>имя-сети</replaceable></option></term>
+          <term><option>--netname=<replaceable>имя-сети</replaceable></option></term>
+          <listitem><para>
+              Явно выбирает DHCP сервер по имени сети.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--interface=<replaceable>имя-интерфейса</replaceable></option></term>
+          <listitem><para>
+              Явно выбирает DHCP сервер по имени интерфейса host-only.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>-f</option></term>
+          <listitem><para>
+              Продолжает отображать добавляемые записи журнала.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+    </refsect2>
+
     <refsect2 id="vboxmanage-dhcpserver-findlease">
       <title>dhcpserver findlease</title>
       <remark role="help-copy-synopsis"/>
@@ -608,4 +659,3 @@
   </refsect1>
 
 </refentry>
-

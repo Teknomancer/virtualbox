@@ -1,4 +1,4 @@
-/* $Id: VBoxManageDHCPServer.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxManageDHCPServer.cpp 114249 2026-06-03 13:06:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of dhcpserver command.
  */
@@ -34,8 +34,10 @@
 #include <VBox/com/ErrorInfo.h>
 #include <VBox/com/errorprint.h>
 #include <VBox/com/VirtualBox.h>
+#include <VBox/com/utils.h>
 
 #include <iprt/cidr.h>
+#include <iprt/file.h>
 #include <iprt/param.h>
 #include <iprt/path.h>
 #include <iprt/stream.h>
@@ -43,6 +45,7 @@
 #include <iprt/net.h>
 #include <iprt/getopt.h>
 #include <iprt/ctype.h>
+#include <iprt/thread.h>
 
 #include <VBox/log.h>
 
@@ -1278,6 +1281,266 @@ static DECLCALLBACK(RTEXITCODE) dhcpdHandleFindLease(PDHCPDCMDCTX pCtx, int argc
     return RTEXITCODE_FAILURE;
 }
 
+/**
+ * Writes all currently available log file data to stdout.
+ *
+ * @returns VBox status code.
+ * @param   hLogFile           The open log file handle.
+ * @param   hStdOut            The stdout file handle.
+ * @param   poffFile           The current log file offset, updated on
+ *                             successful writes.
+ */
+static int dhcpdLogWriteAvailable(RTFILE hLogFile, RTFILE hStdOut, uint64_t *poffFile)
+{
+    for (;;)
+    {
+        uint8_t abBuf[_64K];
+        size_t cbRead = 0;
+        int vrc = RTFileRead(hLogFile, abBuf, sizeof(abBuf), &cbRead);
+        if (RT_FAILURE(vrc))
+            return vrc;
+        if (!cbRead)
+            return VINF_SUCCESS;
+
+        vrc = RTFileWrite(hStdOut, abBuf, cbRead, NULL);
+        if (RT_FAILURE(vrc))
+            return vrc;
+        *poffFile += cbRead;
+    }
+}
+
+/**
+ * Writes a DHCP server log file to stdout.
+ *
+ * @returns Suitable exit code.
+ * @param   pszLogFile         The log file path.
+ * @param   fFollow            Whether to keep watching for appended output.
+ */
+static RTEXITCODE dhcpdLogOutput(const char *pszLogFile, bool fFollow)
+{
+    RTFILE hLogFile;
+    int vrc = RTFileOpen(&hLogFile, pszLogFile, RTFILE_O_READ | RTFILE_O_OPEN | RTFILE_O_DENY_NONE);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, DHCPServer::tr("Cannot open log file '%s': %Rrc"), pszLogFile, vrc);
+
+    RTFILE hStdOut;
+    vrc = RTFileFromNative(&hStdOut, 1);
+    if (RT_FAILURE(vrc))
+    {
+        RTFileClose(hLogFile);
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, DHCPServer::tr("Cannot open standard output: %Rrc"), vrc);
+    }
+
+    uint64_t offFile = 0;
+    vrc = dhcpdLogWriteAvailable(hLogFile, hStdOut, &offFile);
+    if (RT_FAILURE(vrc))
+    {
+        RTFileClose(hLogFile);
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, DHCPServer::tr("Cannot read log file '%s': %Rrc"), pszLogFile, vrc);
+    }
+
+    while (fFollow)
+    {
+        uint64_t cbFile = 0;
+        vrc = RTFileQuerySize(hLogFile, &cbFile);
+        if (RT_SUCCESS(vrc) && cbFile < offFile)
+        {
+            vrc = RTFileSeek(hLogFile, 0, RTFILE_SEEK_BEGIN, &offFile);
+            if (RT_FAILURE(vrc))
+                break;
+        }
+
+        vrc = dhcpdLogWriteAvailable(hLogFile, hStdOut, &offFile);
+        if (RT_FAILURE(vrc))
+            break;
+
+        RTThreadSleep(1000);
+    }
+
+    RTFileClose(hLogFile);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, DHCPServer::tr("Cannot read log file '%s': %Rrc"), pszLogFile, vrc);
+    return RTEXITCODE_SUCCESS;
+}
+
+/**
+ * Gets the DHCP log name for a NAT network.
+ *
+ * @returns Suitable exit code.
+ * @param   pCtx               Pointer to the DHCP server command context.
+ * @param   pszNetwork         The NAT network name.
+ * @param   bstrLogName        Where to return the log name.
+ */
+static RTEXITCODE dhcpdGetNATNetworkLogName(PDHCPDCMDCTX pCtx, const char *pszNetwork, Bstr &bstrLogName)
+{
+    Bstr bstrNetwork(pszNetwork);
+    ComPtr<INATNetwork> ptrNATNetwork;
+    HRESULT hrc = pCtx->pArg->virtualBox->FindNATNetworkByName(bstrNetwork.raw(), ptrNATNetwork.asOutParam());
+    if (FAILED(hrc))
+        return errorArgument(DHCPServer::tr("Failed to locate NAT network '%s'"), pszNetwork);
+
+    bstrLogName = bstrNetwork;
+    return RTEXITCODE_SUCCESS;
+}
+
+/**
+ * Gets the DHCP log name for a host-only interface.
+ *
+ * @returns Suitable exit code.
+ * @param   pCtx               Pointer to the DHCP server command context.
+ * @param   pszInterface       The host-only interface name.
+ * @param   bstrLogName        Where to return the log name.
+ */
+static RTEXITCODE dhcpdGetInterfaceLogName(PDHCPDCMDCTX pCtx, const char *pszInterface, Bstr &bstrLogName)
+{
+    HRESULT hrc;
+    ComPtr<IHost> ptrHost;
+    CHECK_ERROR2_RET(hrc, pCtx->pArg->virtualBox, COMGETTER(Host)(ptrHost.asOutParam()), RTEXITCODE_FAILURE);
+
+    Bstr bstrInterface(pszInterface);
+    ComPtr<IHostNetworkInterface> ptrHostIf;
+    CHECK_ERROR2(hrc, ptrHost, FindHostNetworkInterfaceByName(bstrInterface.raw(), ptrHostIf.asOutParam()));
+    if (FAILED(hrc))
+        return errorArgument(DHCPServer::tr("Failed to locate host-only interface '%s'"), pszInterface);
+
+    CHECK_ERROR2_RET(hrc, ptrHostIf, COMGETTER(NetworkName)(bstrLogName.asOutParam()), RTEXITCODE_FAILURE);
+    return RTEXITCODE_SUCCESS;
+}
+
+/**
+ * Gets the log name from a positional log target.
+ *
+ * @returns Suitable exit code.
+ * @param   pCtx               Pointer to the DHCP server command context.
+ * @param   pszLogTarget       Log target, interpreted as either a NAT network
+ *                             or an interface name.
+ * @param   bstrLogName        Where to return the log name.
+ */
+static RTEXITCODE dhcpdGetLogName(PDHCPDCMDCTX pCtx, const char *pszLogTarget, Bstr &bstrLogName)
+{
+    Bstr bstrLogTarget(pszLogTarget);
+    ComPtr<INATNetwork> ptrNATNetwork;
+    HRESULT hrc = pCtx->pArg->virtualBox->FindNATNetworkByName(bstrLogTarget.raw(), ptrNATNetwork.asOutParam());
+    bool const fIsNATNetwork = SUCCEEDED(hrc);
+
+    ComPtr<IHost> ptrHost;
+    CHECK_ERROR2_RET(hrc, pCtx->pArg->virtualBox, COMGETTER(Host)(ptrHost.asOutParam()), RTEXITCODE_FAILURE);
+
+    Bstr bstrInterfaceNetworkName;
+    ComPtr<IHostNetworkInterface> ptrHostIf;
+    hrc = ptrHost->FindHostNetworkInterfaceByName(bstrLogTarget.raw(), ptrHostIf.asOutParam());
+    bool const fIsInterface = SUCCEEDED(hrc);
+    if (fIsInterface)
+    {
+        CHECK_ERROR2_RET(hrc, ptrHostIf, COMGETTER(NetworkName)(bstrInterfaceNetworkName.asOutParam()), RTEXITCODE_FAILURE);
+    }
+
+    if (fIsNATNetwork && fIsInterface)
+    {
+        RTMsgWarning(DHCPServer::tr("Ambiguous DHCP log target '%s': both a NAT network and an interface have this name."),
+                     pszLogTarget);
+        return errorArgument(DHCPServer::tr("Use --network/--netname or --interface to select the DHCP server explicitly."));
+    }
+
+    if (fIsNATNetwork)
+    {
+        bstrLogName = bstrLogTarget;
+        return RTEXITCODE_SUCCESS;
+    }
+
+    if (fIsInterface)
+    {
+        bstrLogName = bstrInterfaceNetworkName;
+        return RTEXITCODE_SUCCESS;
+    }
+
+    return errorArgument(DHCPServer::tr("Failed to locate NAT network or host-only interface '%s'"), pszLogTarget);
+}
+
+/**
+ * Handles the 'log' subcommand.
+ *
+ * @returns Suitable exit code.
+ * @param   pCtx               Pointer to the DHCP server command context.
+ * @param   argc               Number of subcommand arguments.
+ * @param   argv               Subcommand argument vector.
+ */
+static DECLCALLBACK(RTEXITCODE) dhcpdHandleLog(PDHCPDCMDCTX pCtx, int argc, char **argv)
+{
+    static const RTGETOPTDEF s_aOptions[] =
+    {
+        DHCPD_CMD_COMMON_OPTION_DEFS(),
+        { "--follow",           'f', RTGETOPT_REQ_NOTHING },
+    };
+
+    bool fFollow = false;
+    const char *pszLogTarget = NULL;
+
+    RTGETOPTSTATE GetState;
+    int vrc = RTGetOptInit(&GetState, argc, argv, s_aOptions, RT_ELEMENTS(s_aOptions), 1, 0);
+    AssertRCReturn(vrc, RTEXITCODE_FAILURE);
+
+    RTGETOPTUNION ValueUnion;
+    while ((vrc = RTGetOpt(&GetState, &ValueUnion)))
+    {
+        switch (vrc)
+        {
+            DHCPD_CMD_COMMON_OPTION_CASES(pCtx, vrc, &ValueUnion);
+
+            case 'f':   // -f / --follow
+                if (fFollow)
+                    return errorSyntax(DHCPServer::tr("You can specify -f only once."));
+                fFollow = true;
+                break;
+
+            case VINF_GETOPT_NOT_OPTION:
+                if (   pszLogTarget
+                    || pCtx->pszInterface
+                    || pCtx->pszNetwork)
+                    return errorTooManyParameters(&argv[GetState.iNext - 1]);
+                pszLogTarget = ValueUnion.psz;
+                break;
+
+            default:
+                return errorGetOpt(vrc, &ValueUnion);
+        }
+    }
+
+    Bstr bstrLogName;
+    RTEXITCODE rcExit;
+    if (pCtx->pszNetwork)
+        rcExit = dhcpdGetNATNetworkLogName(pCtx, pCtx->pszNetwork, bstrLogName);
+    else if (pCtx->pszInterface)
+        rcExit = dhcpdGetInterfaceLogName(pCtx, pCtx->pszInterface, bstrLogName);
+    else if (pszLogTarget)
+        rcExit = dhcpdGetLogName(pCtx, pszLogTarget, bstrLogName);
+    else
+        return RTMsgErrorExit(RTEXITCODE_FAILURE,
+                              DHCPServer::tr("Neither network nor interface name specified"));
+    if (rcExit != RTEXITCODE_SUCCESS)
+        return rcExit;
+
+    Utf8Str strLogName(bstrLogName);
+    const char *pszLogName = strLogName.c_str();
+
+    char szLogFile[RTPATH_MAX];
+    vrc = com::GetVBoxUserHomeDirectory(szLogFile, sizeof(szLogFile), false /* fCreateDir */);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE,
+                              DHCPServer::tr("Cannot determine VirtualBox global configuration directory: %Rrc"), vrc);
+
+    char szLogFileName[RTPATH_MAX];
+    ssize_t cchLogFileName = RTStrPrintf2(szLogFileName, sizeof(szLogFileName), "%s-Dhcpd.log", pszLogName);
+    if (cchLogFileName < 0 || (size_t)cchLogFileName >= sizeof(szLogFileName))
+        return errorArgument(DHCPServer::tr("DHCP server log file name is too long"));
+
+    vrc = RTPathAppend(szLogFile, sizeof(szLogFile), szLogFileName);
+    if (RT_FAILURE(vrc))
+        return RTMsgErrorExit(RTEXITCODE_FAILURE, DHCPServer::tr("Cannot construct log file path: %Rrc"), vrc);
+
+    return dhcpdLogOutput(szLogFile, fFollow);
+}
+
 
 /**
  * Handles the 'dhcpserver' command.
@@ -1296,6 +1559,7 @@ RTEXITCODE handleDHCPServer(HandlerArg *pArg)
         { "restart",        dhcpdHandleRestart,         HELP_SCOPE_DHCPSERVER_RESTART },
         { "stop",           dhcpdHandleStop,            HELP_SCOPE_DHCPSERVER_STOP },
         { "findlease",      dhcpdHandleFindLease,       HELP_SCOPE_DHCPSERVER_FINDLEASE },
+        { "log",            dhcpdHandleLog,             HELP_SCOPE_DHCPSERVER_LOG },
     };
 
     /*
