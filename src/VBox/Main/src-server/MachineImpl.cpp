@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.cpp 113542 2026-03-24 15:42:24Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.cpp 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC.
  */
@@ -2351,6 +2351,18 @@ HRESULT Machine::setClipboardFileTransfersEnabled(BOOL aEnabled)
         i_saveSettings(NULL, alock);
 
     return S_OK;
+}
+
+/**
+ * Returns the clipboard control interface for this machine.
+ *
+ * @returns COM status code.
+ * @param   aClipboard      Where to return the clipboard control interface.
+ */
+HRESULT Machine::getClipboard(ComPtr<IClipboard> &aClipboard)
+{
+    RT_NOREF(aClipboard);
+    ReturnComNotImplemented();
 }
 
 HRESULT Machine::getDnDMode(DnDMode_T *aDnDMode)

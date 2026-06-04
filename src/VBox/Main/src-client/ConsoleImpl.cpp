@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114003 2026-04-24 06:30:09Z aleksey.ilyushin@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -5902,7 +5902,7 @@ HRESULT Console::i_onClipboardError(const Utf8Str &aId, const Utf8Str &aErrMsg, 
     if (SUCCEEDED(hrc))
     {
         alock.release();
-        ::FireClipboardErrorEvent(mEventSource, aId, aErrMsg, aRc);
+        ::FireClipboardErrorEvent(mEventSource, aId, NULL /* aItem */, FALSE /* aVeto */, aErrMsg, aRc);
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));

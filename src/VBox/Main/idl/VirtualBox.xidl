@@ -1469,6 +1469,109 @@
   </enum>
 
   <enum
+    name="ClipboardAction"
+    uuid="6113a71f-b56e-4481-b1ce-4a0264e8e0c3"
+    >
+    <desc>
+      Clipboard operation action.
+    </desc>
+
+    <const name="Invalid"           value="0">
+      <desc>Invalid action.</desc>
+    </const>
+    <const name="Copy"              value="1">
+      <desc>Copy clipboard data.</desc>
+    </const>
+    <const name="Cut"               value="2">
+      <desc>Cut clipboard data.</desc>
+    </const>
+    <const name="Paste"             value="3">
+      <desc>Paste clipboard data.</desc>
+    </const>
+    <const name="Custom"            value="4">
+      <desc>Custom clipboard action.</desc>
+    </const>
+  </enum>
+
+  <enum
+    name="ClipboardSource"
+    uuid="36cd5e9a-cfe5-4d57-b1b7-49192b175af3"
+    >
+    <desc>
+      Clipboard data source.
+    </desc>
+
+    <const name="Host"              value="0">
+      <desc>Clipboard data originating from the host.</desc>
+    </const>
+    <const name="Guest"             value="1">
+      <desc>Clipboard data originating from the guest.</desc>
+    </const>
+    <const name="Remote"            value="2">
+      <desc>Clipboard data originating from a remote clipboard source, such as a VRDE extension.</desc>
+    </const>
+    <const name="Custom"            value="3">
+      <desc>Custom clipboard data source.</desc>
+    </const>
+  </enum>
+
+  <enum
+    name="ClipboardTransferState"
+    uuid="2b757ce6-a55c-466a-8a41-7f4e0ddc34ed"
+    >
+    <desc>
+      Clipboard transfer state.
+    </desc>
+
+    <const name="Added"             value="0">
+      <desc>The transfer was added.</desc>
+    </const>
+    <const name="Removed"           value="1">
+      <desc>The transfer was removed.</desc>
+    </const>
+    <const name="InProgress"        value="2">
+      <desc>The transfer is in progress.</desc>
+    </const>
+    <const name="Interaction"       value="3">
+      <desc>The transfer requires user interaction.</desc>
+    </const>
+    <const name="Completed"         value="4">
+      <desc>The transfer completed successfully.</desc>
+    </const>
+    <const name="Canceled"          value="5">
+      <desc>The transfer was canceled.</desc>
+    </const>
+    <const name="Failed"            value="6">
+      <desc>The transfer failed.</desc>
+    </const>
+  </enum>
+
+  <enum
+    name="ClipboardError"
+    uuid="d4724b6d-2528-4a9e-bab9-72cdc67521be"
+    >
+    <desc>
+      Clipboard operation error code.
+    </desc>
+
+    <const name="None"              value="0">
+      <desc>No error.</desc>
+    </const>
+    <const name="NotSupported"      value="1">
+      <desc>The requested clipboard operation is not supported.</desc>
+    </const>
+    <const name="AccessDenied"      value="2">
+      <desc>Access to the requested clipboard operation was denied.</desc>
+    </const>
+    <const name="FormatNotSupported" value="3">
+      <desc>The requested clipboard format is not supported.</desc>
+    </const>
+    <const name="OperationFailed"   value="4">
+      <desc>The requested clipboard operation failed.</desc>
+    </const>
+  </enum>
+
+  <enum
     name="DnDMode"
     uuid="07af8800-f936-4b33-9172-cd400e83c148"
     >
@@ -7757,12 +7860,12 @@
 
   <interface
     name="IMachine" extends="$unknown"
-    uuid="e36a5081-a82a-40bd-9e4e-42a44d6ce50f"
+    uuid="ce345112-2a8c-45be-ab41-c2b5b2b5a028"
     wsmap="managed"
     rest="managed"
     wrap-hint-server-addinterfaces="IInternalMachineControl"
     wrap-hint-server="manualaddinterfaces"
-    reservedMethods="8" reservedAttributes="16"
+    reservedMethods="8" reservedAttributes="15"
     >
     <!-- Note! This interface is not compatible between 5.0 and 5.1 as it had too many
                methods/attributes for midl and the reservedAttributes had to be
@@ -8291,6 +8394,12 @@
 
         When set to @a true, clipboard file transfers between supported
         host and guest OSes are allowed.
+      </desc>
+    </attribute>
+
+    <attribute name="clipboard" type="IClipboard" readonly="yes">
+      <desc>
+        Clipboard control interface for this machine.
       </desc>
     </attribute>
 
@@ -15530,6 +15639,263 @@
       Not implemented yet.</desc>
     </const>
   </enum>
+
+  <interface
+    name="IClipboardFormat" extends="$unknown"
+    uuid="999743bd-3d40-4507-ac97-713b12fb0694"
+    wsmap="managed"
+    reservedMethods="4" reservedAttributes="4"
+    >
+    <desc>
+      Clipboard data format.
+    </desc>
+
+    <attribute name="mimeType" type="wstring">
+      <desc>
+        MIME type of the clipboard format, for example <tt>text/plain</tt> or <tt>image/bmp</tt>.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardItem" extends="$unknown"
+    uuid="fca0c20a-df0b-4d03-a8ef-d8d9bb9471ab"
+    wsmap="managed"
+    reservedMethods="4" reservedAttributes="8"
+    >
+    <desc>
+      Clipboard item data and metadata.
+    </desc>
+
+    <attribute name="id" type="unsigned long">
+      <desc>
+        Unique identifier used to distinguish clipboard transfers.
+      </desc>
+    </attribute>
+
+    <attribute name="source" type="ClipboardSource">
+      <desc>
+        Source clipboard identifier. For X11 based clipboards, values can be used to distinguish PRIMARY,
+        SECONDARY and CLIPBOARD selections.
+      </desc>
+    </attribute>
+
+    <attribute name="format" type="IClipboardFormat">
+      <desc>
+        MIME format of the clipboard item.
+      </desc>
+    </attribute>
+
+    <attribute name="buffer" type="octet" safearray="yes">
+      <desc>
+        Clipboard item payload.
+      </desc>
+    </attribute>
+
+    <attribute name="size" type="unsigned long" readonly="yes">
+      <desc>
+        Size of the clipboard item payload in bytes.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardTransfer" extends="$unknown"
+    uuid="77806335-7ab1-4083-89e5-e3a6836861b4"
+    wsmap="managed"
+    reservedMethods="4" reservedAttributes="8"
+    >
+    <desc>
+      Single clipboard transfer.
+    </desc>
+
+    <attribute name="id" type="unsigned long" readonly="yes">
+      <desc>
+        Unique clipboard transfer identifier.
+      </desc>
+    </attribute>
+
+    <attribute name="action" type="ClipboardAction" readonly="yes">
+      <desc>
+        Clipboard action associated with the transfer.
+      </desc>
+    </attribute>
+
+    <attribute name="item" type="IClipboardItem" readonly="yes">
+      <desc>
+        Clipboard item associated with the transfer.
+      </desc>
+    </attribute>
+
+    <attribute name="progress" type="IProgress" readonly="yes">
+      <desc>
+        Progress object used to track transfer completion.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardTransferManager" extends="$unknown"
+    uuid="d716987d-ee39-41c5-8234-7ec8e0ffa629"
+    wsmap="managed"
+    reservedMethods="8" reservedAttributes="4"
+    >
+    <desc>
+      Clipboard transfer manager.
+    </desc>
+
+    <attribute name="transfers" type="IClipboardTransfer" safearray="yes" readonly="yes">
+      <desc>
+        Current clipboard transfers.
+      </desc>
+    </attribute>
+
+    <method name="add">
+      <desc>
+        Adds a clipboard transfer to the manager.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to add.</desc>
+      </param>
+    </method>
+
+    <method name="remove">
+      <desc>
+        Removes a clipboard transfer from the manager.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to remove.</desc>
+      </param>
+    </method>
+
+    <method name="cancel">
+      <desc>
+        Cancels a clipboard transfer.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to cancel.</desc>
+      </param>
+    </method>
+
+    <method name="reset">
+      <desc>
+        Resets all clipboard transfers tracked by the manager.
+      </desc>
+    </method>
+  </interface>
+
+  <interface
+    name="IClipboard" extends="$unknown"
+    uuid="ba409764-89d0-4c49-9118-84fc651530ca"
+    wsmap="managed"
+    reservedMethods="8" reservedAttributes="8"
+    >
+    <desc>
+      Clipboard control interface for a virtual machine.
+    </desc>
+
+    <attribute name="mode" type="ClipboardMode">
+      <desc>
+        Synchronization mode between the host OS clipboard and the guest OS clipboard.
+      </desc>
+    </attribute>
+
+    <attribute name="fileList" type="wstring" safearray="yes">
+      <desc>
+        Clipboard file list represented as host paths.
+      </desc>
+    </attribute>
+
+    <attribute name="transfers" type="IClipboardTransferManager" readonly="yes">
+      <desc>
+        Clipboard transfer manager.
+      </desc>
+    </attribute>
+
+    <attribute name="eventSource" type="IEventSource" readonly="yes">
+      <desc>
+        Event source for clipboard events.
+      </desc>
+    </attribute>
+
+    <method name="readData">
+      <desc>
+        Reads the current clipboard item for the requested clipboard action.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to read data for.</desc>
+      </param>
+      <param name="item" type="IClipboardItem" dir="return">
+        <desc>Clipboard item returned on success.</desc>
+      </param>
+    </method>
+
+    <method name="readFormats">
+      <desc>
+        Reads the clipboard formats currently available.
+      </desc>
+      <param name="formats" type="IClipboardFormat" safearray="yes" dir="return">
+        <desc>Clipboard formats returned on success.</desc>
+      </param>
+    </method>
+
+    <method name="writeData">
+      <desc>
+        Writes a clipboard item for the requested clipboard action.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to write data for.</desc>
+      </param>
+      <param name="item" type="IClipboardItem" dir="in">
+        <desc>Clipboard item to write.</desc>
+      </param>
+      <param name="writtenItem" type="IClipboardItem" dir="return">
+        <desc>Clipboard item accepted for writing.</desc>
+      </param>
+    </method>
+
+    <method name="writeFormats">
+      <desc>
+        Writes the clipboard formats currently available.
+      </desc>
+      <param name="formats" type="IClipboardFormat" safearray="yes" dir="in">
+        <desc>Clipboard formats to make available.</desc>
+      </param>
+    </method>
+
+    <method name="reset">
+      <desc>
+        Resets all clipboard data and transfer state.
+      </desc>
+    </method>
+
+    <method name="isFormatAvailable">
+      <desc>
+        Checks whether a clipboard format is available for a clipboard source.
+      </desc>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source to check.</desc>
+      </param>
+      <param name="format" type="IClipboardFormat" dir="in">
+        <desc>Clipboard format to check.</desc>
+      </param>
+      <param name="available" type="boolean" dir="return">
+        <desc>Returns @c true if the format is available, @c false otherwise.</desc>
+      </param>
+    </method>
+
+    <method name="getSupportedFormats">
+      <desc>
+        Returns clipboard formats supported by a clipboard source.
+      </desc>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source to query.</desc>
+      </param>
+      <param name="formats" type="IClipboardFormat" safearray="yes" dir="return">
+        <desc>Supported clipboard formats.</desc>
+      </param>
+    </method>
+  </interface>
 
   <interface
     name="IDnDBase" extends="$unknown"
@@ -28000,8 +28366,28 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
         See <link to="IRecordingScreenStateChangedEvent">IRecordingScreenStateChangeEvent</link>.
       </desc>
     </const>
+    <const name="OnClipboardSourceChanged" value="126">
+      <desc>
+        See <link to="IClipboardSourceChangedEvent">IClipboardSourceChangedEvent</link>.
+      </desc>
+    </const>
+    <const name="OnClipboardFormatChanged" value="127">
+      <desc>
+        See <link to="IClipboardFormatChangedEvent">IClipboardFormatChangedEvent</link>.
+      </desc>
+    </const>
+    <const name="OnClipboardDataChanged" value="128">
+      <desc>
+        See <link to="IClipboardDataChangedEvent">IClipboardDataChangedEvent</link>.
+      </desc>
+    </const>
+    <const name="OnClipboardTransfer" value="129">
+      <desc>
+        See <link to="IClipboardTransferEvent">IClipboardTransferEvent</link>.
+      </desc>
+    </const>
     <!-- End event marker -->
-    <const name="End" value="126">
+    <const name="End" value="130">
       <desc>
         Must be last event, used for iterations and structures relying on numerical event values.
       </desc>
@@ -28881,7 +29267,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardEvent" extends="IEvent"
-    uuid="f22dd3b4-e4d0-437a-bfdf-0372896ba162"
+    uuid="2dcc4f52-5bee-406b-838e-2cae63b3df2a"
     wsmap="managed">
     <desc>
       Abstract base interface for clipboard events.
@@ -28891,6 +29277,95 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
       For Windows or macOS hosts / guests, this string is empty.
       For X11-based hosts / guests, this can hold either "PRIMARY" or "SECONDARY".
+      </desc>
+    </attribute>
+    <attribute name="item" type="IClipboardItem" readonly="yes">
+      <desc>
+        Clipboard item associated with the event.
+      </desc>
+    </attribute>
+    <attribute name="veto" type="boolean" readonly="yes">
+      <desc>
+        Whether the announced clipboard operation was vetoed.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardSourceChangedEvent" extends="IEvent"
+    uuid="5dc52168-cf7a-4b67-8d2b-c73de8b3c174"
+    wsmap="managed" autogen="VBoxEvent" id="OnClipboardSourceChanged"
+    >
+    <desc>
+      Notification when the active clipboard source changes.
+    </desc>
+    <attribute name="clipboardSource" type="ClipboardSource" readonly="yes">
+      <desc>
+        New clipboard source.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardFormatChangedEvent" extends="IClipboardEvent"
+    uuid="cbd01fa4-894f-461d-96c1-894836a69ce0"
+    wsmap="managed" autogen="VBoxEvent" id="OnClipboardFormatChanged"
+    >
+    <desc>
+      Notification when clipboard formats change.
+    </desc>
+    <attribute name="clipboardSource" type="ClipboardSource" readonly="yes">
+      <desc>
+        Clipboard source whose formats changed.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardDataChangedEvent" extends="IClipboardEvent"
+    uuid="b05ff6bc-d988-4e5f-9191-ff6392488153"
+    wsmap="managed" autogen="VBoxEvent" id="OnClipboardDataChanged"
+    >
+    <desc>
+      Notification when clipboard data changes.
+    </desc>
+    <attribute name="action" type="ClipboardAction" readonly="yes">
+      <desc>
+        Clipboard action associated with the data change.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardTransferEvent" extends="IEvent"
+    uuid="1ac1ed45-26e7-4b81-b4b2-b4a4bf52976c"
+    wsmap="managed" autogen="VBoxEvent" id="OnClipboardTransfer"
+    >
+    <desc>
+      Notification when clipboard transfer state changes.
+    </desc>
+
+    <attribute name="transfer" type="IClipboardTransfer" readonly="yes">
+      <desc>
+        Clipboard transfer associated with the event.
+      </desc>
+    </attribute>
+
+    <attribute name="state" type="ClipboardTransferState" readonly="yes">
+      <desc>
+        New clipboard transfer state.
+      </desc>
+    </attribute>
+
+    <attribute name="message" type="wstring" readonly="yes">
+      <desc>
+        Optional user interaction message, for example to ask whether an existing file should be overwritten.
+      </desc>
+    </attribute>
+
+    <attribute name="error" type="ClipboardError" readonly="yes">
+      <desc>
+        Clipboard transfer error code.
       </desc>
     </attribute>
   </interface>

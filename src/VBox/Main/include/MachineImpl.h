@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.h 113542 2026-03-24 15:42:24Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.h 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC - Header.
  */
@@ -990,6 +990,7 @@ private:
     HRESULT setClipboardMode(ClipboardMode_T aClipboardMode);
     HRESULT getClipboardFileTransfersEnabled(BOOL *aEnabled);
     HRESULT setClipboardFileTransfersEnabled(BOOL aEnabled);
+    HRESULT getClipboard(ComPtr<IClipboard> &aClipboard);
     HRESULT getDnDMode(DnDMode_T *aDnDMode);
     HRESULT setDnDMode(DnDMode_T aDnDMode);
     HRESULT getTeleporterEnabled(BOOL *aTeleporterEnabled);

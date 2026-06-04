@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1189,6 +1189,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  	src-client/BusAssignmentManager.cpp \
  	$(if $(VBOX_WITH_PCI_PASSTHROUGH),src-client/PCIRawDevImpl.cpp,) \
  	src-client/ClientTokenHolder.cpp \
+ 	src-client/ClipboardImpl.cpp \
  	src-client/ConsoleImpl.cpp \
  	src-client/ConsoleImplConfigCommon.cpp \
  	src-client/ConsoleImplConfigX86.cpp \
