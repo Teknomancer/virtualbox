@@ -1,4 +1,4 @@
-/* $Id: DevQemuFwCfg.cpp 114256 2026-06-04 10:52:53Z alexander.eichner@oracle.com $ */
+/* $Id: DevQemuFwCfg.cpp 114257 2026-06-04 11:12:51Z alexander.eichner@oracle.com $ */
 /** @file
  * DevQemuFwCfg - QEMU firmware configuration compatible device.
  */
@@ -2028,7 +2028,7 @@ static DECLCALLBACK(int) qemuFwCfgR3RamfbPortQueryDefaultOutputTargetToken(PPDMI
                                                                            uint32_t idScreen,
                                                                            uint64_t *pu64OutputTargetToken)
 {
-    RT_NOREF(pInterface, pu64OutputTargetToken);
+    RT_NOREF(pInterface, idScreen, pu64OutputTargetToken);
     return VERR_NOT_IMPLEMENTED;
 }
 
