@@ -1,4 +1,4 @@
-/* $Id: VBoxManageInfo.cpp 114003 2026-04-24 06:30:09Z aleksey.ilyushin@oracle.com $ */
+/* $Id: VBoxManageInfo.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - The 'showvminfo' command and helper routines.
  */
@@ -2400,8 +2400,11 @@ HRESULT showVMInfo(ComPtr<IVirtualBox> pVirtualBox,
     /* Shared clipboard */
     {
         const char *psz = details == VMINFO_MACHINEREADABLE ? "unknown" : Info::tr("Unknown");
+        ComPtr<IClipboard> clipboard;
+        hrc = machine->COMGETTER(Clipboard)(clipboard.asOutParam());
         ClipboardMode_T enmMode;
-        hrc = machine->COMGETTER(ClipboardMode)(&enmMode);
+        if (SUCCEEDED(hrc))
+            hrc = clipboard->COMGETTER(Mode)(&enmMode);
         if (SUCCEEDED(hrc))
         {
             switch (enmMode)
@@ -2424,7 +2427,7 @@ HRESULT showVMInfo(ComPtr<IVirtualBox> pVirtualBox,
         }
         SHOW_UTF8_STRING("clipboard", Info::tr("Clipboard Mode:"), psz);
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-        SHOW_BOOLEAN_PROP(machine, ClipboardFileTransfersEnabled, "clipboard_file_transfers", Info::tr("Clipboard file transfers:"));
+        SHOW_BOOLEAN_PROP(clipboard, FileTransfersEnabled, "clipboard_file_transfers", Info::tr("Clipboard file transfers:"));
 #endif
     }
 

@@ -1,4 +1,4 @@
-/* $Id: VBoxManageModifyVM.cpp 114091 2026-05-06 15:48:09Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageModifyVM.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of modifyvm command.
  */
@@ -2910,7 +2910,10 @@ RTEXITCODE handleModifyVM(HandlerArg *a)
                 }
                 if (SUCCEEDED(hrc))
                 {
-                    CHECK_ERROR(sessionMachine, COMSETTER(ClipboardMode)(mode));
+                    ComPtr<IClipboard> clipboard;
+                    CHECK_ERROR(sessionMachine, COMGETTER(Clipboard)(clipboard.asOutParam()));
+                    if (SUCCEEDED(hrc))
+                        CHECK_ERROR(clipboard, COMSETTER(Mode)(mode));
                 }
                 break;
             }
@@ -2930,7 +2933,10 @@ RTEXITCODE handleModifyVM(HandlerArg *a)
                 }
                 if (SUCCEEDED(hrc))
                 {
-                    CHECK_ERROR(sessionMachine, COMSETTER(ClipboardFileTransfersEnabled)(fEnabled));
+                    ComPtr<IClipboard> clipboard;
+                    CHECK_ERROR(sessionMachine, COMGETTER(Clipboard)(clipboard.asOutParam()));
+                    if (SUCCEEDED(hrc))
+                        CHECK_ERROR(clipboard, COMSETTER(FileTransfersEnabled)(fEnabled));
                 }
                 break;
             }

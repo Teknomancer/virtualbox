@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard API.
  */
@@ -31,6 +31,138 @@
 #include "ClipboardImpl.h"
 #include "AutoCaller.h"
 #include "EventImpl.h"
+#include "MachineImpl.h"
+
+#include <VBox/GuestHost/SharedClipboard.h>
+
+#include <iprt/errcore.h>
+#include <iprt/string.h>
+
+
+/*********************************************************************************************************************************
+*   Internal Functions                                                                                                           *
+*********************************************************************************************************************************/
+/**
+ * Converts a clipboard MIME type to a shared clipboard format mask bit.
+ *
+ * @returns Shared Clipboard format mask bit, or VBOX_SHCL_FMT_NONE if unsupported.
+ * @param   aMimeType       MIME type to convert.
+ */
+static SHCLFORMAT clipboardMimeTypeToFormat(const com::Utf8Str &aMimeType)
+{
+    const char *pszMimeType = aMimeType.c_str();
+    if (   !RTStrICmp(pszMimeType, "text/plain")
+        || !RTStrNICmp(pszMimeType, "text/plain;", sizeof("text/plain;") - 1)
+        || !RTStrICmp(pszMimeType, "text/plain;charset=utf-8")
+        || !RTStrICmp(pszMimeType, "text/plain;charset=UTF-8"))
+        return VBOX_SHCL_FMT_UNICODETEXT;
+    if (   !RTStrICmp(pszMimeType, "text/html")
+        || !RTStrNICmp(pszMimeType, "text/html;", sizeof("text/html;") - 1))
+        return VBOX_SHCL_FMT_HTML;
+    if (   !RTStrICmp(pszMimeType, "image/bmp")
+        || !RTStrICmp(pszMimeType, "image/x-bmp")
+        || !RTStrICmp(pszMimeType, "application/x-bmp"))
+        return VBOX_SHCL_FMT_BITMAP;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    if (   !RTStrICmp(pszMimeType, "text/uri-list")
+        || !RTStrICmp(pszMimeType, "application/x-virtualbox-shared-clipboard-uri-list"))
+        return VBOX_SHCL_FMT_URI_LIST;
+#endif
+    return VBOX_SHCL_FMT_NONE;
+}
+
+
+/**
+ * Converts a shared clipboard format bit to the public MIME type.
+ *
+ * @returns MIME type, or NULL if unsupported.
+ * @param   uFormat         Shared Clipboard format bit.
+ */
+static const char *clipboardFormatToMimeType(SHCLFORMAT uFormat)
+{
+    switch (uFormat)
+    {
+        case VBOX_SHCL_FMT_UNICODETEXT:
+            return "text/plain;charset=utf-8";
+        case VBOX_SHCL_FMT_HTML:
+            return "text/html";
+        case VBOX_SHCL_FMT_BITMAP:
+            return "image/bmp";
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        case VBOX_SHCL_FMT_URI_LIST:
+            return "text/uri-list";
+#endif
+        default:
+            return NULL;
+    }
+}
+
+
+/**
+ * Creates a clipboard format object for a shared clipboard format bit.
+ *
+ * @returns COM status code.
+ * @param   uFormat         Shared Clipboard format bit.
+ * @param   aFormat         Where to return the format object.
+ */
+static HRESULT clipboardCreateFormat(SHCLFORMAT uFormat, ComPtr<IClipboardFormat> &aFormat)
+{
+    const char *pszMimeType = clipboardFormatToMimeType(uFormat);
+    AssertReturn(pszMimeType, E_INVALIDARG);
+
+    ComObjPtr<ClipboardFormat> pFormat;
+    HRESULT hrc = pFormat.createObject();
+    if (FAILED(hrc))
+        return hrc;
+    hrc = pFormat->init(pszMimeType);
+    if (FAILED(hrc))
+        return hrc;
+    return pFormat.queryInterfaceTo(aFormat.asOutParam());
+}
+
+
+/**
+ * Gets the shared clipboard format bit for a public format object.
+ *
+ * @returns COM status code.
+ * @param   aFormat         Public clipboard format object.
+ * @param   puFormat        Where to return the shared clipboard format bit.
+ */
+static HRESULT clipboardGetFormatBit(const ComPtr<IClipboardFormat> &aFormat, SHCLFORMAT *puFormat)
+{
+    AssertReturn(!aFormat.isNull(), E_INVALIDARG);
+    AssertPtrReturn(puFormat, E_POINTER);
+
+    com::Bstr bstrMimeType;
+    HRESULT hrc = aFormat->COMGETTER(MimeType)(bstrMimeType.asOutParam());
+    if (FAILED(hrc))
+        return hrc;
+
+    const com::Utf8Str strMimeType(bstrMimeType);
+    SHCLFORMAT uFormat = clipboardMimeTypeToFormat(strMimeType);
+    if (uFormat == VBOX_SHCL_FMT_NONE)
+        return E_INVALIDARG;
+
+    *puFormat = uFormat;
+    return S_OK;
+}
+
+
+/**
+ * Validates a public clipboard action.
+ *
+ * @returns COM status code.
+ * @param   aAction         Public clipboard action.
+ */
+static HRESULT clipboardValidateAction(ClipboardAction_T aAction)
+{
+    if (   aAction == ClipboardAction_Copy
+        || aAction == ClipboardAction_Cut
+        || aAction == ClipboardAction_Paste
+        || aAction == ClipboardAction_Custom)
+        return S_OK;
+    return E_INVALIDARG;
+}
 
 
 // constructor / destructor
@@ -559,8 +691,7 @@ HRESULT ClipboardTransferManager::remove(const ComPtr<IClipboardTransfer> &aTran
  */
 HRESULT ClipboardTransferManager::cancel(const ComPtr<IClipboardTransfer> &aTransfer)
 {
-    RT_NOREF(aTransfer);
-    ReturnComNotImplemented();
+    return remove(aTransfer);
 }
 
 
@@ -584,7 +715,9 @@ HRESULT ClipboardTransferManager::reset()
  */
 HRESULT Clipboard::FinalConstruct()
 {
-    mData.mMode = ClipboardMode_Disabled;
+    mData.mParent     = NULL;
+    mData.mFormats    = VBOX_SHCL_FMT_NONE;
+    mData.mNextItemId = 1;
     return BaseFinalConstruct();
 }
 
@@ -604,13 +737,17 @@ void Clipboard::FinalRelease()
  *
  * @returns COM status code.
  */
-HRESULT Clipboard::init()
+HRESULT Clipboard::init(Machine *aParent /* = NULL */)
 {
     AutoInitSpan autoInitSpan(this);
     AssertReturn(autoInitSpan.isOk(), E_FAIL);
 
-    mData.mMode = ClipboardMode_Disabled;
+    mData.mParent = aParent;
+    mData.bd.allocate();
+    mData.mFormats = VBOX_SHCL_FMT_NONE;
+    mData.mNextItemId = 1;
     mData.mFileList.clear();
+    mData.mItems.clear();
 
     HRESULT hrc = mData.mTransfers.createObject();
     if (FAILED(hrc))
@@ -646,9 +783,127 @@ void Clipboard::uninit()
     if (!mData.mTransfers.isNull())
         mData.mTransfers->uninit();
     mData.mTransfers.setNull();
+    mData.mParent = NULL;
+    mData.bd.free();
     mData.mEventSource.setNull();
     mData.mFileList.clear();
-    mData.mMode = ClipboardMode_Disabled;
+    mData.mItems.clear();
+    mData.mFormats = VBOX_SHCL_FMT_NONE;
+    mData.mNextItemId = 1;
+}
+
+
+/**
+ * Gets whether clipboard file transfers are enabled.
+ *
+ * @returns COM status code.
+ * @param   aEnabled        Where to return the file transfer enabled state.
+ */
+HRESULT Clipboard::i_getFileTransfersEnabled(BOOL *aEnabled)
+{
+    AssertPtrReturn(aEnabled, E_POINTER);
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    *aEnabled = mData.bd->fFileTransfersEnabled;
+    return S_OK;
+}
+
+
+/**
+ * Gets whether clipboard file transfers are enabled.
+ *
+ * @returns COM status code.
+ * @param   aEnabled        Where to return the file transfer enabled state.
+ */
+HRESULT Clipboard::getFileTransfersEnabled(BOOL *aEnabled)
+{
+    return i_getFileTransfersEnabled(aEnabled);
+}
+
+
+/**
+ * Sets whether clipboard file transfers are enabled.
+ *
+ * @returns COM status code.
+ * @param   aEnabled        New file transfer enabled state.
+ */
+HRESULT Clipboard::i_setFileTransfersEnabled(BOOL aEnabled)
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    mData.bd.backup();
+    mData.bd->fFileTransfersEnabled = RT_BOOL(aEnabled);
+    return S_OK;
+}
+
+
+HRESULT Clipboard::i_notifyClipboardFileTransferModeChange(BOOL aEnable)
+{
+    Machine *pParent;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        pParent = mData.mParent;
+    }
+
+    if (!pParent)
+        return S_OK;
+
+    return pParent->i_onClipboardFileTransferModeChange(aEnable);
+}
+
+
+/**
+ * Sets whether clipboard file transfers are enabled.
+ *
+ * @returns COM status code.
+ * @param   aEnabled        New file transfer enabled state.
+ */
+HRESULT Clipboard::setFileTransfersEnabled(BOOL aEnabled)
+{
+    Machine *pParent;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        pParent = mData.mParent;
+    }
+
+    if (pParent)
+    {
+        HRESULT hrc = pParent->i_checkClipboardSettingsChangeAllowed();
+        if (FAILED(hrc))
+            return hrc;
+
+        hrc = i_notifyClipboardFileTransferModeChange(aEnabled);
+        if (FAILED(hrc))
+            return hrc;
+
+        hrc = i_setFileTransfersEnabled(aEnabled);
+        if (FAILED(hrc))
+            return hrc;
+
+        pParent->i_onSettingsChanged();
+        return S_OK;
+    }
+
+    return i_setFileTransfersEnabled(aEnabled);
+}
+
+
+/**
+ * Rolls back settings changes made to this clipboard object.
+ */
+void Clipboard::i_rollback()
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    mData.bd.rollback();
+}
+
+
+/**
+ * Commits settings changes made to this clipboard object.
+ */
+void Clipboard::i_commit()
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    mData.bd.commit();
 }
 
 
@@ -661,8 +916,38 @@ void Clipboard::uninit()
 HRESULT Clipboard::getMode(ClipboardMode_T *aMode)
 {
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-    *aMode = mData.mMode;
+    *aMode = mData.bd->mode;
     return S_OK;
+}
+
+
+/**
+ * Sets the clipboard mode.
+ *
+ * @returns COM status code.
+ * @param   aMode           New clipboard mode.
+ */
+HRESULT Clipboard::i_setMode(ClipboardMode_T aMode)
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    mData.bd.backup();
+    mData.bd->mode = aMode;
+    return S_OK;
+}
+
+
+HRESULT Clipboard::i_notifyClipboardModeChange(ClipboardMode_T aMode)
+{
+    Machine *pParent;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        pParent = mData.mParent;
+    }
+
+    if (!pParent)
+        return S_OK;
+
+    return pParent->i_onClipboardModeChange(aMode);
 }
 
 
@@ -674,9 +959,31 @@ HRESULT Clipboard::getMode(ClipboardMode_T *aMode)
  */
 HRESULT Clipboard::setMode(ClipboardMode_T aMode)
 {
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-    mData.mMode = aMode;
-    return S_OK;
+    Machine *pParent;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        pParent = mData.mParent;
+    }
+
+    if (pParent)
+    {
+        HRESULT hrc = pParent->i_checkClipboardSettingsChangeAllowed();
+        if (FAILED(hrc))
+            return hrc;
+
+        hrc = i_notifyClipboardModeChange(aMode);
+        if (FAILED(hrc))
+            return hrc;
+
+        hrc = i_setMode(aMode);
+        if (FAILED(hrc))
+            return hrc;
+
+        pParent->i_onSettingsChanged();
+        return S_OK;
+    }
+
+    return i_setMode(aMode);
 }
 
 
@@ -744,8 +1051,16 @@ HRESULT Clipboard::getEventSource(ComPtr<IEventSource> &aEventSource)
  */
 HRESULT Clipboard::readData(ClipboardAction_T aAction, ComPtr<IClipboardItem> &aItem)
 {
-    RT_NOREF(aAction, aItem);
-    ReturnComNotImplemented();
+    HRESULT hrc = clipboardValidateAction(aAction);
+    if (FAILED(hrc))
+        return hrc;
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    if (mData.mItems.empty())
+        return E_FAIL;
+
+    aItem = mData.mItems.back();
+    return S_OK;
 }
 
 
@@ -757,8 +1072,28 @@ HRESULT Clipboard::readData(ClipboardAction_T aAction, ComPtr<IClipboardItem> &a
  */
 HRESULT Clipboard::readFormats(std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
-    RT_NOREF(aFormats);
-    ReturnComNotImplemented();
+    SHCLFORMATS fFormats;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        fFormats = mData.mFormats;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        if (!mData.mFileList.empty())
+            fFormats |= VBOX_SHCL_FMT_URI_LIST;
+#endif
+    }
+
+    aFormats.clear();
+    for (SHCLFORMAT uFormat = 1; uFormat <= VBOX_SHCL_FMT_VALID_MASK; uFormat <<= 1)
+        if (fFormats & uFormat)
+        {
+            ComPtr<IClipboardFormat> pFormat;
+            HRESULT hrc = clipboardCreateFormat(uFormat, pFormat);
+            if (FAILED(hrc))
+                return hrc;
+            aFormats.push_back(pFormat);
+        }
+
+    return S_OK;
 }
 
 
@@ -774,8 +1109,74 @@ HRESULT Clipboard::writeData(ClipboardAction_T aAction,
                              const ComPtr<IClipboardItem> &aItem,
                              ComPtr<IClipboardItem> &aWrittenItem)
 {
-    RT_NOREF(aAction, aItem, aWrittenItem);
-    ReturnComNotImplemented();
+    HRESULT hrc = clipboardValidateAction(aAction);
+    if (FAILED(hrc))
+        return hrc;
+    AssertReturn(!aItem.isNull(), E_INVALIDARG);
+
+    ComPtr<IClipboardFormat> pFormat;
+    hrc = aItem->COMGETTER(Format)(pFormat.asOutParam());
+    if (FAILED(hrc))
+        return hrc;
+
+    SHCLFORMAT uFormat;
+    hrc = clipboardGetFormatBit(pFormat, &uFormat);
+    if (FAILED(hrc))
+        return hrc;
+
+    ClipboardSource_T enmSource;
+    hrc = aItem->COMGETTER(Source)(&enmSource);
+    if (FAILED(hrc))
+        return hrc;
+
+    com::SafeArray<BYTE> aSafeBuffer;
+    hrc = aItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(aSafeBuffer));
+    if (FAILED(hrc))
+        return hrc;
+
+    std::vector<BYTE> aBuffer;
+    if (aSafeBuffer.size())
+        aBuffer.assign(aSafeBuffer.raw(), aSafeBuffer.raw() + aSafeBuffer.size());
+
+    ComObjPtr<ClipboardItem> pWrittenItem;
+    hrc = pWrittenItem.createObject();
+    if (FAILED(hrc))
+        return hrc;
+
+    ULONG idItem;
+    {
+        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+        idItem = mData.mNextItemId++;
+        if (mData.mNextItemId == 0)
+            mData.mNextItemId = 1;
+    }
+
+    hrc = pWrittenItem->init(idItem, enmSource, pFormat, aBuffer);
+    if (FAILED(hrc))
+        return hrc;
+
+    ComPtr<IClipboardItem> pWrittenItemIface;
+    hrc = pWrittenItem.queryInterfaceTo(pWrittenItemIface.asOutParam());
+    if (FAILED(hrc))
+        return hrc;
+
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    for (std::vector<ComPtr<IClipboardItem> >::iterator it = mData.mItems.begin(); it != mData.mItems.end();)
+    {
+        ComPtr<IClipboardFormat> pItemFormat;
+        HRESULT hrc2 = (*it)->COMGETTER(Format)(pItemFormat.asOutParam());
+        SHCLFORMAT uItemFormat = VBOX_SHCL_FMT_NONE;
+        if (SUCCEEDED(hrc2))
+            hrc2 = clipboardGetFormatBit(pItemFormat, &uItemFormat);
+        if (SUCCEEDED(hrc2) && uItemFormat == uFormat)
+            it = mData.mItems.erase(it);
+        else
+            ++it;
+    }
+    mData.mItems.push_back(pWrittenItemIface);
+    mData.mFormats |= uFormat;
+    aWrittenItem = pWrittenItemIface;
+    return S_OK;
 }
 
 
@@ -787,8 +1188,31 @@ HRESULT Clipboard::writeData(ClipboardAction_T aAction,
  */
 HRESULT Clipboard::writeFormats(const std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
-    RT_NOREF(aFormats);
-    ReturnComNotImplemented();
+    SHCLFORMATS fFormats = VBOX_SHCL_FMT_NONE;
+    for (std::vector<ComPtr<IClipboardFormat> >::const_iterator it = aFormats.begin(); it != aFormats.end(); ++it)
+    {
+        SHCLFORMAT uFormat;
+        HRESULT hrc = clipboardGetFormatBit(*it, &uFormat);
+        if (FAILED(hrc))
+            return hrc;
+        fFormats |= uFormat;
+    }
+
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    mData.mFormats = fFormats;
+    for (std::vector<ComPtr<IClipboardItem> >::iterator it = mData.mItems.begin(); it != mData.mItems.end();)
+    {
+        ComPtr<IClipboardFormat> pItemFormat;
+        HRESULT hrc = (*it)->COMGETTER(Format)(pItemFormat.asOutParam());
+        SHCLFORMAT uItemFormat = VBOX_SHCL_FMT_NONE;
+        if (SUCCEEDED(hrc))
+            hrc = clipboardGetFormatBit(pItemFormat, &uItemFormat);
+        if (FAILED(hrc) || !(fFormats & uItemFormat))
+            it = mData.mItems.erase(it);
+        else
+            ++it;
+    }
+    return S_OK;
 }
 
 
@@ -801,6 +1225,8 @@ HRESULT Clipboard::reset()
 {
     AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
     mData.mFileList.clear();
+    mData.mItems.clear();
+    mData.mFormats = VBOX_SHCL_FMT_NONE;
     if (!mData.mTransfers.isNull())
         mData.mTransfers->i_reset();
     return S_OK;
@@ -816,11 +1242,29 @@ HRESULT Clipboard::reset()
  * @param   aAvailable      Where to return whether the format is available.
  */
 HRESULT Clipboard::isFormatAvailable(ClipboardSource_T aSource,
-                                     const ComPtr<IClipboardFormat> &aFormat,
-                                     BOOL *aAvailable)
+                                      const ComPtr<IClipboardFormat> &aFormat,
+                                      BOOL *aAvailable)
 {
-    RT_NOREF(aSource, aFormat, aAvailable);
-    ReturnComNotImplemented();
+    AssertPtrReturn(aAvailable, E_POINTER);
+    if (   aSource != ClipboardSource_Host
+        && aSource != ClipboardSource_Guest
+        && aSource != ClipboardSource_Remote
+        && aSource != ClipboardSource_Custom)
+        return E_INVALIDARG;
+
+    SHCLFORMAT uFormat;
+    HRESULT hrc = clipboardGetFormatBit(aFormat, &uFormat);
+    if (FAILED(hrc))
+        return hrc;
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    SHCLFORMATS fFormats = mData.mFormats;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    if (!mData.mFileList.empty())
+        fFormats |= VBOX_SHCL_FMT_URI_LIST;
+#endif
+    *aAvailable = (fFormats & uFormat) ? TRUE : FALSE;
+    return S_OK;
 }
 
 
@@ -832,8 +1276,32 @@ HRESULT Clipboard::isFormatAvailable(ClipboardSource_T aSource,
  * @param   aFormats        Where to return the supported formats.
  */
 HRESULT Clipboard::getSupportedFormats(ClipboardSource_T aSource,
-                                       std::vector<ComPtr<IClipboardFormat> > &aFormats)
+                                        std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
-    RT_NOREF(aSource, aFormats);
-    ReturnComNotImplemented();
+    if (   aSource != ClipboardSource_Host
+        && aSource != ClipboardSource_Guest
+        && aSource != ClipboardSource_Remote
+        && aSource != ClipboardSource_Custom)
+        return E_INVALIDARG;
+
+    static const SHCLFORMAT s_aFormats[] =
+    {
+        VBOX_SHCL_FMT_UNICODETEXT,
+        VBOX_SHCL_FMT_HTML,
+        VBOX_SHCL_FMT_BITMAP,
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        VBOX_SHCL_FMT_URI_LIST,
+#endif
+    };
+
+    aFormats.clear();
+    for (size_t i = 0; i < RT_ELEMENTS(s_aFormats); ++i)
+    {
+        ComPtr<IClipboardFormat> pFormat;
+        HRESULT hrc = clipboardCreateFormat(s_aFormats[i], pFormat);
+        if (FAILED(hrc))
+            return hrc;
+        aFormats.push_back(pFormat);
+    }
+    return S_OK;
 }

@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard API.
  */
@@ -36,6 +36,8 @@
 #include "ClipboardTransferWrap.h"
 #include "ClipboardTransferManagerWrap.h"
 #include "ClipboardWrap.h"
+
+class Machine;
 
 /**
  * Clipboard data format object.
@@ -207,8 +209,16 @@ public:
     HRESULT FinalConstruct();
     void FinalRelease();
 
-    HRESULT init();
+    HRESULT init(Machine *aParent = NULL);
     void uninit();
+
+    HRESULT i_setMode(ClipboardMode_T aMode);
+    HRESULT i_getFileTransfersEnabled(BOOL *aEnabled);
+    HRESULT i_setFileTransfersEnabled(BOOL aEnabled);
+    HRESULT i_notifyClipboardModeChange(ClipboardMode_T aMode);
+    HRESULT i_notifyClipboardFileTransferModeChange(BOOL aEnable);
+    void i_rollback();
+    void i_commit();
 
 private:
 
@@ -216,6 +226,8 @@ private:
      * @{ */
     HRESULT getMode(ClipboardMode_T *aMode);
     HRESULT setMode(ClipboardMode_T aMode);
+    HRESULT getFileTransfersEnabled(BOOL *aEnabled);
+    HRESULT setFileTransfersEnabled(BOOL aEnabled);
     HRESULT getFileList(std::vector<com::Utf8Str> &aFileList);
     HRESULT setFileList(const std::vector<com::Utf8Str> &aFileList);
     HRESULT getTransfers(ComPtr<IClipboardTransferManager> &aTransfers);
@@ -236,14 +248,36 @@ private:
 
     struct Data
     {
-        /** Clipboard mode. */
-        ClipboardMode_T mMode;
+        /** Clipboard settings. */
+        struct Settings
+        {
+            Settings()
+                : mode(ClipboardMode_Disabled)
+                , fFileTransfersEnabled(false)
+            { }
+
+            /** Clipboard mode. */
+            ClipboardMode_T mode;
+            /** Whether clipboard file transfers are enabled. */
+            bool fFileTransfersEnabled;
+        };
+
+        /** Parent machine. */
+        Machine *mParent;
+        /** Clipboard settings. */
+        Backupable<Settings> bd;
         /** Clipboard file list. */
         std::vector<com::Utf8Str> mFileList;
         /** Transfer manager object. */
         ComObjPtr<ClipboardTransferManager> mTransfers;
         /** Clipboard event source. */
         ComPtr<IEventSource> mEventSource;
+        /** Current available Shared Clipboard format mask (VBOX_SHCL_FMT_XXX). */
+        uint32_t mFormats;
+        /** Next clipboard item identifier to assign. */
+        ULONG mNextItemId;
+        /** Current clipboard data items. */
+        std::vector<ComPtr<IClipboardItem> > mItems;
     } mData;
 };
 

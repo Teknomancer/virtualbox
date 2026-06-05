@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.h 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.h 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC - Header.
  */
@@ -52,6 +52,7 @@
 #include "TrustedPlatformModuleImpl.h"
 #include "NvramStoreImpl.h"
 #include "GuestDebugControlImpl.h"
+#include "ClipboardImpl.h"
 #ifdef VBOX_WITH_RESOURCE_USAGE_API
 # include "Performance.h"
 # include "PerformanceImpl.h"
@@ -324,9 +325,6 @@ public:
         typedef std::list<ComObjPtr<SharedFolder> > SharedFolderList;
         SharedFolderList    mSharedFolders;
 
-        ClipboardMode_T     mClipboardMode;
-        BOOL                mClipboardFileTransfersEnabled;
-
         DnDMode_T           mDnDMode;
 
         typedef std::map<Utf8Str, GuestProperty> GuestPropertyMap;
@@ -567,8 +565,10 @@ public:
     virtual HRESULT i_onMediumChange(IMediumAttachment * /* mediumAttachment */, BOOL /* force */) { return S_OK; }
     virtual HRESULT i_onSharedFolderChange(BOOL /* aGlobal */) { return S_OK; }
     virtual HRESULT i_onVMProcessPriorityChange(VMProcPriority_T /* aPriority */) { return S_OK; }
+    virtual HRESULT i_checkClipboardSettingsChangeAllowed();
     virtual HRESULT i_onClipboardModeChange(ClipboardMode_T /* aClipboardMode */) { return S_OK; }
     virtual HRESULT i_onClipboardFileTransferModeChange(BOOL /* aEnable */) { return S_OK; }
+    virtual void i_onSettingsChanged();
     virtual HRESULT i_onDnDModeChange(DnDMode_T /* aDnDMode */) { return S_OK; }
     virtual HRESULT i_onBandwidthGroupChange(IBandwidthGroup * /* aBandwidthGroup */) { return S_OK; }
     virtual HRESULT i_onStorageDeviceChange(IMediumAttachment * /* mediumAttachment */, BOOL /* remove */,
@@ -842,6 +842,7 @@ protected:
     const ComObjPtr<GraphicsAdapter>   mGraphicsAdapter;
     const ComObjPtr<BandwidthControl>  mBandwidthControl;
     const ComObjPtr<GuestDebugControl> mGuestDebugControl;
+    const ComObjPtr<Clipboard>         mClipboard;
 
     const ComObjPtr<TrustedPlatformModule> mTrustedPlatformModule;
     const ComObjPtr<NvramStore>            mNvramStore;
@@ -986,10 +987,6 @@ private:
     HRESULT getSnapshotCount(ULONG *aSnapshotCount);
     HRESULT getCurrentStateModified(BOOL *aCurrentStateModified);
     HRESULT getSharedFolders(std::vector<ComPtr<ISharedFolder> > &aSharedFolders);
-    HRESULT getClipboardMode(ClipboardMode_T *aClipboardMode);
-    HRESULT setClipboardMode(ClipboardMode_T aClipboardMode);
-    HRESULT getClipboardFileTransfersEnabled(BOOL *aEnabled);
-    HRESULT setClipboardFileTransfersEnabled(BOOL aEnabled);
     HRESULT getClipboard(ComPtr<IClipboard> &aClipboard);
     HRESULT getDnDMode(DnDMode_T *aDnDMode);
     HRESULT setDnDMode(DnDMode_T aDnDMode);

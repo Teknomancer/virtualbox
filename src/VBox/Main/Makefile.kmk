@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -642,6 +642,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  	src-all/RecordingUtils.cpp \
  	src-all/SecretKeyStore.cpp \
  	src-all/SharedFolderImpl.cpp \
+ 	src-all/ClipboardImpl.cpp \
  	src-all/AutoCaller.cpp \
  	src-all/ThreadTask.cpp \
  	src-all/VirtualBoxBase.cpp \
@@ -1160,6 +1161,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  VBoxC_SOURCES += \
  	$(VBoxAPIWrap_0_OUTDIR)/VBoxAPI.d \
  	src-all/AudioUtils.cpp \
+ 	src-all/ClipboardImpl.cpp \
  	src-all/CryptoUtils.cpp \
  	src-all/ConsoleSharedFolderImpl.cpp \
  	src-all/DisplayPNGUtil.cpp \
@@ -1189,7 +1191,6 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  	src-client/BusAssignmentManager.cpp \
  	$(if $(VBOX_WITH_PCI_PASSTHROUGH),src-client/PCIRawDevImpl.cpp,) \
  	src-client/ClientTokenHolder.cpp \
- 	src-client/ClipboardImpl.cpp \
  	src-client/ConsoleImpl.cpp \
  	src-client/ConsoleImplConfigCommon.cpp \
  	src-client/ConsoleImplConfigX86.cpp \

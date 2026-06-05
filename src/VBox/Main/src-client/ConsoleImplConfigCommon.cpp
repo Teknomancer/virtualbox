@@ -1,4 +1,4 @@
-/* $Id: ConsoleImplConfigCommon.cpp 114003 2026-04-24 06:30:09Z aleksey.ilyushin@oracle.com $ */
+/* $Id: ConsoleImplConfigCommon.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation - VM Configuration Bits.
  *
@@ -3984,11 +3984,14 @@ int Console::i_configVmmDev(ComPtr<IMachine> pMachine, BusAssignmentManager *pBu
      * Shared Clipboard.
      */
     {
+        ComPtr<IClipboard> pClipboard;
+        hrc = pMachine->COMGETTER(Clipboard)(pClipboard.asOutParam()); H();
+
         ClipboardMode_T enmClipboardMode = ClipboardMode_Disabled;
-        hrc = pMachine->COMGETTER(ClipboardMode)(&enmClipboardMode); H();
+        hrc = pClipboard->COMGETTER(Mode)(&enmClipboardMode); H();
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
         BOOL fFileTransfersEnabled;
-        hrc = pMachine->COMGETTER(ClipboardFileTransfersEnabled)(&fFileTransfersEnabled); H();
+        hrc = pClipboard->COMGETTER(FileTransfersEnabled)(&fFileTransfersEnabled); H();
 #endif
 
         /* Load the service */

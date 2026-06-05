@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.cpp 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC.
  */
@@ -62,6 +62,7 @@
 #include "ExtPackManagerImpl.h"
 #include "MachineLaunchVMCommonWorker.h"
 #include "CryptoUtils.h"
+#include "ClipboardImpl.h"
 
 // generated header
 #include "VBoxEvents.h"
@@ -257,9 +258,6 @@ Machine::HWData::HWData()
     mBootOrder[2] = DeviceType_HardDisk;
     for (size_t i = 3; i < RT_ELEMENTS(mBootOrder); ++i)
         mBootOrder[i] = DeviceType_Null;
-
-    mClipboardMode                 = ClipboardMode_Disabled;
-    mClipboardFileTransfersEnabled = FALSE;
 
     mDnDMode = DnDMode_Disabled;
 
@@ -2287,70 +2285,20 @@ HRESULT Machine::getSharedFolders(std::vector<ComPtr<ISharedFolder> > &aSharedFo
     return S_OK;
 }
 
-HRESULT Machine::getClipboardMode(ClipboardMode_T *aClipboardMode)
+HRESULT Machine::i_checkClipboardSettingsChangeAllowed()
 {
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-
-    *aClipboardMode = mHWData->mClipboardMode;
-
-    return S_OK;
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    return i_checkStateDependency(MutableOrRunningStateDep);
 }
 
-HRESULT Machine::setClipboardMode(ClipboardMode_T aClipboardMode)
+void Machine::i_onSettingsChanged()
 {
-    HRESULT hrc = S_OK;
-
     AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-
-    hrc = i_checkStateDependency(MutableOrRunningStateDep);
-    if (FAILED(hrc)) return hrc;
-
-    alock.release();
-    hrc = i_onClipboardModeChange(aClipboardMode);
-    alock.acquire();
-    if (FAILED(hrc)) return hrc;
-
     i_setModified(IsModified_MachineData);
-    mHWData.backup();
-    mHWData->mClipboardMode = aClipboardMode;
 
     /** Save settings if online - @todo why is this required? -- @bugref{6818} */
     if (Global::IsOnline(mData->mMachineState))
         i_saveSettings(NULL, alock);
-
-    return S_OK;
-}
-
-HRESULT Machine::getClipboardFileTransfersEnabled(BOOL *aEnabled)
-{
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-
-    *aEnabled = mHWData->mClipboardFileTransfersEnabled;
-
-    return S_OK;
-}
-
-HRESULT Machine::setClipboardFileTransfersEnabled(BOOL aEnabled)
-{
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-
-    HRESULT hrc = i_checkStateDependency(MutableOrRunningStateDep);
-    if (FAILED(hrc)) return hrc;
-
-    alock.release();
-    hrc = i_onClipboardFileTransferModeChange(aEnabled);
-    alock.acquire();
-    if (FAILED(hrc)) return hrc;
-
-    i_setModified(IsModified_MachineData);
-    mHWData.backup();
-    mHWData->mClipboardFileTransfersEnabled = aEnabled;
-
-    /** Save settings if online - @todo why is this required? -- @bugref{6818} */
-    if (Global::IsOnline(mData->mMachineState))
-        i_saveSettings(NULL, alock);
-
-    return S_OK;
 }
 
 /**
@@ -2361,8 +2309,9 @@ HRESULT Machine::setClipboardFileTransfersEnabled(BOOL aEnabled)
  */
 HRESULT Machine::getClipboard(ComPtr<IClipboard> &aClipboard)
 {
-    RT_NOREF(aClipboard);
-    ReturnComNotImplemented();
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertReturn(!mClipboard.isNull(), E_FAIL);
+    return mClipboard.queryInterfaceTo(aClipboard.asOutParam());
 }
 
 HRESULT Machine::getDnDMode(DnDMode_T *aDnDMode)
@@ -8167,6 +8116,12 @@ HRESULT Machine::initDataAndChildObjects()
     unconst(mGuestDebugControl).createObject();
     mGuestDebugControl->init(this);
 
+    /* create the clipboard control object */
+    hrc = unconst(mClipboard).createObject();
+    ComAssertComRCRetRC(hrc);
+    hrc = mClipboard->init(this);
+    ComAssertComRCRetRC(hrc);
+
     return hrc;
 }
 
@@ -8189,6 +8144,12 @@ void Machine::uninitDataAndChildObjects()
                      || getObjectState().getState() == ObjectState::Limited);
 
     /* tell all our other child objects we've been uninitialized */
+    if (mClipboard)
+    {
+        mClipboard->uninit();
+        unconst(mClipboard).setNull();
+    }
+
     if (mGuestDebugControl)
     {
         mGuestDebugControl->uninit();
@@ -8922,8 +8883,13 @@ HRESULT Machine::i_loadHardware(const Guid *puuidRegistry,
         }
 
         // Clipboard
-        mHWData->mClipboardMode                 = data.clipboardMode;
-        mHWData->mClipboardFileTransfersEnabled = data.fClipboardFileTransfersEnabled ? TRUE : FALSE;
+        if (!mClipboard.isNull())
+        {
+            hrc = mClipboard->i_setMode(data.clipboardSettings.mode);
+            if (FAILED(hrc)) return hrc;
+            hrc = mClipboard->i_setFileTransfersEnabled(data.clipboardSettings.fFileTransfersEnabled ? TRUE : FALSE);
+            if (FAILED(hrc)) return hrc;
+        }
 
         // drag'n'drop
         mHWData->mDnDMode = data.dndMode;
@@ -10297,8 +10263,12 @@ HRESULT Machine::i_saveHardware(settings::Hardware &data, settings::Debugging *p
         }
 
         // clipboard
-        data.clipboardMode                  = mHWData->mClipboardMode;
-        data.fClipboardFileTransfersEnabled = RT_BOOL(mHWData->mClipboardFileTransfersEnabled);
+        hrc = mClipboard->COMGETTER(Mode)(&data.clipboardSettings.mode);
+        if (FAILED(hrc)) return hrc;
+        BOOL fClipboardFileTransfersEnabled;
+        hrc = mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
+        if (FAILED(hrc)) return hrc;
+        data.clipboardSettings.fFileTransfersEnabled = RT_BOOL(fClipboardFileTransfersEnabled);
 
         // drag'n'drop
         data.dndMode = mHWData->mDnDMode;
@@ -11821,6 +11791,9 @@ void Machine::i_rollback(bool aNotify)
     if (mGuestDebugControl && (mData->flModifications & IsModified_GuestDebugControl))
         mGuestDebugControl->i_rollback();
 
+    if (mClipboard && (mData->flModifications & IsModified_MachineData))
+        mClipboard->i_rollback();
+
     if (mPlatform && (mData->flModifications & IsModified_Platform))
     {
         ChipsetType_T enmChipset;
@@ -11947,6 +11920,7 @@ void Machine::i_commit()
     mUSBDeviceFilters->i_commit();
     mBandwidthControl->i_commit();
     mGuestDebugControl->i_commit();
+    mClipboard->i_commit();
 
     /* Since mNetworkAdapters is a list which might have been changed (resized)
      * without using the Backupable<> template we need to handle the copying
@@ -12181,6 +12155,25 @@ void Machine::i_commit()
         /* mmMediumAttachments is reshared by fixupMedia */
         // mPeer->mMediumAttachments.attach(mMediumAttachments);
         Assert(mPeer->mMediumAttachments.data() == mMediumAttachments.data());
+
+        ClipboardMode_T enmClipboardMode;
+        HRESULT hrc2 = mClipboard->COMGETTER(Mode)(&enmClipboardMode);
+        AssertComRC(hrc2);
+        if (SUCCEEDED(hrc2))
+        {
+            hrc2 = mPeer->mClipboard->i_setMode(enmClipboardMode);
+            AssertComRC(hrc2);
+        }
+
+        BOOL fClipboardFileTransfersEnabled;
+        hrc2 = mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
+        AssertComRC(hrc2);
+        if (SUCCEEDED(hrc2))
+        {
+            hrc2 = mPeer->mClipboard->i_setFileTransfersEnabled(fClipboardFileTransfersEnabled);
+            AssertComRC(hrc2);
+        }
+        mPeer->mClipboard->i_commit();
     }
 }
 
@@ -12230,6 +12223,24 @@ void Machine::i_copyFrom(Machine *aThat)
     mUSBDeviceFilters->i_copyFrom(aThat->mUSBDeviceFilters);
     mBandwidthControl->i_copyFrom(aThat->mBandwidthControl);
     mGuestDebugControl->i_copyFrom(aThat->mGuestDebugControl);
+
+    ClipboardMode_T enmClipboardMode;
+    HRESULT hrcClipboard = aThat->mClipboard->COMGETTER(Mode)(&enmClipboardMode);
+    AssertComRC(hrcClipboard);
+    if (SUCCEEDED(hrcClipboard))
+    {
+        hrcClipboard = mClipboard->i_setMode(enmClipboardMode);
+        AssertComRC(hrcClipboard);
+    }
+
+    BOOL fClipboardFileTransfersEnabled;
+    hrcClipboard = aThat->mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
+    AssertComRC(hrcClipboard);
+    if (SUCCEEDED(hrcClipboard))
+    {
+        hrcClipboard = mClipboard->i_setFileTransfersEnabled(fClipboardFileTransfersEnabled);
+        AssertComRC(hrcClipboard);
+    }
 
     /* create private copies of all controllers */
     mStorageControllers.backup();
@@ -12647,6 +12658,21 @@ HRESULT SessionMachine::init(Machine *aMachine)
 
     unconst(mGuestDebugControl).createObject();
     mGuestDebugControl->init(this, aMachine->mGuestDebugControl);
+
+    unconst(mClipboard).createObject();
+    hrc = mClipboard->init(this);
+    if (FAILED(hrc)) return hrc;
+    ClipboardMode_T enmClipboardMode;
+    hrc = aMachine->mClipboard->COMGETTER(Mode)(&enmClipboardMode);
+    if (FAILED(hrc)) return hrc;
+    hrc = mClipboard->i_setMode(enmClipboardMode);
+    if (FAILED(hrc)) return hrc;
+    BOOL fClipboardFileTransfersEnabled;
+    hrc = aMachine->mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
+    if (FAILED(hrc)) return hrc;
+    hrc = mClipboard->i_setFileTransfersEnabled(fClipboardFileTransfersEnabled);
+    if (FAILED(hrc)) return hrc;
+    mClipboard->i_commit();
 
     /* default is to delete saved state on Saved -> PoweredOff transition */
     mRemoveSavedState = true;

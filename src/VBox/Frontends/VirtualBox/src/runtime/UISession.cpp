@@ -1,4 +1,4 @@
-/* $Id: UISession.cpp 113938 2026-04-17 09:37:43Z sergey.dubov@oracle.com $ */
+/* $Id: UISession.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISession class implementation.
  */
@@ -29,6 +29,9 @@
 #include <QApplication>
 #include <QRegularExpression>
 #include <QWidget>
+
+/* COM includes: */
+#include "CClipboard.h"
 
 /* GUI includes: */
 #include "UIActionPoolRuntime.h"
@@ -578,20 +581,30 @@ bool UISession::acquireClipboardMode(KClipboardMode &enmMode)
     CMachine comMachine = machine();
     if (comMachine.isNull())
         return false;
-    const KClipboardMode enmClipboardMode = comMachine.GetClipboardMode();
-    const bool fSuccess = comMachine.isOk();
+    CClipboard comClipboard = comMachine.GetClipboard();
+    bool fSuccess = comMachine.isOk();
+    if (fSuccess)
+    {
+        const KClipboardMode enmClipboardMode = comClipboard.GetMode();
+        fSuccess = comClipboard.isOk();
+        if (fSuccess)
+            enmMode = enmClipboardMode;
+    }
     if (!fSuccess)
         UINotificationMessage::cannotAcquireMachineParameter(comMachine);
-    else
-        enmMode = enmClipboardMode;
     return fSuccess;
 }
 
 bool UISession::setClipboardMode(KClipboardMode enmMode)
 {
     CMachine comMachine = machine();
-    comMachine.SetClipboardMode(enmMode);
-    const bool fSuccess = comMachine.isOk();
+    CClipboard comClipboard = comMachine.GetClipboard();
+    bool fSuccess = comMachine.isOk();
+    if (fSuccess)
+    {
+        comClipboard.SetMode(enmMode);
+        fSuccess = comClipboard.isOk();
+    }
     if (!fSuccess)
         UINotificationMessage::cannotAcquireMachineParameter(comMachine);
     return fSuccess;
@@ -600,8 +613,13 @@ bool UISession::setClipboardMode(KClipboardMode enmMode)
 bool UISession::toggleClipboardFileTransfer(bool fEnabled)
 {
     CMachine comMachine = machine();
-    comMachine.SetClipboardFileTransfersEnabled(fEnabled);
-    const bool fSuccess = comMachine.isOk();
+    CClipboard comClipboard = comMachine.GetClipboard();
+    bool fSuccess = comMachine.isOk();
+    if (fSuccess)
+    {
+        comClipboard.SetFileTransfersEnabled(fEnabled);
+        fSuccess = comClipboard.isOk();
+    }
     if (!fSuccess)
         UINotificationMessage::cannotChangeMachineParameter(comMachine);
     return fSuccess;
@@ -610,8 +628,14 @@ bool UISession::toggleClipboardFileTransfer(bool fEnabled)
 bool UISession::isClipboardFileTransferEnabled()
 {
     CMachine comMachine = machine();
-    bool fEnabled = comMachine.GetClipboardFileTransfersEnabled();
-    const bool fSuccess = comMachine.isOk();
+    CClipboard comClipboard = comMachine.GetClipboard();
+    bool fSuccess = comMachine.isOk();
+    bool fEnabled = false;
+    if (fSuccess)
+    {
+        fEnabled = comClipboard.GetFileTransfersEnabled();
+        fSuccess = comClipboard.isOk();
+    }
     if (!fSuccess)
         return UINotificationMessage::cannotAcquireMachineParameter(comMachine);
     return fEnabled;

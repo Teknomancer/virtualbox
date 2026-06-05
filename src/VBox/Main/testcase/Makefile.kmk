@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114039 2026-04-28 05:08:58Z valery.portnyagin@oracle.com $
+# $Id: Makefile.kmk 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the VBox API testcases.
 #
@@ -47,6 +47,7 @@ ifndef VBOX_ONLY_SDK
   	$(if $(VBOX_WITH_GUEST_CONTROL),tstGuestCtrlPaths,) \
   	tstMediumLock \
   	tstSafeArray \
+  	tstClipboard \
   	tstRecording \
   	tstSettings \
   	tstBstr \
@@ -306,6 +307,31 @@ tstMediumLock_SOURCES  = tstMediumLock.cpp
 #
 tstSafeArray_TEMPLATE = VBoxMainClientTstExe
 tstSafeArray_SOURCES  = tstSafeArray.cpp
+
+
+#
+# tstClipboard
+#
+tstClipboard_TEMPLATE      = VBoxMainClientTstExe
+tstClipboard_INTERMEDIATES = \
+	$(VBOX_MAIN_APIWRAPPER_GEN_HDRS) \
+	$(VBOX_AUTOGEN_EVENT_H)
+tstClipboard_INCS          = \
+	../include \
+	$(VBOX_MAIN_APIWRAPPER_INCS) \
+	$(dir $(VBOX_AUTOGEN_EVENT_H))
+tstClipboard_SOURCES       = \
+	tstClipboard.cpp \
+	../src-all/ClipboardImpl.cpp \
+	../src-all/EventImpl.cpp \
+	../src-all/ObjectsTracker.cpp \
+	../src-all/VirtualBoxBase.cpp \
+	../src-all/VirtualBoxErrorInfoImpl.cpp \
+	../src-all/AutoCaller.cpp \
+	../src-all/GlobalStatusConversion.cpp \
+	$(VBOX_AUTOGEN_EVENT_CPP)
+tstClipboard_LIBS          = \
+	$(PATH_STAGE_LIB)/VBoxAPIWrap$(VBOX_SUFF_LIB)
 
 
 #

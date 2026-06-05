@@ -3,7 +3,7 @@
 # pylint: disable=line-too-long
 # pylint: disable=too-many-statements
 # pylint: disable=deprecated-module
-# $Id: vboxshell.py 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: vboxshell.py 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $
 
 # The following checks for the right (i.e. most recent) Python binary available
 # and re-starts the script using that binary (like a shell wrapper).
@@ -63,7 +63,7 @@ along with this program; if not, see <https://www.gnu.org/licenses>.
 
 SPDX-License-Identifier: GPL-3.0-only
 """
-__version__ = "$Revision: 112403 $"
+__version__ = "$Revision: 114262 $"
 
 
 import gc
@@ -997,7 +997,7 @@ def infoCmd(ctx, args):
     print("  Monitors [monitorCount]: %d" % (mach.graphicsAdapter.monitorCount))
     print("  Chipset [chipsetType]: %s (%s)" % (asEnumElem(ctx, "ChipsetType", mach.platform.chipsetType), mach.platform.chipsetType))
     print()
-    print("  Clipboard mode [clipboardMode]: %s (%s)" % (asEnumElem(ctx, "ClipboardMode", mach.clipboardMode), mach.clipboardMode))
+    print("  Clipboard mode [clipboard.mode]: %s (%s)" % (asEnumElem(ctx, "ClipboardMode", mach.clipboard.mode), mach.clipboard.mode))
     print("  Machine status [n/a]: %s (%s)" % (asEnumElem(ctx, "SessionState", mach.sessionState), mach.sessionState))
     print()
     if mach.teleporterEnabled:

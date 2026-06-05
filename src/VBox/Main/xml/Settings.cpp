@@ -1,4 +1,4 @@
-/* $Id: Settings.cpp 114003 2026-04-24 06:30:09Z aleksey.ilyushin@oracle.com $ */
+/* $Id: Settings.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * Settings File Manipulation API.
  *
@@ -130,7 +130,7 @@ using namespace settings;
 #define VBOX_XML_SCHEMA "VirtualBox-settings.xsd"
 
 /** VirtualBox XML settings version number substring ("x.y")  */
-#define VBOX_XML_VERSION        "1.12"
+#define VBOX_XML_VERSION        "1.22"
 
 /** VirtualBox OVF settings import default version number substring ("x.y").
  *
@@ -319,7 +319,7 @@ ConfigFileBase::ConfigFileBase(const com::Utf8Str *pstrFilename)
     {
         // creating new settings file:
         m->strSettingsVersionFull = VBOX_XML_VERSION_FULL;
-        m->sv = SettingsVersion_v1_12;
+        m->sv = SettingsVersion_v1_22;
     }
 }
 
@@ -442,7 +442,9 @@ SettingsVersion_T ConfigFileBase::parseVersion(const Utf8Str &strVersion, const 
                 sv = SettingsVersion_v1_20;
             else if (uMinor == 21)
                 sv = SettingsVersion_v1_21;
-            else if (uMinor > 21)
+            else if (uMinor == 22)
+                sv = SettingsVersion_v1_22;
+            else if (uMinor > 22)
                 sv = SettingsVersion_Future;
         }
         else if (uMajor > 1)
@@ -1092,6 +1094,10 @@ void ConfigFileBase::setVersionAttribute(xml::ElementNode &elm)
             pcszVersion = "1.21";
             break;
 
+        case SettingsVersion_v1_22:
+            pcszVersion = "1.22";
+            break;
+
         default:
             // catch human error: the assertion below will trigger in debug
             // or dbgopt builds, so hopefully this will get noticed sooner in
@@ -1114,8 +1120,8 @@ void ConfigFileBase::setVersionAttribute(xml::ElementNode &elm)
                 // for "forgotten settings" this may not be the best choice,
                 // but as it's an omission of someone who changed this file
                 // it's the only generic possibility.
-                pcszVersion = "1.21";
-                m->sv = SettingsVersion_v1_21;
+                pcszVersion = "1.22";
+                m->sv = SettingsVersion_v1_22;
             }
             break;
     }
@@ -1688,6 +1694,29 @@ bool SharedFolder::operator==(const SharedFolder &g) const
             && fAutoMount        == g.fAutoMount
             && strAutoMountPoint == g.strAutoMountPoint
             && enmSymlinkPolicy  == g.enmSymlinkPolicy);
+}
+
+
+/**
+ * Constructor. Needs to set sane defaults which stand the test of time.
+ */
+Clipboard::Clipboard() :
+    mode(ClipboardMode_Disabled),
+    fFileTransfersEnabled(false)
+{
+}
+
+
+/**
+ * Comparison operator. This gets called from MachineConfigFile::operator==,
+ * which in turn gets called from Machine::saveSettings to figure out whether
+ * machine settings have really changed and thus need to be written out to disk.
+ */
+bool Clipboard::operator==(const Clipboard &rOther) const
+{
+    return (this == &rOther)
+        || (   mode                  == rOther.mode
+            && fFileTransfersEnabled == rOther.fFileTransfersEnabled);
 }
 
 
@@ -4198,8 +4227,6 @@ Hardware::Hardware() :
     paravirtProvider(ParavirtProvider_Legacy), // default for old VMs, for new ones it's ParavirtProvider_Default
     strParavirtDebug(""),
     fEmulatedUSBCardReader(false),
-    clipboardMode(ClipboardMode_Disabled),
-    fClipboardFileTransfersEnabled(false),
     dndMode(DnDMode_Disabled),
     ulMemoryBalloonSize(0),
     fPageFusionEnabled(false)
@@ -4290,8 +4317,7 @@ bool Hardware::operator==(const Hardware& h) const
             && audioAdapter                   == h.audioAdapter
             && storage                        == h.storage
             && llSharedFolders                == h.llSharedFolders
-            && clipboardMode                  == h.clipboardMode
-            && fClipboardFileTransfersEnabled == h.fClipboardFileTransfersEnabled
+            && clipboardSettings              == h.clipboardSettings
             && dndMode                        == h.dndMode
             && ulMemoryBalloonSize            == h.ulMemoryBalloonSize
             && fPageFusionEnabled             == h.fPageFusionEnabled
@@ -5245,6 +5271,43 @@ void MachineConfigFile::readAudioAdapter(const xml::ElementNode &elmAudioAdapter
 }
 
 /**
+ * Parses a clipboard mode XML attribute value.
+ */
+static ClipboardMode_T parseClipboardModeValue(const ConfigFileBase *pFile, const xml::ElementNode *pElm,
+                                                const char *pszAttribute, const Utf8Str &strValue)
+{
+    if (strValue == "Disabled")
+        return ClipboardMode_Disabled;
+    if (strValue == "HostToGuest")
+        return ClipboardMode_HostToGuest;
+    if (strValue == "GuestToHost")
+        return ClipboardMode_GuestToHost;
+    if (strValue == "Bidirectional")
+        return ClipboardMode_Bidirectional;
+    throw ConfigFileError(pFile, pElm, N_("Invalid value '%s' in %s attribute"), strValue.c_str(), pszAttribute);
+}
+
+
+/**
+ * Stringifies a clipboard mode XML attribute value.
+ */
+static const char *stringifyClipboardMode(ClipboardMode_T enmMode)
+{
+    switch (enmMode)
+    {
+        default: /*case ClipboardMode_Disabled:*/
+            return "Disabled";
+        case ClipboardMode_HostToGuest:
+            return "HostToGuest";
+        case ClipboardMode_GuestToHost:
+            return "GuestToHost";
+        case ClipboardMode_Bidirectional:
+            return "Bidirectional";
+    }
+}
+
+
+/**
  * Called from MachineConfigFile::readHardware() to read guest property information.
  * @param elmGuestProperties
  * @param hw
@@ -5629,6 +5692,11 @@ void MachineConfigFile::readHardware(const xml::ElementNode &elmHardware,
         /* The new default is disabled, before it was enabled by default. */
         hw.audioAdapter.fEnabledOut = false;
     }
+
+    Utf8Str strLegacyClipboardMode;
+    if (   m->sv < SettingsVersion_v1_22
+        && elmHardware.getAttributeValue("clipboardMode", strLegacyClipboardMode))
+        hw.clipboardSettings.mode = parseClipboardModeValue(this, &elmHardware, "Hardware/@clipboardMode", strLegacyClipboardMode);
 
     if (!elmHardware.getAttributeValue("version", hw.strVersion))
     {
@@ -6163,20 +6231,9 @@ void MachineConfigFile::readHardware(const xml::ElementNode &elmHardware,
         {
             Utf8Str strTemp;
             if (pelmHwChild->getAttributeValue("mode", strTemp))
-            {
-                if (strTemp == "Disabled")
-                    hw.clipboardMode = ClipboardMode_Disabled;
-                else if (strTemp == "HostToGuest")
-                    hw.clipboardMode = ClipboardMode_HostToGuest;
-                else if (strTemp == "GuestToHost")
-                    hw.clipboardMode = ClipboardMode_GuestToHost;
-                else if (strTemp == "Bidirectional")
-                    hw.clipboardMode = ClipboardMode_Bidirectional;
-                else
-                    throw ConfigFileError(this, pelmHwChild, N_("Invalid value '%s' in Clipboard/@mode attribute"), strTemp.c_str());
-            }
+                hw.clipboardSettings.mode = parseClipboardModeValue(this, pelmHwChild, "Clipboard/@mode", strTemp);
 
-            pelmHwChild->getAttributeValue("fileTransfersEnabled", hw.fClipboardFileTransfersEnabled);
+            pelmHwChild->getAttributeValue("fileTransfersEnabled", hw.clipboardSettings.fFileTransfersEnabled);
         }
         else if (pelmHwChild->nameEquals("DragAndDrop"))
         {
@@ -8524,24 +8581,16 @@ void MachineConfigFile::buildHardwareXML(xml::ElementNode &elmParent,
         }
     }
 
-    xml::ElementNode *pelmClip = pelmHardware->createChild("Clipboard");
-    if (pelmClip)
+    if (   m->sv >= SettingsVersion_v1_22
+        && (   hw.clipboardSettings.mode != ClipboardMode_Disabled
+            || hw.clipboardSettings.fFileTransfersEnabled))
     {
-        if (hw.clipboardMode != ClipboardMode_Disabled)
-        {
-            const char *pcszClip;
-            switch (hw.clipboardMode)
-            {
-                default: /*case ClipboardMode_Disabled:*/ pcszClip = "Disabled"; break;
-                case ClipboardMode_HostToGuest: pcszClip = "HostToGuest"; break;
-                case ClipboardMode_GuestToHost: pcszClip = "GuestToHost"; break;
-                case ClipboardMode_Bidirectional: pcszClip = "Bidirectional"; break;
-            }
-            pelmClip->setAttribute("mode", pcszClip);
-        }
+        xml::ElementNode *pelmClip = pelmHardware->createChild("Clipboard");
+        if (hw.clipboardSettings.mode != ClipboardMode_Disabled)
+            pelmClip->setAttribute("mode", stringifyClipboardMode(hw.clipboardSettings.mode));
 
-        if (hw.fClipboardFileTransfersEnabled)
-            pelmClip->setAttribute("fileTransfersEnabled", hw.fClipboardFileTransfersEnabled);
+        if (hw.clipboardSettings.fFileTransfersEnabled)
+            pelmClip->setAttribute("fileTransfersEnabled", hw.clipboardSettings.fFileTransfersEnabled);
     }
 
     if (hw.dndMode != DnDMode_Disabled)
@@ -9665,6 +9714,17 @@ bool MachineConfigFile::isAudioDriverAllowedOnThisHost(AudioDriverType_T enmDrvT
  */
 void MachineConfigFile::bumpSettingsVersionIfNeeded()
 {
+    if (m->sv < SettingsVersion_v1_22)
+    {
+        // VirtualBox 7.3 (settings v1.22) moves clipboard mode to Hardware/Clipboard/@mode.
+        if (   hardwareMachine.clipboardSettings.mode != ClipboardMode_Disabled
+            || hardwareMachine.clipboardSettings.fFileTransfersEnabled)
+        {
+            m->sv = SettingsVersion_v1_22;
+            return;
+        }
+    }
+
     if (m->sv < SettingsVersion_v1_21)
     {
 #ifdef VBOX_WITH_VIRT_ARMV8

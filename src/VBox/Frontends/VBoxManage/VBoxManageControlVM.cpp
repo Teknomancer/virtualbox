@@ -1,4 +1,4 @@
-/* $Id: VBoxManageControlVM.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxManageControlVM.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of the controlvm command.
  */
@@ -529,7 +529,9 @@ RTEXITCODE handleControlVM(HandlerArg *a)
                     break;
                 }
 
-                CHECK_ERROR_BREAK(sessionMachine, COMSETTER(ClipboardMode)(mode));
+                ComPtr<IClipboard> clipboard;
+                CHECK_ERROR_BREAK(sessionMachine, COMGETTER(Clipboard)(clipboard.asOutParam()));
+                CHECK_ERROR_BREAK(clipboard, COMSETTER(Mode)(mode));
                 if (SUCCEEDED(hrc))
                     fNeedsSaving = true;
             }
@@ -552,7 +554,9 @@ RTEXITCODE handleControlVM(HandlerArg *a)
                     break;
                 }
 
-                CHECK_ERROR_BREAK(sessionMachine, COMSETTER(ClipboardFileTransfersEnabled)(fEnabled));
+                ComPtr<IClipboard> clipboard;
+                CHECK_ERROR_BREAK(sessionMachine, COMGETTER(Clipboard)(clipboard.asOutParam()));
+                CHECK_ERROR_BREAK(clipboard, COMSETTER(FileTransfersEnabled)(fEnabled));
                 fNeedsSaving = true;
             }
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */

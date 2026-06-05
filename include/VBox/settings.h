@@ -244,6 +244,23 @@ struct SharedFolder
 
 typedef std::list<SharedFolder> SharedFoldersList;
 
+/**
+ * Clipboard settings.
+ *
+ * NOTE: If you add any fields in here, you must update a) the constructor and b)
+ * the operator== which is used by MachineConfigFile::operator==(), or otherwise
+ * your settings might never get saved.
+ */
+struct Clipboard
+{
+    Clipboard();
+
+    bool operator==(const Clipboard &rOther) const;
+
+    ClipboardMode_T     mode;
+    bool                fFileTransfersEnabled;
+};
+
 typedef std::vector<uint8_t> IconBlob;
 
 /**
@@ -1380,8 +1397,7 @@ struct Hardware
     // clever reason <Hardware> is where they are in the XML....
     SharedFoldersList   llSharedFolders;
 
-    ClipboardMode_T     clipboardMode;
-    bool                fClipboardFileTransfersEnabled;
+    Clipboard           clipboardSettings;
 
     DnDMode_T           dndMode;
 

@@ -1,4 +1,4 @@
-/* $Id: UIMachineSettingsGeneral.cpp 113324 2026-03-11 09:47:08Z sergey.dubov@oracle.com $ */
+/* $Id: UIMachineSettingsGeneral.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIMachineSettingsGeneral class implementation.
  */
@@ -28,6 +28,9 @@
 /* Qt includes: */
 #include <QFileInfo>
 #include <QVBoxLayout>
+
+/* COM includes: */
+#include "CClipboard.h"
 
 /* GUI includes: */
 #include "QITabWidget.h"
@@ -187,7 +190,7 @@ void UIMachineSettingsGeneral::loadToCacheFrom(QVariant &data)
     /* Gather old 'Advanced' data: */
     oldGeneralData.m_strSnapshotsFolder = m_machine.GetSnapshotFolder();
     oldGeneralData.m_strSnapshotsHomeDir = QFileInfo(m_machine.GetSettingsFilePath()).absolutePath();
-    oldGeneralData.m_clipboardMode = m_machine.GetClipboardMode();
+    oldGeneralData.m_clipboardMode = m_machine.GetClipboard().GetMode();
     oldGeneralData.m_dndMode = m_machine.GetDnDMode();
 
     /* Gather old 'Description' data: */
@@ -793,8 +796,13 @@ bool UIMachineSettingsGeneral::saveAdvancedData()
         /* Save machine clipboard mode: */
         if (fSuccess && newGeneralData.m_clipboardMode != oldGeneralData.m_clipboardMode)
         {
-            m_machine.SetClipboardMode(newGeneralData.m_clipboardMode);
+            CClipboard comClipboard = m_machine.GetClipboard();
             fSuccess = m_machine.isOk();
+            if (fSuccess)
+            {
+                comClipboard.SetMode(newGeneralData.m_clipboardMode);
+                fSuccess = comClipboard.isOk();
+            }
         }
         /* Save machine D&D mode: */
         if (fSuccess && newGeneralData.m_dndMode != oldGeneralData.m_dndMode)

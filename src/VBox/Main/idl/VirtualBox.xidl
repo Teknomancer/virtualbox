@@ -676,14 +676,20 @@
             settings only).
       -->
     </const>
-  <const name="v1_21" value="23">
-    <desc>Settings version "1.21", written by VirtualBox 7.2.x.</desc>
-    <!--
-      Machine changes: GIC ITS.
-    -->
-  </const>
+    <const name="v1_21" value="23">
+      <desc>Settings version "1.21", written by VirtualBox 7.2.x.</desc>
+      <!--
+          Machine changes: GIC ITS.
+      -->
+    </const>
+    <const name="v1_22" value="24">
+      <desc>Settings version "1.22", written by VirtualBox 7.3.x.</desc>
+      <!--
+          Machine changes: Clipboard mode is stored in Hardware/Clipboard/@mode.
+      -->
+    </const>
     <const name="Future" value="99999">
-      <desc>Settings version greater than "1.21", written by a future VirtualBox version.</desc>
+      <desc>Settings version greater than "1.22", written by a future VirtualBox version.</desc>
     </const>
   </enum>
 
@@ -7860,7 +7866,7 @@
 
   <interface
     name="IMachine" extends="$unknown"
-    uuid="ce345112-2a8c-45be-ab41-c2b5b2b5a028"
+    uuid="ecfe93f4-872c-4e40-abcd-3ef742378555"
     wsmap="managed"
     rest="managed"
     wrap-hint-server-addinterfaces="IInternalMachineControl"
@@ -8378,22 +8384,6 @@
         New shared folders are added to the collection using
         <link to="#createSharedFolder"/>. Existing shared folders can be
         removed using <link to="#removeSharedFolder"/>.
-      </desc>
-    </attribute>
-
-    <attribute name="clipboardMode" type="ClipboardMode">
-      <desc>
-        Synchronization mode between the host OS clipboard
-        and the guest OS clipboard.
-      </desc>
-    </attribute>
-
-    <attribute name="clipboardFileTransfersEnabled" type="boolean">
-      <desc>
-        Sets or retrieves whether clipboard file transfers are allowed or not.
-
-        When set to @a true, clipboard file transfers between supported
-        host and guest OSes are allowed.
       </desc>
     </attribute>
 
@@ -15786,7 +15776,7 @@
 
   <interface
     name="IClipboard" extends="$unknown"
-    uuid="ba409764-89d0-4c49-9118-84fc651530ca"
+    uuid="3350ba8d-fd5d-46b4-9b7c-a81e3b036218"
     wsmap="managed"
     reservedMethods="8" reservedAttributes="8"
     >
@@ -15797,6 +15787,15 @@
     <attribute name="mode" type="ClipboardMode">
       <desc>
         Synchronization mode between the host OS clipboard and the guest OS clipboard.
+      </desc>
+    </attribute>
+
+    <attribute name="fileTransfersEnabled" type="boolean">
+      <desc>
+        Sets or retrieves whether clipboard file transfers are allowed or not.
+
+        When set to @a true, clipboard file transfers between supported
+        host and guest OSes are allowed.
       </desc>
     </attribute>
 
