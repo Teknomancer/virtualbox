@@ -1,4 +1,4 @@
-/* $Id: scm.cpp 113976 2026-04-22 20:19:20Z knut.osmundsen@oracle.com $ */
+/* $Id: scm.cpp 114261 2026-06-05 14:47:02Z andreas.loeffler@oracle.com $ */
 /** @file
  * IPRT Testcase / Tool - Source Code Massager.
  */
@@ -3083,7 +3083,7 @@ static void scmPrintStats(void)
  *
  * @returns RTEXITCODE_SUCCESS.
  */
-static int scmHelpActions(void)
+static RTEXITCODE scmHelpActions(void)
 {
     RTPrintf("Available rewriter actions:\n");
     for (uint32_t i = 0; i < RT_ELEMENTS(g_papRewriterActions); i++)
@@ -3096,7 +3096,7 @@ static int scmHelpActions(void)
  *
  * @returns RTEXITCODE_SUCCESS.
  */
-static int scmHelpConfig(void)
+static RTEXITCODE scmHelpConfig(void)
 {
     RTPrintf("Rewriter configuration:\n");
     for (size_t iCfg = 0; iCfg < RT_ELEMENTS(g_aConfigs); iCfg++)
@@ -3125,7 +3125,7 @@ static void hlpPrntf(const char *pszFormat, ...)
  * @param   paOpts              Options.
  * @param   cOpts               Number of options.
  */
-static int scmHelp(PCRTGETOPTDEF paOpts, size_t cOpts)
+static RTEXITCODE scmHelp(PCRTGETOPTDEF paOpts, size_t cOpts)
 {
     RTPrintf("VirtualBox Source Code Massager\n"
              "\n"
@@ -3420,12 +3420,15 @@ int main(int argc, char **argv)
                 break;
 
             case 'h':
+                scmSettingsDestroy(pSettings);
                 return scmHelp(s_aOpts, RT_ELEMENTS(s_aOpts));
 
             case SCMOPT_HELP_CONFIG:
+                scmSettingsDestroy(pSettings);
                 return scmHelpConfig();
 
             case SCMOPT_HELP_ACTIONS:
+                scmSettingsDestroy(pSettings);
                 return scmHelpActions();
 
             case 'q':
@@ -3439,10 +3442,11 @@ int main(int argc, char **argv)
             case 'V':
             {
                 /* The following is assuming that svn does it's job here. */
-                static const char s_szRev[] = "$Revision: 113976 $";
+                static const char s_szRev[] = "$Revision: 114261 $";
                 const char *psz = RTStrStripL(strchr(s_szRev, ' '));
                 RTPrintf("r%.*s\n", strchr(psz, ' ') - psz, psz);
-                return 0;
+                scmSettingsDestroy(pSettings);
+                return RTEXITCODE_SUCCESS;
             }
 
             case SCMOPT_DIFF_IGNORE_EOL:
@@ -3485,8 +3489,9 @@ int main(int argc, char **argv)
                 int rc2 = scmSettingsBaseHandleOpt(&pSettings->Base, rc, &ValueUnion, "/", 1);
                 if (RT_SUCCESS(rc2))
                     break;
+                scmSettingsDestroy(pSettings);
                 if (rc2 != VERR_GETOPT_UNKNOWN_OPTION)
-                    return 2;
+                    return RTEXITCODE_SYNTAX;
                 return RTGetOptPrintError(rc, &ValueUnion);
             }
         }
