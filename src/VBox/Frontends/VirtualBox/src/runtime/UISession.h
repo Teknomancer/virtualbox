@@ -1,4 +1,4 @@
-/* $Id: UISession.h 113893 2026-04-15 16:29:23Z sergey.dubov@oracle.com $ */
+/* $Id: UISession.h 114263 2026-06-05 17:21:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISession class declaration.
  */
@@ -55,6 +55,7 @@
 #include "CMouse.h"
 #include "CSession.h"
 #include "KChipsetType.h"
+#include "KClipboardMode.h"
 #include "KGraphicsControllerType.h"
 #include "KGuestMonitorChangedEventType.h"
 #include "KPlatformArchitecture.h"

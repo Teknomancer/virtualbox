@@ -1,4 +1,4 @@
-/* $Id: VBoxManageInfo.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageInfo.cpp 114263 2026-06-05 17:21:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - The 'showvminfo' command and helper routines.
  */
@@ -2402,7 +2402,7 @@ HRESULT showVMInfo(ComPtr<IVirtualBox> pVirtualBox,
         const char *psz = details == VMINFO_MACHINEREADABLE ? "unknown" : Info::tr("Unknown");
         ComPtr<IClipboard> clipboard;
         hrc = machine->COMGETTER(Clipboard)(clipboard.asOutParam());
-        ClipboardMode_T enmMode;
+        ClipboardMode_T enmMode = ClipboardMode_Disabled;
         if (SUCCEEDED(hrc))
             hrc = clipboard->COMGETTER(Mode)(&enmMode);
         if (SUCCEEDED(hrc))
