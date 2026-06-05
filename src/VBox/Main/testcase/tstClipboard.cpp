@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114264 2026-06-05 17:33:29Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -42,7 +42,7 @@
 
 
 /*********************************************************************************************************************************
-*   Internal Functions                                                                                                            *
+*   Internal Functions                                                                                                           *
 *********************************************************************************************************************************/
 static HRESULT tstCreateFormat(const char *pszMimeType, ComPtr<IClipboardFormat> &ptrFormat)
 {
