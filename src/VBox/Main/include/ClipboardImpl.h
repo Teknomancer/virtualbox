@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114265 2026-06-08 07:52:29Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard API.
  */
@@ -210,6 +210,7 @@ public:
     void FinalRelease();
 
     HRESULT init(Machine *aParent = NULL);
+    HRESULT initCopy(Machine *aParent, Clipboard *aThat);
     void uninit();
 
     HRESULT i_setMode(ClipboardMode_T aMode);

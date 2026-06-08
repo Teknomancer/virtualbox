@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114265 2026-06-08 07:52:29Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard API.
  */
@@ -744,6 +744,52 @@ HRESULT Clipboard::init(Machine *aParent /* = NULL */)
 
     mData.mParent = aParent;
     mData.bd.allocate();
+    mData.mFormats = VBOX_SHCL_FMT_NONE;
+    mData.mNextItemId = 1;
+    mData.mFileList.clear();
+    mData.mItems.clear();
+
+    HRESULT hrc = mData.mTransfers.createObject();
+    if (FAILED(hrc))
+        return hrc;
+    hrc = mData.mTransfers->init();
+    if (FAILED(hrc))
+        return hrc;
+
+    ComObjPtr<EventSource> pEventSource;
+    hrc = pEventSource.createObject();
+    if (FAILED(hrc))
+        return hrc;
+    hrc = pEventSource->init();
+    if (FAILED(hrc))
+        return hrc;
+    pEventSource.queryInterfaceTo(mData.mEventSource.asOutParam());
+
+    autoInitSpan.setSucceeded();
+    return S_OK;
+}
+
+
+/**
+ * Initializes a clipboard control object as a private copy of another clipboard object.
+ *
+ * @returns COM status code.
+ */
+HRESULT Clipboard::initCopy(Machine *aParent, Clipboard *aThat)
+{
+    ComAssertRet(aParent && aThat, E_INVALIDARG);
+
+    AutoInitSpan autoInitSpan(this);
+    AssertReturn(autoInitSpan.isOk(), E_FAIL);
+
+    mData.mParent = aParent;
+    {
+        AutoCaller thatCaller(aThat);
+        AssertComRCReturnRC(thatCaller.hrc());
+
+        AutoReadLock thatLock(aThat COMMA_LOCKVAL_SRC_POS);
+        mData.bd.attachCopy(aThat->mData.bd);
+    }
     mData.mFormats = VBOX_SHCL_FMT_NONE;
     mData.mNextItemId = 1;
     mData.mFileList.clear();
