@@ -1,4 +1,4 @@
-/* $Id: DrvNAT.cpp 114107 2026-05-08 14:07:09Z andreas.loeffler@oracle.com $ */
+/* $Id: DrvNAT.cpp 114267 2026-06-08 17:26:00Z andreas.loeffler@oracle.com $ */
 /** @file
  * DrvNATlibslirp - NATlibslirp network transport driver.
  */
@@ -53,6 +53,7 @@
 # include <fcntl.h>
 # include <poll.h>
 # include <errno.h>
+# include <netdb.h>
 #endif
 
 #ifdef RT_OS_FREEBSD
@@ -63,6 +64,7 @@
 #include <iprt/assert.h>
 #include <iprt/critsect.h>
 #include <iprt/cidr.h>
+#include <iprt/ctype.h>
 #include <iprt/file.h>
 #include <limits.h>
 #include <iprt/mem.h>
@@ -98,6 +100,21 @@
 
 #define IPV4_MAX_MTU 65521
 #define IPV4_MIN_MTU 68
+/** Number of recent diagnostic events kept for the debugger info item. */
+#define DRVNAT_DIAG_EVENT_COUNT 64
+/** Maximum length of one recent diagnostic event. */
+#define DRVNAT_DIAG_EVENT_MSG_MAX 160
+/** Number of port-forwarding rules tracked for diagnostic output. */
+#define DRVNAT_DIAG_PF_COUNT 64
+
+#ifdef DEBUG
+# define DRVNAT_DIAG_COUNTER_INC(a_pCounter)      ASMAtomicIncU64(a_pCounter)
+# define DRVNAT_DIAG_COUNTER_ADD(a_pCounter, a_u) ASMAtomicAddU64(a_pCounter, (uint64_t)(a_u))
+#else
+/** NAT diagnostic counters are debug-build only. */
+# define DRVNAT_DIAG_COUNTER_INC(a_pCounter)      do { } while (0)
+# define DRVNAT_DIAG_COUNTER_ADD(a_pCounter, a_u) do { } while (0)
+#endif
 
 
 /*********************************************************************************************************************************
@@ -118,6 +135,144 @@ typedef struct slirpTimer
     /** Opaque object passed to callback. */
     void *opaque;
 } SlirpTimer;
+
+/** A recent NAT diagnostic event. */
+typedef struct DRVNATDIAGEVENT
+{
+    /** Event timestamp, from RTTimeMilliTS. */
+    uint64_t msTimestamp;
+    /** Human-readable event text. */
+    char     szMsg[DRVNAT_DIAG_EVENT_MSG_MAX];
+} DRVNATDIAGEVENT;
+
+/** Port-forwarding rule as applied to libslirp, for diagnostic output. */
+typedef struct DRVNATDIAGPF
+{
+    /** Whether this entry is in use. */
+    bool           fInUse;
+    /** Whether this is UDP, otherwise TCP. */
+    bool           fUdp;
+    /** Host bind address. */
+    struct in_addr HostIp;
+    /** Host bind port. */
+    uint16_t       u16HostPort;
+    /** Guest target address. */
+    struct in_addr GuestIp;
+    /** Guest target port. */
+    uint16_t       u16GuestPort;
+} DRVNATDIAGPF;
+
+#ifdef DEBUG
+/** NAT diagnostic counters for debugger info output. */
+typedef struct DRVNATDIAGCOUNTERS
+{
+    /** Frames submitted by the guest to libslirp. */
+    volatile uint64_t cGuestToNatFrames;
+    /** Bytes submitted by the guest to libslirp. */
+    volatile uint64_t cbGuestToNat;
+    /** Frames queued by libslirp for delivery to the guest. */
+    volatile uint64_t cNatToGuestFrames;
+    /** Bytes queued by libslirp for delivery to the guest. */
+    volatile uint64_t cbNatToGuest;
+    /** Frames dropped because the link was down. */
+    volatile uint64_t cDropLinkDown;
+    /** Packets/frames dropped because a NAT/RX thread was not running. */
+    volatile uint64_t cDropNatThreadDown;
+    /** Oversized guest frames rejected before reaching libslirp. */
+    volatile uint64_t cDropOversized;
+    /** Guest GSO frames rejected because the GSO descriptor was invalid. */
+    volatile uint64_t cDropInvalidGso;
+    /** Queueing failures on the NAT or RX request queues. */
+    volatile uint64_t cQueueFailures;
+    /** Successful wakeups sent to the NAT thread. */
+    volatile uint64_t cWakeupsSent;
+    /** Failed wakeups sent to the NAT thread. */
+    volatile uint64_t cWakeupFailures;
+    /** Successful port-forward additions. */
+    volatile uint64_t cPortForwardAddSuccesses;
+    /** Failed port-forward additions. */
+    volatile uint64_t cPortForwardAddFailures;
+    /** Successful port-forward removals. */
+    volatile uint64_t cPortForwardRemoveSuccesses;
+    /** Failed port-forward removals. */
+    volatile uint64_t cPortForwardRemoveFailures;
+    /** DNS update notifications received. */
+    volatile uint64_t cDnsUpdates;
+    /** IPv4 DNS fallbacks to the libslirp proxy. */
+    volatile uint64_t cDnsIpv4Fallbacks;
+    /** IPv6 DNS fallbacks to the libslirp proxy. */
+    volatile uint64_t cDnsIpv6Fallbacks;
+    /** Libslirp guest-error callbacks. */
+    volatile uint64_t cGuestErrors;
+} DRVNATDIAGCOUNTERS;
+#endif
+
+/** NAT diagnostic state for debugger info output. */
+typedef struct DRVNATDIAG
+{
+    /** Configured IPv4 network address. */
+    RTNETADDRIPV4          Ipv4Network;
+    /** Configured IPv4 network mask. */
+    RTNETADDRIPV4          Ipv4Netmask;
+    /** Virtual host/gateway IPv4 address. */
+    struct in_addr         Ipv4Host;
+    /** DHCP start IPv4 address. */
+    struct in_addr         Ipv4DhcpStart;
+    /** Virtual IPv4 nameserver address. */
+    struct in_addr         Ipv4NameServer;
+    /** Configured IPv6 prefix. */
+    struct in6_addr        Ipv6Prefix;
+    /** Configured virtual IPv6 host/gateway address. */
+    struct in6_addr        Ipv6Host;
+    /** Configured virtual IPv6 nameserver address. */
+    struct in6_addr        Ipv6NameServer;
+    /** Configured IPv6 prefix length. */
+    uint8_t                bIpv6PrefixLen;
+    /** Configured interface MTU. */
+    uint32_t               u32Mtu;
+    /** Configured interface MRU. */
+    uint32_t               u32Mru;
+    /** Whether localhost is reachable from the guest. */
+    bool                   fLocalhostReachable;
+    /** Whether broadcast forwarding is enabled. */
+    bool                   fForwardBroadcast;
+    /** Whether TFTP was enabled. */
+    bool                   fTftpEnabled;
+    /** Whether an outbound bind address was configured. */
+    bool                   fBindIp;
+    /** Configured outbound bind IPv4 address. */
+    RTNETADDRIPV4          BindIp;
+    /** Configured listen backlog. */
+    int                    iSoMaxConn;
+#ifdef DEBUG
+    /** Diagnostic counters, debug builds only to avoid hot-path overhead. */
+    DRVNATDIAGCOUNTERS     Counters;
+#endif
+    /** Last DNS update timestamp, from RTTimeMilliTS. */
+    uint64_t               msDnsLastUpdate;
+    /** Last DNS domain name. */
+    char                   szDnsDomainName[256];
+    /** Last DNS update search-domain count. */
+    uint32_t               cDnsSearchDomains;
+    /** Last DNS update configured IPv4 nameserver count. */
+    uint32_t               cDnsIpv4NameServersConfigured;
+    /** Last DNS update accepted IPv4 nameserver count. */
+    uint32_t               cDnsIpv4NameServersAccepted;
+    /** Whether the last IPv4 DNS update fell back to the libslirp proxy. */
+    bool                   fDnsIpv4Fallback;
+    /** Last DNS update configured IPv6 nameserver count. */
+    uint32_t               cDnsIpv6NameServersConfigured;
+    /** Last DNS update accepted IPv6 nameserver count. */
+    uint32_t               cDnsIpv6NameServersAccepted;
+    /** Whether the last IPv6 DNS update fell back to the libslirp proxy. */
+    bool                   fDnsIpv6Fallback;
+    /** Active port-forwarding rules. */
+    DRVNATDIAGPF           aPf[DRVNAT_DIAG_PF_COUNT];
+    /** Recent event ring. */
+    DRVNATDIAGEVENT        aEvents[DRVNAT_DIAG_EVENT_COUNT];
+    /** Next event slot. */
+    volatile uint32_t      iEvent;
+} DRVNATDIAG;
 
 /**
  * NAT network transport driver instance data.
@@ -197,6 +352,8 @@ typedef struct DRVNAT
     SlirpTimer *pTimerHead;
     /** Flag from Main API that determines if we pass search domain via DHCP */
     bool fPassDomain;
+    /** Diagnostic state for debugger info output. */
+    DRVNATDIAG Diag;
 } DRVNAT;
 AssertCompileMemberAlignment(DRVNAT, StatNATRecvWakeups, 8);
 /** Pointer to the NAT driver instance data. */
@@ -207,6 +364,7 @@ typedef DRVNAT *PDRVNAT;
 *   Internal Functions                                                                                                           *
 *********************************************************************************************************************************/
 static void drvNATNotifyNATThread(PDRVNAT pThis, const char *pszWho);
+static void drvNATDiagEvent(PDRVNAT pThis, const char *pszFormat, ...) RT_IPRT_FORMAT_ATTR(2, 3);
 static int  drvNATTimersAdjustTimeoutDown(PDRVNAT pThis, int cMsTimeout);
 static void drvNATTimersRunExpired(PDRVNAT pThis);
 static DECLCALLBACK(int) drvNAT_AddPollCb(slirp_os_socket hFd, int iEvents, void *opaque);
@@ -215,6 +373,158 @@ static DECLCALLBACK(int) drvNAT_GetREventsCb(int idx, void *opaque);
 static DECLCALLBACK(int) drvNATNotifyApplyPortForwardCommand(PDRVNAT pThis, bool fRemove, bool fUdp, const char *pszHostIp,
                                                              uint16_t u16HostPort, const char *pszGuestIp, uint16_t u16GuestPort);
 
+
+/**
+ * Adds an entry to the recent diagnostic event ring.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pszFormat   Format string.
+ * @param   ...         Format arguments.
+ *
+ * @thread  any
+ */
+static void drvNATDiagEvent(PDRVNAT pThis, const char *pszFormat, ...)
+{
+    if (!pThis)
+        return;
+
+    uint32_t const iEvent = ASMAtomicIncU32(&pThis->Diag.iEvent) - 1;
+    DRVNATDIAGEVENT * const pEvent = &pThis->Diag.aEvents[iEvent % DRVNAT_DIAG_EVENT_COUNT];
+    pEvent->msTimestamp = RTTimeMilliTS();
+
+    va_list va;
+    va_start(va, pszFormat);
+    RTStrPrintfV(pEvent->szMsg, sizeof(pEvent->szMsg), pszFormat, va);
+    va_end(va);
+}
+
+
+/**
+ * Checks whether the DBGF info argument contains the given section name.
+ *
+ * @returns true if present, false if not.
+ * @param   pszArgs     Info argument string, optional.
+ * @param   pszSection  Section name to look for.
+ */
+static bool drvNATInfoHasSection(const char *pszArgs, const char *pszSection)
+{
+    if (!pszArgs || !*pszArgs)
+        return false;
+
+    size_t const cchSection = strlen(pszSection);
+    const char *pszCur = pszArgs;
+    while (*pszCur)
+    {
+        while (RT_C_IS_SPACE(*pszCur) || *pszCur == ',' || *pszCur == ';' || *pszCur == '|')
+            pszCur++;
+
+        const char * const pszStart = pszCur;
+        while (*pszCur && !RT_C_IS_SPACE(*pszCur) && *pszCur != ',' && *pszCur != ';' && *pszCur != '|')
+            pszCur++;
+
+        if (   (size_t)(pszCur - pszStart) == cchSection
+            && RTStrNICmpAscii(pszStart, pszSection, cchSection) == 0)
+            return true;
+    }
+
+    return false;
+}
+
+
+/**
+ * Checks whether a DBGF info argument string is empty or only contains separators.
+ *
+ * @returns true if empty, false if not.
+ * @param   pszArgs     Info argument string, optional.
+ */
+static bool drvNATInfoArgsAreEmpty(const char *pszArgs)
+{
+    if (!pszArgs)
+        return true;
+
+    while (*pszArgs)
+    {
+        if (!RT_C_IS_SPACE(*pszArgs) && *pszArgs != ',' && *pszArgs != ';' && *pszArgs != '|')
+            return false;
+        pszArgs++;
+    }
+
+    return true;
+}
+
+
+/**
+ * Converts link state to a stable diagnostic string.
+ *
+ * @returns Link-state string.
+ * @param   enmLinkState    The link state.
+ */
+static const char *drvNATLinkStateName(PDMNETWORKLINKSTATE enmLinkState)
+{
+    switch (enmLinkState)
+    {
+        case PDMNETWORKLINKSTATE_UP:          return "up";
+        case PDMNETWORKLINKSTATE_DOWN:        return "down";
+        case PDMNETWORKLINKSTATE_DOWN_RESUME: return "down-resume";
+        case PDMNETWORKLINKSTATE_INVALID:     return "invalid";
+        default:                              return "unknown";
+    }
+}
+
+
+/**
+ * Updates the diagnostic copy of active port-forwarding rules.
+ *
+ * @param   pThis           The NAT instance.
+ * @param   fRemove         Whether a rule is being removed.
+ * @param   fUdp            Whether this is UDP, otherwise TCP.
+ * @param   HostIp          Host bind address.
+ * @param   u16HostPort     Host bind port.
+ * @param   GuestIp         Guest target address.
+ * @param   u16GuestPort    Guest target port.
+ */
+static void drvNATDiagPortForwardUpdate(PDRVNAT pThis, bool fRemove, bool fUdp, struct in_addr HostIp, uint16_t u16HostPort,
+                                        struct in_addr GuestIp, uint16_t u16GuestPort)
+{
+    if (fRemove)
+    {
+        for (uint32_t i = 0; i < RT_ELEMENTS(pThis->Diag.aPf); i++)
+            if (   pThis->Diag.aPf[i].fInUse
+                && pThis->Diag.aPf[i].fUdp == fUdp
+                && pThis->Diag.aPf[i].HostIp.s_addr == HostIp.s_addr
+                && pThis->Diag.aPf[i].u16HostPort == u16HostPort)
+            {
+                pThis->Diag.aPf[i].fInUse = false;
+                return;
+            }
+        return;
+    }
+
+    for (uint32_t i = 0; i < RT_ELEMENTS(pThis->Diag.aPf); i++)
+        if (   pThis->Diag.aPf[i].fInUse
+            && pThis->Diag.aPf[i].fUdp == fUdp
+            && pThis->Diag.aPf[i].HostIp.s_addr == HostIp.s_addr
+            && pThis->Diag.aPf[i].u16HostPort == u16HostPort)
+        {
+            pThis->Diag.aPf[i].GuestIp      = GuestIp;
+            pThis->Diag.aPf[i].u16GuestPort = u16GuestPort;
+            return;
+        }
+
+    for (uint32_t i = 0; i < RT_ELEMENTS(pThis->Diag.aPf); i++)
+        if (!pThis->Diag.aPf[i].fInUse)
+        {
+            pThis->Diag.aPf[i].fInUse       = true;
+            pThis->Diag.aPf[i].fUdp         = fUdp;
+            pThis->Diag.aPf[i].HostIp       = HostIp;
+            pThis->Diag.aPf[i].u16HostPort  = u16HostPort;
+            pThis->Diag.aPf[i].GuestIp      = GuestIp;
+            pThis->Diag.aPf[i].u16GuestPort = u16GuestPort;
+            return;
+        }
+
+    drvNATDiagEvent(pThis, "port-forward diagnostic table full; newest rule not tracked");
+}
 
 
 /*
@@ -337,6 +647,7 @@ static DECLCALLBACK(void) drvNATSendWorker(PDRVNAT pThis, PPDMSCATTERGATHER pSgB
 
     if (pThis->enmLinkState != PDMNETWORKLINKSTATE_UP)
     {
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropLinkDown);
         drvNATFreeSgBuf(pThis, pSgBuf);
         LogFlowFuncLeave();
         return;
@@ -348,6 +659,8 @@ static DECLCALLBACK(void) drvNATSendWorker(PDRVNAT pThis, PPDMSCATTERGATHER pSgB
          * A normal frame.
          */
         LogFlowFunc(("Normal Frame -> pvAllocator=%p LB %#zx\n", pSgBuf->pvAllocator, pSgBuf->cbUsed));
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cGuestToNatFrames);
+        DRVNAT_DIAG_COUNTER_ADD(&pThis->Diag.Counters.cbGuestToNat, (uint64_t)pSgBuf->cbUsed);
         slirp_input(pThis->pSlirp, (uint8_t const *)pSgBuf->pvAllocator, (int)pSgBuf->cbUsed);
         drvNATFreeSgBuf(pThis, pSgBuf);
         LogFlowFuncLeave();
@@ -379,9 +692,14 @@ static DECLCALLBACK(void) drvNATSendWorker(PDRVNAT pThis, PPDMSCATTERGATHER pSgB
 
             memcpy(&pbSeg[cbHdrs], &pbFrame[offPayload], cbPayload);
 
-            slirp_input(pThis->pSlirp, pbSeg, (int)(cbPayload + cbHdrs));
+            size_t const cbSeg = cbPayload + cbHdrs;
+            DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cGuestToNatFrames);
+            DRVNAT_DIAG_COUNTER_ADD(&pThis->Diag.Counters.cbGuestToNat, (uint64_t)cbSeg);
+            slirp_input(pThis->pSlirp, pbSeg, (int)cbSeg);
         }
     }
+    else
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropInvalidGso);
 
     drvNATFreeSgBuf(pThis, pSgBuf);
     LogFlowFuncLeave();
@@ -420,6 +738,7 @@ static DECLCALLBACK(int) drvNATNetworkUp_AllocBuf(PPDMINETWORKUP pInterface, siz
      */
     if (pThis->pSlirpThread->enmState != PDMTHREADSTATE_RUNNING)
     {
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropNatThreadDown);
         Log(("drvNATNetowrkUp_AllocBuf: returns VERR_NET_DOWN\n"));
         return VERR_NET_DOWN;
     }
@@ -437,6 +756,7 @@ static DECLCALLBACK(int) drvNATNetworkUp_AllocBuf(PPDMINETWORKUP pInterface, siz
          */
         if (cbMin >= DRVNAT_MAXFRAMESIZE)
         {
+            DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropOversized);
             Log(("drvNATNetowrkUp_AllocBuf: drops over-sized frame (%u bytes), returns VERR_INVALID_PARAMETER\n",
                  cbMin));
             RTMemFree(pSgBuf);
@@ -461,6 +781,7 @@ static DECLCALLBACK(int) drvNATNetworkUp_AllocBuf(PPDMINETWORKUP pInterface, siz
          */
         if (pGso->cbHdrsTotal + pGso->cbMaxSeg >= DRVNAT_MAXFRAMESIZE)
         {
+            DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropOversized);
             Log(("drvNATNetowrkUp_AllocBuf: drops over-sized frame (%u bytes), returns VERR_INVALID_PARAMETER\n",
                  pGso->cbHdrsTotal + pGso->cbMaxSeg));
             RTMemFree(pSgBuf);
@@ -531,7 +852,12 @@ static DECLCALLBACK(int) drvNATNetworkUp_SendBuf(PPDMINETWORKUP pInterface, PPDM
         rc = VERR_NET_NO_BUFFER_SPACE;
     }
     else
+    {
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropNatThreadDown);
         rc = VERR_NET_DOWN;
+    }
+    if (rc == VERR_NET_NO_BUFFER_SPACE)
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cQueueFailures);
     drvNATFreeSgBuf(pThis, pSgBuf);
     LogFlowFunc(("leave rc=%Rrc\n", rc));
     return rc;
@@ -561,9 +887,13 @@ static void drvNATNotifyNATThread(PDRVNAT pThis, const char *pszWho)
     {
         /* Count how many bites we send down the socket */
         ASMAtomicIncU64(&pThis->cbWakeupNotifs);
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cWakeupsSent);
     }
     else
+    {
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cWakeupFailures);
         Log4(("Notify NAT Thread Error %d\n", WSAGetLastError()));
+    }
 #else
     /* kick poll() */
     size_t cbIgnored;
@@ -573,7 +903,10 @@ static void drvNATNotifyNATThread(PDRVNAT pThis, const char *pszWho)
     {
         /* Count how many bites we send down the socket */
         ASMAtomicIncU64(&pThis->cbWakeupNotifs);
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cWakeupsSent);
     }
+    else
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cWakeupFailures);
 #endif
 }
 
@@ -603,11 +936,13 @@ static DECLCALLBACK(void) drvNATNotifyLinkChangedWorker(PDRVNAT pThis, PDMNETWOR
     {
         case PDMNETWORKLINKSTATE_UP:
             LogRel(("NAT: Link up\n"));
+            drvNATDiagEvent(pThis, "link up");
             break;
 
         case PDMNETWORKLINKSTATE_DOWN:
         case PDMNETWORKLINKSTATE_DOWN_RESUME:
             LogRel(("NAT: Link down\n"));
+            drvNATDiagEvent(pThis, "link down (%s)", drvNATLinkStateName(enmLinkState));
             break;
 
         default:
@@ -810,23 +1145,547 @@ static DECLCALLBACK(void *) drvNATQueryInterface(PPDMIBASE pInterface, const cha
 }
 
 /**
+ * Prints NAT debugger-info help.
+ *
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoHelp(PCDBGFINFOHLP pHlp)
+{
+    pHlp->pfnPrintf(pHlp,
+                    "NAT info arguments:\n"
+                    "  help           Show this help.\n"
+                    "  summary   | s  Show configuration and thread/link summary.\n"
+                    "  flows     | f  Show libslirp TCP/UDP/ICMP connection state.\n"
+                    "  flowsr    | fr Show libslirp TCP/UDP/ICMP connection state with destination reverse DNS.\n"
+                    "  neighbors | n  Show libslirp ARP/NDP neighbor state.\n"
+                    "  pf             Show VirtualBox-tracked active port-forwarding rules.\n"
+                    "  counters  | c  Show diagnostic counters (debug builds only).\n"
+                    "  dns            Show DNS update/proxy state.\n"
+                    "  poll      | p  Show poll/wakeup state.\n"
+                    "  timers    | t  Show libslirp timer state.\n"
+                    "  events    | e  Show recent NAT diagnostic events.\n"
+                    "  all            Show all diagnostic sections.\n");
+}
+
+
+/**
+ * Prints NAT summary information.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoSummary(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    char szIpv6Prefix[INET6_ADDRSTRLEN] = "";
+    char szIpv6Host[INET6_ADDRSTRLEN] = "";
+    char szIpv6NameServer[INET6_ADDRSTRLEN] = "";
+    inet_ntop(AF_INET6, &pThis->Diag.Ipv6Prefix, szIpv6Prefix, sizeof(szIpv6Prefix));
+    inet_ntop(AF_INET6, &pThis->Diag.Ipv6Host, szIpv6Host, sizeof(szIpv6Host));
+    inet_ntop(AF_INET6, &pThis->Diag.Ipv6NameServer, szIpv6NameServer, sizeof(szIpv6NameServer));
+
+    pHlp->pfnPrintf(pHlp,
+                    "NAT summary:\n"
+                    "  libslirp:             %s\n"
+                    "  link-state:           %s (wanted %s)\n"
+                    "  NAT thread state:     %d\n"
+                    "  RX thread state:      %d\n"
+                    "  in-flight RX packets: %u\n"
+                    "  IPv4 network:         %RTnaipv4/%RTnaipv4\n"
+                    "  IPv4 host/gateway:    %RTnaipv4\n"
+                    "  IPv4 DHCP start:      %RTnaipv4\n"
+                    "  IPv4 DNS proxy:       %RTnaipv4\n"
+                    "  IPv6 prefix:          %s/%u\n"
+                    "  IPv6 host/gateway:    %s\n"
+                    "  IPv6 DNS proxy:       %s\n"
+                    "  MTU/MRU:              %u/%u\n"
+                    "  localhost reachable:  %RTbool\n"
+                    "  forward broadcast:    %RTbool\n"
+                    "  pass domain:          %RTbool\n"
+                    "  TFTP enabled:         %RTbool\n"
+                    "  outbound bind IPv4:   %s%RTnaipv4\n"
+                    "  SO max connection:    %d\n",
+                    slirp_version_string(),
+                    drvNATLinkStateName(pThis->enmLinkState), drvNATLinkStateName(pThis->enmLinkStateWant),
+                    pThis->pSlirpThread ? pThis->pSlirpThread->enmState : -1,
+                    pThis->pRecvThread ? pThis->pRecvThread->enmState : -1,
+                    ASMAtomicReadU32(&pThis->cPkts),
+                    pThis->Diag.Ipv4Network.u, pThis->Diag.Ipv4Netmask.u,
+                    pThis->Diag.Ipv4Host.s_addr, pThis->Diag.Ipv4DhcpStart.s_addr, pThis->Diag.Ipv4NameServer.s_addr,
+                    szIpv6Prefix[0] ? szIpv6Prefix : "<unknown>", pThis->Diag.bIpv6PrefixLen,
+                    szIpv6Host[0] ? szIpv6Host : "<unknown>", szIpv6NameServer[0] ? szIpv6NameServer : "<unknown>",
+                    pThis->Diag.u32Mtu, pThis->Diag.u32Mru,
+                    pThis->Diag.fLocalhostReachable, pThis->Diag.fForwardBroadcast, pThis->fPassDomain, pThis->Diag.fTftpEnabled,
+                    pThis->Diag.fBindIp ? "" : "<not configured> ", pThis->Diag.BindIp.u,
+                    pThis->Diag.iSoMaxConn);
+}
+
+
+/**
+ * Prints debug-build-only NAT diagnostic counters.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoCounters(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+#ifdef DEBUG
+    DRVNATDIAGCOUNTERS * const pCtr = &pThis->Diag.Counters;
+    pHlp->pfnPrintf(pHlp,
+                    "NAT diagnostic counters:\n"
+                    "  guest -> NAT:             %RU64 frames, %RU64 bytes\n"
+                    "  NAT -> guest:             %RU64 frames, %RU64 bytes\n"
+                    "  drops, link down:         %RU64\n"
+                    "  drops, thread down:       %RU64\n"
+                    "  drops, oversized:         %RU64\n"
+                    "  drops, invalid GSO:       %RU64\n"
+                    "  queue failures:           %RU64\n"
+                    "  NAT-thread wakeups:       %RU64 sent, %RU64 failed\n"
+                    "  port-forward add:         %RU64 ok, %RU64 failed\n"
+                    "  port-forward remove:      %RU64 ok, %RU64 failed\n"
+                    "  DNS updates:              %RU64\n"
+                    "  DNS fallback:             %RU64 IPv4, %RU64 IPv6\n"
+                    "  libslirp guest errors:    %RU64\n",
+                    ASMAtomicReadU64(&pCtr->cGuestToNatFrames), ASMAtomicReadU64(&pCtr->cbGuestToNat),
+                    ASMAtomicReadU64(&pCtr->cNatToGuestFrames), ASMAtomicReadU64(&pCtr->cbNatToGuest),
+                    ASMAtomicReadU64(&pCtr->cDropLinkDown), ASMAtomicReadU64(&pCtr->cDropNatThreadDown),
+                    ASMAtomicReadU64(&pCtr->cDropOversized), ASMAtomicReadU64(&pCtr->cDropInvalidGso),
+                    ASMAtomicReadU64(&pCtr->cQueueFailures),
+                    ASMAtomicReadU64(&pCtr->cWakeupsSent), ASMAtomicReadU64(&pCtr->cWakeupFailures),
+                    ASMAtomicReadU64(&pCtr->cPortForwardAddSuccesses), ASMAtomicReadU64(&pCtr->cPortForwardAddFailures),
+                    ASMAtomicReadU64(&pCtr->cPortForwardRemoveSuccesses), ASMAtomicReadU64(&pCtr->cPortForwardRemoveFailures),
+                    ASMAtomicReadU64(&pCtr->cDnsUpdates),
+                    ASMAtomicReadU64(&pCtr->cDnsIpv4Fallbacks), ASMAtomicReadU64(&pCtr->cDnsIpv6Fallbacks),
+                    ASMAtomicReadU64(&pCtr->cGuestErrors));
+#else
+    RT_NOREF(pThis);
+    pHlp->pfnPrintf(pHlp,
+                    "NAT diagnostic counters:\n"
+                    "  (only available in debug builds)\n");
+#endif
+}
+
+
+/**
+ * Prints DNS diagnostic state.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoDns(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    char szIpv6NameServer[INET6_ADDRSTRLEN] = "";
+    inet_ntop(AF_INET6, &pThis->Diag.Ipv6NameServer, szIpv6NameServer, sizeof(szIpv6NameServer));
+
+    pHlp->pfnPrintf(pHlp,
+                    "DNS state:\n"
+                    "  virtual IPv4 DNS proxy:       %RTnaipv4\n"
+                    "  virtual IPv6 DNS proxy:       %s\n"
+                    "  pass domain via DHCP:         %RTbool\n",
+                    pThis->Diag.Ipv4NameServer.s_addr,
+                    szIpv6NameServer[0] ? szIpv6NameServer : "<unknown>",
+                    pThis->fPassDomain);
+#ifdef DEBUG
+    pHlp->pfnPrintf(pHlp,
+                    "  updates:                      %RU64\n"
+                    "  IPv4 fallbacks:               %RU64\n"
+                    "  IPv6 fallbacks:               %RU64\n",
+                    ASMAtomicReadU64(&pThis->Diag.Counters.cDnsUpdates),
+                    ASMAtomicReadU64(&pThis->Diag.Counters.cDnsIpv4Fallbacks),
+                    ASMAtomicReadU64(&pThis->Diag.Counters.cDnsIpv6Fallbacks));
+#else
+    pHlp->pfnPrintf(pHlp, "  counters:                     <DEBUG builds only>\n");
+#endif
+
+    if (pThis->Diag.msDnsLastUpdate)
+        pHlp->pfnPrintf(pHlp,
+                        "  last update:                  %RU64 ms\n"
+                        "  last domain:                  %s\n"
+                        "  last search domains:          %u\n"
+                        "  last IPv4 nameservers:        %u configured, %u accepted, fallback %RTbool\n"
+                        "  last IPv6 nameservers:        %u configured, %u accepted, fallback %RTbool\n",
+                        pThis->Diag.msDnsLastUpdate,
+                        pThis->Diag.szDnsDomainName[0] ? pThis->Diag.szDnsDomainName : "<none>",
+                        pThis->Diag.cDnsSearchDomains,
+                        pThis->Diag.cDnsIpv4NameServersConfigured, pThis->Diag.cDnsIpv4NameServersAccepted,
+                        pThis->Diag.fDnsIpv4Fallback,
+                        pThis->Diag.cDnsIpv6NameServersConfigured, pThis->Diag.cDnsIpv6NameServersAccepted,
+                        pThis->Diag.fDnsIpv6Fallback);
+    else
+        pHlp->pfnPrintf(pHlp, "  last update:                  <none>\n");
+}
+
+
+/**
+ * Extracts the last IPv4 address token from a line of libslirp connection info.
+ *
+ * The last IPv4 token is the destination address in the current libslirp output.
+ *
+ * @returns true if an IPv4 address was found, false if not.
+ * @param   pszLine     The line to parse, not necessarily zero-terminated.
+ * @param   cchLine     The line length.
+ * @param   pszAddr     Where to return the address string.
+ * @param   cbAddr      Size of the output buffer.
+ */
+static bool drvNATInfoExtractDestIpv4(const char *pszLine, size_t cchLine, char *pszAddr, size_t cbAddr)
+{
+    bool fFound = false;
+    for (size_t off = 0; off < cchLine; )
+    {
+        while (   off < cchLine
+               && !RT_C_IS_DIGIT(pszLine[off]))
+            off++;
+
+        size_t const offStart = off;
+        while (   off < cchLine
+               && (RT_C_IS_DIGIT(pszLine[off]) || pszLine[off] == '.'))
+            off++;
+
+        size_t const cchToken = off - offStart;
+        if (   cchToken > 0
+            && cchToken < cbAddr
+            && memchr(&pszLine[offStart], '.', cchToken))
+        {
+            char szTmp[INET_ADDRSTRLEN];
+            memcpy(szTmp, &pszLine[offStart], cchToken);
+            szTmp[cchToken] = '\0';
+
+            struct in_addr Addr;
+            if (inet_pton(AF_INET, szTmp, &Addr) == 1)
+            {
+                RTStrCopy(pszAddr, cbAddr, szTmp);
+                fFound = true;
+            }
+        }
+    }
+
+    return fFound;
+}
+
+
+/**
+ * Reverse-resolves an IPv4 address for optional debugger output.
+ *
+ * @returns true if a host name was resolved, false if not.
+ * @param   pszAddr     IPv4 address string.
+ * @param   pszHost     Where to return the host name.
+ * @param   cbHost      Size of the output buffer.
+ */
+static bool drvNATInfoResolveIpv4(const char *pszAddr, char *pszHost, size_t cbHost)
+{
+    AssertReturn(cbHost > 0, false);
+    pszHost[0] = '\0';
+
+    struct sockaddr_in Addr;
+    RT_ZERO(Addr);
+    Addr.sin_family = AF_INET;
+    if (inet_pton(AF_INET, pszAddr, &Addr.sin_addr) != 1)
+        return false;
+
+    int const rc = getnameinfo((struct sockaddr *)&Addr, sizeof(Addr), pszHost, (socklen_t)cbHost,
+                               NULL /*pszService*/, 0 /*cbService*/, NI_NAMEREQD);
+    if (rc == 0 && pszHost[0])
+        return true;
+
+    pszHost[0] = '\0';
+    return false;
+}
+
+
+/**
+ * Prints libslirp connection information, optionally with destination names.
+ *
+ * @param   pHlp            Info helper callbacks.
+ * @param   pszInfo         Formatted libslirp connection info.
+ * @param   fResolveDest    Whether to reverse-resolve destination addresses.
+ */
+static void drvNATInfoPrintConnectionInfo(PCDBGFINFOHLP pHlp, const char *pszInfo, bool fResolveDest)
+{
+    if (!fResolveDest)
+    {
+        pHlp->pfnPrintf(pHlp, "%s", pszInfo);
+        return;
+    }
+
+    for (const char *pszLine = pszInfo; *pszLine; )
+    {
+        const char *pszEol = strchr(pszLine, '\n');
+        size_t const cchLine = pszEol ? (size_t)(pszEol - pszLine) : strlen(pszLine);
+        pHlp->pfnPrintf(pHlp, "%.*s", (int)cchLine, pszLine);
+
+        if (RTStrStr(pszLine, "Dest. Address"))
+            pHlp->pfnPrintf(pHlp, " Dest. Name");
+        else if (cchLine > 0)
+        {
+            char szAddr[INET_ADDRSTRLEN];
+            if (drvNATInfoExtractDestIpv4(pszLine, cchLine, szAddr, sizeof(szAddr)))
+            {
+                char szHost[256];
+                if (drvNATInfoResolveIpv4(szAddr, szHost, sizeof(szHost)))
+                    pHlp->pfnPrintf(pHlp, "  %s", szHost);
+                else
+                    pHlp->pfnPrintf(pHlp, "  <unresolved>");
+            }
+        }
+
+        if (!pszEol)
+            return;
+        pHlp->pfnPrintf(pHlp, "\n");
+        pszLine = pszEol + 1;
+    }
+}
+
+
+/**
+ * Prints libslirp connection information.
+ *
+ * @param   pThis           The NAT instance.
+ * @param   pHlp            Info helper callbacks.
+ * @param   fResolveDest    Whether to reverse-resolve destination addresses.
+ */
+static void drvNATInfoFlows(PDRVNAT pThis, PCDBGFINFOHLP pHlp, bool fResolveDest)
+{
+    pHlp->pfnPrintf(pHlp, "libslirp connection info%s:\n",
+                    fResolveDest ? " (destination reverse DNS enabled)" : "");
+    char *pszInfo = slirp_connection_info(pThis->pSlirp);
+    if (pszInfo)
+        drvNATInfoPrintConnectionInfo(pHlp, pszInfo, fResolveDest);
+    else
+        pHlp->pfnPrintf(pHlp, "  <unavailable>\n");
+}
+
+
+/**
+ * Prints libslirp neighbor information.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoNeighbors(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    pHlp->pfnPrintf(pHlp, "libslirp neighbor info:\n");
+    char *pszInfo = slirp_neighbor_info(pThis->pSlirp);
+    if (pszInfo)
+        pHlp->pfnPrintf(pHlp, "%s", pszInfo);
+    else
+        pHlp->pfnPrintf(pHlp, "  <unavailable>\n");
+}
+
+
+/**
+ * Prints VirtualBox-tracked port-forwarding rules.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoPortForwarding(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    pHlp->pfnPrintf(pHlp, "VirtualBox port-forwarding rules:\n");
+    pHlp->pfnPrintf(pHlp, "  Proto  Host address  Port  Guest address  Port\n");
+
+    uint32_t cRules = 0;
+    for (uint32_t i = 0; i < RT_ELEMENTS(pThis->Diag.aPf); i++)
+        if (pThis->Diag.aPf[i].fInUse)
+        {
+            pHlp->pfnPrintf(pHlp, "  %-5s  %RTnaipv4  %5u  %RTnaipv4  %5u\n",
+                            pThis->Diag.aPf[i].fUdp ? "UDP" : "TCP",
+                            pThis->Diag.aPf[i].HostIp.s_addr, pThis->Diag.aPf[i].u16HostPort,
+                            pThis->Diag.aPf[i].GuestIp.s_addr, pThis->Diag.aPf[i].u16GuestPort);
+            cRules++;
+        }
+
+    if (!cRules)
+        pHlp->pfnPrintf(pHlp, "  <none tracked>\n");
+}
+
+
+/**
+ * Prints poll/wakeup state.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoPoll(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    pHlp->pfnPrintf(pHlp,
+                    "Poll/wakeup state:\n"
+                    "  poll entries:          %u\n"
+                    "  poll capacity:         %u\n"
+                    "  pending wakeups:       %RU64\n",
+                    pThis->cSockets, pThis->uPollCap, ASMAtomicReadU64(&pThis->cbWakeupNotifs));
+
+    uint32_t const cEntries = RT_MIN(pThis->cSockets, pThis->uPollCap);
+    pHlp->pfnPrintf(pHlp, "  Idx  FD        Events  REvents\n");
+    for (uint32_t i = 0; i < cEntries; i++)
+    {
+#ifdef RT_OS_WINDOWS
+        pHlp->pfnPrintf(pHlp, "  %3u  %p  %#06x  %#07x\n", i, (void *)(uintptr_t)pThis->aPolls[i].fd,
+                        pThis->aPolls[i].events, pThis->aPolls[i].revents);
+#else
+        pHlp->pfnPrintf(pHlp, "  %3u  %-8d  %#06x  %#07x\n", i, pThis->aPolls[i].fd,
+                        pThis->aPolls[i].events, pThis->aPolls[i].revents);
+#endif
+    }
+}
+
+
+/**
+ * Prints timer state.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoTimers(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    uint32_t cTimers = 0;
+    uint32_t cActive = 0;
+    int64_t msNext = INT64_MAX;
+    int64_t const msNow = drvNAT_ClockGetNsCb(pThis) / RT_NS_1MS;
+
+    for (SlirpTimer *pTimer = pThis->pTimerHead; pTimer; pTimer = pTimer->next)
+    {
+        cTimers++;
+        if (pTimer->msExpire > 0)
+        {
+            cActive++;
+            if (pTimer->msExpire < msNext)
+                msNext = pTimer->msExpire;
+        }
+    }
+
+    pHlp->pfnPrintf(pHlp,
+                    "Timer state:\n"
+                    "  timers:        %u\n"
+                    "  active timers: %u\n",
+                    cTimers, cActive);
+    if (msNext != INT64_MAX)
+        pHlp->pfnPrintf(pHlp, "  next expiry:   %RI64 ms from now\n", msNext - msNow);
+    else
+        pHlp->pfnPrintf(pHlp, "  next expiry:   <none>\n");
+}
+
+
+/**
+ * Prints recent diagnostic events.
+ *
+ * @param   pThis       The NAT instance.
+ * @param   pHlp        Info helper callbacks.
+ */
+static void drvNATInfoEvents(PDRVNAT pThis, PCDBGFINFOHLP pHlp)
+{
+    uint32_t const iNext = ASMAtomicReadU32(&pThis->Diag.iEvent);
+    uint32_t const cEvents = RT_MIN(iNext, (uint32_t)DRVNAT_DIAG_EVENT_COUNT);
+
+    pHlp->pfnPrintf(pHlp, "Recent NAT events (newest first):\n");
+    if (!cEvents)
+    {
+        pHlp->pfnPrintf(pHlp, "  <none>\n");
+        return;
+    }
+
+    for (uint32_t i = 0; i < cEvents; i++)
+    {
+        DRVNATDIAGEVENT const * const pEvent = &pThis->Diag.aEvents[(iNext - 1 - i) % DRVNAT_DIAG_EVENT_COUNT];
+        if (pEvent->szMsg[0])
+            pHlp->pfnPrintf(pHlp, "  %RU64 ms: %s\n", pEvent->msTimestamp, pEvent->szMsg);
+    }
+}
+
+
+/**
  * Info handler.
  *
  * @param   pDrvIns     The PDM driver context.
  * @param   pHlp        Info helper callbacks.
- * @param   pszArgs     Unused.
+ * @param   pszArgs     Optional section list.
  *
  * @thread  any
  */
 static DECLCALLBACK(void) drvNATInfo(PPDMDRVINS pDrvIns, PCDBGFINFOHLP pHlp, const char *pszArgs)
 {
-    RT_NOREF(pszArgs);
     PDRVNAT pThis = PDMINS_2_DATA(pDrvIns, PDRVNAT);
-    pHlp->pfnPrintf(pHlp, "libslirp Connection Info:\n");
-    pHlp->pfnPrintf(pHlp, slirp_connection_info(pThis->pSlirp));
-    pHlp->pfnPrintf(pHlp, "libslirp Neighbor Info:\n");
-    pHlp->pfnPrintf(pHlp, slirp_neighbor_info(pThis->pSlirp));
-    pHlp->pfnPrintf(pHlp, "libslirp Version String: %s \n", slirp_version_string());
+
+    if (drvNATInfoHasSection(pszArgs, "help"))
+    {
+        drvNATInfoHelp(pHlp);
+        return;
+    }
+
+    bool const fAll = drvNATInfoArgsAreEmpty(pszArgs) || drvNATInfoHasSection(pszArgs, "all");
+    bool const fResolveDest =    drvNATInfoHasSection(pszArgs, "flowsr")
+                              || drvNATInfoHasSection(pszArgs, "fr");
+    bool       fAny = false;
+
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "s")
+        || drvNATInfoHasSection(pszArgs, "summary"))
+    {
+        drvNATInfoSummary(pThis, pHlp);
+        fAny = true;
+    }
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "pf"))
+    {
+        drvNATInfoPortForwarding(pThis, pHlp);
+        fAny = true;
+    }
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "c")
+        || drvNATInfoHasSection(pszArgs, "counter")
+        || drvNATInfoHasSection(pszArgs, "counters"))
+    {
+        drvNATInfoCounters(pThis, pHlp);
+        fAny = true;
+    }
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "d")
+        || drvNATInfoHasSection(pszArgs, "dns"))
+    {
+        drvNATInfoDns(pThis, pHlp);
+        fAny = true;
+    }
+    if (   fAll
+        || fResolveDest
+        || drvNATInfoHasSection(pszArgs, "f")
+        || drvNATInfoHasSection(pszArgs, "flows"))
+    {
+        drvNATInfoFlows(pThis, pHlp, fResolveDest);
+        fAny = true;
+    }
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "n")
+        || drvNATInfoHasSection(pszArgs, "neighbors")
+        || drvNATInfoHasSection(pszArgs, "neighbours"))
+    {
+        drvNATInfoNeighbors(pThis, pHlp);
+        fAny = true;
+    }
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "p")
+        || drvNATInfoHasSection(pszArgs, "poll"))
+    {
+        drvNATInfoPoll(pThis, pHlp);
+        fAny = true;
+    }
+    if (fAll
+        || drvNATInfoHasSection(pszArgs, "t")
+        || drvNATInfoHasSection(pszArgs, "timers"))
+    {
+        drvNATInfoTimers(pThis, pHlp);
+        fAny = true;
+    }
+    if (   fAll
+        || drvNATInfoHasSection(pszArgs, "e")
+        || drvNATInfoHasSection(pszArgs, "events"))
+    {
+        drvNATInfoEvents(pThis, pHlp);
+        fAny = true;
+    }
+
+    if (!fAny)
+    {
+        pHlp->pfnPrintf(pHlp, "Unknown NAT info argument: %s\n", pszArgs);
+        drvNATInfoHelp(pHlp);
+    }
 }
 
 /**
@@ -976,13 +1835,24 @@ static DECLCALLBACK(int) drvNATNotifyApplyPortForwardCommand(PDRVNAT pThis, bool
                                u16HostPort, guestIp, u16GuestPort);
     if (rc < 0)
     {
+        DRVNAT_DIAG_COUNTER_INC(fRemove ? &pThis->Diag.Counters.cPortForwardRemoveFailures
+                                : &pThis->Diag.Counters.cPortForwardAddFailures);
         LogRelFunc(("Port forward modify FAIL! Details: fRemove=%d, fUdp=%d, pszHostIp=%s, u16HostPort=%u, pszGuestIp=%s, u16GuestPort=%u\n",
                     fRemove, fUdp, pszHostIp, u16HostPort, pszGuestIp, u16GuestPort));
+        drvNATDiagEvent(pThis, "port-forward %s failed: %s %RTnaipv4:%u -> %RTnaipv4:%u",
+                        fRemove ? "remove" : "add", fUdp ? "UDP" : "TCP",
+                        hostIp.s_addr, u16HostPort, guestIp.s_addr, u16GuestPort);
         return PDMDrvHlpVMSetError(pThis->pDrvIns, VERR_NAT_REDIR_SETUP, RT_SRC_POS,
                                    N_("NAT#%d: configuration error: failed to set up redirection of %d to %d. Probably a conflict with existing services or other rules"),
                                    pThis->pDrvIns->iInstance, u16HostPort, u16GuestPort);
     }
 
+    DRVNAT_DIAG_COUNTER_INC(fRemove ? &pThis->Diag.Counters.cPortForwardRemoveSuccesses
+                            : &pThis->Diag.Counters.cPortForwardAddSuccesses);
+    drvNATDiagPortForwardUpdate(pThis, fRemove, fUdp, hostIp, u16HostPort, guestIp, u16GuestPort);
+    drvNATDiagEvent(pThis, "port-forward %s: %s %RTnaipv4:%u -> %RTnaipv4:%u",
+                    fRemove ? "removed" : "added", fUdp ? "UDP" : "TCP",
+                    hostIp.s_addr, u16HostPort, guestIp.s_addr, u16GuestPort);
     return VINF_SUCCESS;
 }
 
@@ -1027,9 +1897,21 @@ static DECLCALLBACK(int) drvNATAddRedirect(PPDMINETWORKNATCONFIG pInterface, boo
 static DECLCALLBACK(void) drvNATNotifyDnsChanged(PPDMINETWORKNATCONFIG pInterface, PCPDMINETWORKNATDNSCONFIG pDnsConf)
 {
     PDRVNAT const pThis = RT_FROM_MEMBER(pInterface, DRVNAT, INetworkNATCfg);
+    AssertPtrReturnVoid(pDnsConf);
     AssertReturnVoid(pThis->pSlirp);
 
     LogRel(("NAT: DNS settings changed, triggering update\n"));
+    DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDnsUpdates);
+    pThis->Diag.msDnsLastUpdate = RTTimeMilliTS();
+    RTStrCopy(pThis->Diag.szDnsDomainName, sizeof(pThis->Diag.szDnsDomainName), pDnsConf->szDomainName);
+    pThis->Diag.cDnsSearchDomains = (uint32_t)pDnsConf->cSearchDomains;
+    pThis->Diag.cDnsIpv4NameServersConfigured = (uint32_t)pDnsConf->cNameServers;
+    pThis->Diag.cDnsIpv4NameServersAccepted = 0;
+    pThis->Diag.fDnsIpv4Fallback = false;
+    pThis->Diag.cDnsIpv6NameServersConfigured = (uint32_t)pDnsConf->cIPv6NameServers;
+    pThis->Diag.cDnsIpv6NameServersAccepted = 0;
+    pThis->Diag.fDnsIpv6Fallback = false;
+    drvNATDiagEvent(pThis, "DNS settings changed");
 
     int rc = 0;
 
@@ -1067,13 +1949,18 @@ static DECLCALLBACK(void) drvNATNotifyDnsChanged(PPDMINETWORKNATCONFIG pInterfac
                 aIPv4Nameservers[uStoredNameservers].s_addr = tmpNameserver.u;
                 uStoredNameservers++;
                 LogRelMax(256, ("NAT DNS Update: Stored %RTnaipv4 as nameserver #%u\n", tmpNameserver, i));
+                drvNATDiagEvent(pThis, "DNS IPv4 nameserver accepted: %RTnaipv4", tmpNameserver.u);
             }
         }
 
+        pThis->Diag.cDnsIpv4NameServersAccepted = (uint32_t)uStoredNameservers;
         if (aIPv4Nameservers[0].s_addr == 0)
         {
+            pThis->Diag.fDnsIpv4Fallback = true;
+            DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDnsIpv4Fallbacks);
             LogRel(("Nameserver is either on 127/8 network or failed to obtain from host. "
                     "Falling back to libslirp DNS proxy.\n"));
+            drvNATDiagEvent(pThis, "DNS IPv4 fallback to libslirp proxy");
 
             /* Free the unused allocation before falling back. */
             RTMemFree(aIPv4Nameservers);
@@ -1090,6 +1977,7 @@ static DECLCALLBACK(void) drvNATNotifyDnsChanged(PPDMINETWORKNATCONFIG pInterfac
         else
         {
             LogRelMax(256, ("NAT DNS Update: Stored %u total IPv4 nameservers\n", uStoredNameservers));
+            drvNATDiagEvent(pThis, "DNS IPv4 nameservers active: %u", uStoredNameservers);
             slirp_set_RealNameservers(pThis->pSlirp, uStoredNameservers, aIPv4Nameservers);
         }
     }
@@ -1113,13 +2001,18 @@ static DECLCALLBACK(void) drvNATNotifyDnsChanged(PPDMINETWORKNATCONFIG pInterfac
 
             memcpy(&aIPv6Nameservers[uStoredNameservers6], &tmpNameserver, sizeof(RTNETADDRIPV6));
             LogRelMax(256, ("NAT DNS Update: Stored %RTnaipv6 as nameserver #%u\n", &tmpNameserver, (unsigned)uStoredNameservers6));
+            drvNATDiagEvent(pThis, "DNS IPv6 nameserver accepted: %RTnaipv6", &tmpNameserver);
             uStoredNameservers6++;
         }
 
+        pThis->Diag.cDnsIpv6NameServersAccepted = (uint32_t)uStoredNameservers6;
         if (uStoredNameservers6 == 0)
         {
+            pThis->Diag.fDnsIpv6Fallback = true;
+            DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDnsIpv6Fallbacks);
             LogRel(("Failed to obtain nameserver from host. "
                     "Falling back to libslirp DNS proxy for IPv6.\n"));
+            drvNATDiagEvent(pThis, "DNS IPv6 fallback to libslirp proxy");
 
             /* Free the unused allocation before falling back. */
             RTMemFree(aIPv6Nameservers);
@@ -1136,6 +2029,7 @@ static DECLCALLBACK(void) drvNATNotifyDnsChanged(PPDMINETWORKNATCONFIG pInterfac
         else
         {
             LogRelMax(256, ("NAT DNS Update: Stored %u total IPv6 nameservers\n", (unsigned)uStoredNameservers6));
+            drvNATDiagEvent(pThis, "DNS IPv6 nameservers active: %u", (unsigned)uStoredNameservers6);
             slirp_set_IPv6RealNameservers(pThis->pSlirp, uStoredNameservers6, aIPv6Nameservers);
         }
     }
@@ -1286,7 +2180,10 @@ static ssize_t drvNAT_SendPacketCb(const void *pvBuf, ssize_t cb, void *pvUser /
 
     /* Don't queue new requests when the NAT thread is about to stop. */
     if (pThis->pSlirpThread->enmState != PDMTHREADSTATE_RUNNING)
+    {
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cDropNatThreadDown);
         return -1;
+    }
 
     void * const pvNewBuf = RTMemDup(pvBuf, cb);
     AssertPtrReturn(pvNewBuf, -1);
@@ -1297,10 +2194,20 @@ static ssize_t drvNAT_SendPacketCb(const void *pvBuf, ssize_t cb, void *pvUser /
     ASMAtomicIncU32(&pThis->cPkts);
     int rc = RTReqQueueCallEx(pThis->hRecvReqQueue, NULL /*ppReq*/, 0 /*cMillies*/, RTREQFLAGS_VOID | RTREQFLAGS_NO_WAIT,
                               (PFNRT)drvNATRecvWorker, 3, pThis, pvNewBuf, cb);
-    AssertRCStmt(rc, RTMemFree(pvNewBuf));
+    if (RT_FAILURE(rc))
+    {
+        DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cQueueFailures);
+        drvNATDiagEvent(pThis, "RX queueing failed: cb=%zd rc=%Rrc", cb, rc);
+        STAM_COUNTER_INC(&pThis->StatQueuePktDropped);
+        ASMAtomicDecU32(&pThis->cPkts);
+        RTMemFree(pvNewBuf);
+        return -1;
+    }
 
     drvNATRecvWakeup(pThis->pDrvIns, pThis->pRecvThread);
 
+    DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cNatToGuestFrames);
+    DRVNAT_DIAG_COUNTER_ADD(&pThis->Diag.Counters.cbNatToGuest, (uint64_t)cb);
     STAM_COUNTER_INC(&pThis->StatQueuePktSent);
 
     LogFlowFuncLeave();
@@ -1320,7 +2227,10 @@ static void drvNAT_GuestErrorCb(const char *pszMsg, void *pvUser)
     /* Note! This is _just_ libslirp complaining about odd guest behaviour.
              It is nothing we need to create popup messages in the GUI about. */
     LogRelMax(250, ("NAT Guest Error: %s\n", pszMsg));
-    RT_NOREF(pvUser);
+    PDRVNAT const pThis = (PDRVNAT)pvUser;
+    AssertPtrReturnVoid(pThis);
+    DRVNAT_DIAG_COUNTER_INC(&pThis->Diag.Counters.cGuestErrors);
+    drvNATDiagEvent(pThis, "libslirp guest error: %s", pszMsg);
 }
 
 /**
@@ -1694,6 +2604,7 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
 
     rc = pDrvIns->pHlpR3->pfnCFGMQueryBoolDef(pCfg, "ForwardBroadcast", &slirpCfg.fForwardBroadcast, false);
     AssertLogRelRCReturn(rc, rc);
+    pThis->Diag.fForwardBroadcast = slirpCfg.fForwardBroadcast;
 
     /*
      * Keep default as true to preserve functionality for old VMs.
@@ -1702,6 +2613,8 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
     bool fEnableTFTP;
     rc = pDrvIns->pHlpR3->pfnCFGMQueryBoolDef(pCfg, "EnableTFTP", &fEnableTFTP, true);
     AssertLogRelRCReturn(rc, rc);
+
+    pThis->Diag.fTftpEnabled = fEnableTFTP;
 
     if (fEnableTFTP)
     {
@@ -1729,6 +2642,7 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
                                         "and at or below the maximum of %u.\n"),
                                     pDrvIns->iInstance, IPV4_MIN_MTU, IPV4_MAX_MTU);
     slirpCfg.if_mtu = (size_t)uTmpMtu;
+    pThis->Diag.u32Mtu = uTmpMtu;
 
     /** @todo r=jack: make this configurable with the right cfgm key, currently just using MTU */
     uint32_t uTmpMru = 0;
@@ -1741,14 +2655,17 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
                                         "and at or below the maximum of %u.\n"),
                                     pDrvIns->iInstance, IPV4_MIN_MTU, IPV4_MAX_MTU);
     slirpCfg.if_mru = uTmpMru;
+    pThis->Diag.u32Mru = uTmpMru;
 
     rc = pDrvIns->pHlpR3->pfnCFGMQueryBoolDef(pCfg, "LocalhostReachable", &slirpCfg.disable_host_loopback, false);
+    pThis->Diag.fLocalhostReachable = slirpCfg.disable_host_loopback;
     // Invert the input since the libslirp config is "disable" not "is reachable"
     slirpCfg.disable_host_loopback = !slirpCfg.disable_host_loopback;
     AssertLogRelRCReturn(rc, rc);
 
     rc = pDrvIns->pHlpR3->pfnCFGMQuerySIntDef(pCfg, "SoMaxConnection", &slirpCfg.iSoMaxConn, 10);
     AssertLogRelRCReturn(rc, rc);
+    pThis->Diag.iSoMaxConn = slirpCfg.iSoMaxConn;
 
     /* Generate a network address for this network card. */
     char szNetwork[32]; /* xxx.xxx.xxx.xxx/yy */
@@ -1769,18 +2686,23 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
 
     slirpCfg.vnetwork = RTNetIPv4AddrHEToInAddr(&Network);
     slirpCfg.vnetmask = RTNetIPv4AddrHEToInAddr(&Netmask);
+    pThis->Diag.Ipv4Network.u = slirpCfg.vnetwork.s_addr;
+    pThis->Diag.Ipv4Netmask.u = slirpCfg.vnetmask.s_addr;
 
     RTNETADDRIPV4 NetTemp = Network;
     NetTemp.u |= 2;  /* Usually 10.0.2.2 */
     slirpCfg.vhost       = RTNetIPv4AddrHEToInAddr(&NetTemp);
+    pThis->Diag.Ipv4Host = slirpCfg.vhost;
 
     NetTemp = Network;
     NetTemp.u |= 15; /* Usually 10.0.2.15 */
     slirpCfg.vdhcp_start = RTNetIPv4AddrHEToInAddr(&NetTemp);
+    pThis->Diag.Ipv4DhcpStart = slirpCfg.vdhcp_start;
 
     NetTemp = Network;
     NetTemp.u |= 3;  /* Usually 10.0.2.3 */
     slirpCfg.vnameserver = RTNetIPv4AddrHEToInAddr(&NetTemp);
+    pThis->Diag.Ipv4NameServer = slirpCfg.vnameserver;
 
     /* IPv6: Use the same prefix as the NAT Network default:
        [fd17:625c:f037:XXXX::/64] - RFC 4193 (ULA) Locally Assigned
@@ -1790,6 +2712,7 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
     inet_pton(AF_INET6, "fd17:625c:f037:0::2", &slirpCfg.vhost6);
     inet_pton(AF_INET6, "fd17:625c:f037:0::3", &slirpCfg.vnameserver6);
     slirpCfg.vprefix_len = 64;
+    pThis->Diag.bIpv6PrefixLen = slirpCfg.vprefix_len;
 
     /* Copy the middle of the IPv4 addresses to the IPv6 addresses. */
     slirpCfg.vprefix_addr6.s6_addr[6] = RT_BYTE2(slirpCfg.vhost.s_addr);
@@ -1798,6 +2721,9 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
     slirpCfg.vhost6.s6_addr[7]        = RT_BYTE3(slirpCfg.vhost.s_addr);
     slirpCfg.vnameserver6.s6_addr[6]  = RT_BYTE2(slirpCfg.vnameserver.s_addr);
     slirpCfg.vnameserver6.s6_addr[7]  = RT_BYTE3(slirpCfg.vnameserver.s_addr);
+    pThis->Diag.Ipv6Prefix     = slirpCfg.vprefix_addr6;
+    pThis->Diag.Ipv6Host       = slirpCfg.vhost6;
+    pThis->Diag.Ipv6NameServer = slirpCfg.vnameserver6;
 
     slirpCfg.vdnssearch = NULL;
     slirpCfg.vdomainname = NULL;
@@ -1817,6 +2743,8 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
         slirpCfg.outbound_addr->sin_addr = RTNetIPv4AddrToInAddr(&mOutboundAddr);
         slirpCfg.outbound_addr->sin_family = AF_INET;
         slirpCfg.outbound_addr->sin_port = 0;
+        pThis->Diag.fBindIp = true;
+        pThis->Diag.BindIp = mOutboundAddr;
     }
     else
         rc = VINF_SUCCESS;
@@ -1879,7 +2807,11 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
 
     char szTmp[128];
     RTStrPrintf(szTmp, sizeof(szTmp), "nat%d", pDrvIns->iInstance);
-    PDMDrvHlpDBGFInfoRegister(pDrvIns, szTmp, "NAT info.", drvNATInfo);
+    PDMDrvHlpDBGFInfoRegister(pDrvIns, szTmp,
+                               "NAT info. Accepts 'help' for more information.",
+                               drvNATInfo);
+    drvNATDiagEvent(pThis, "NAT diagnostics initialized: network %RTnaipv4/%RTnaipv4, MTU %u",
+                    pThis->Diag.Ipv4Network.u, pThis->Diag.Ipv4Netmask.u, pThis->Diag.u32Mtu);
 
 #ifdef VBOX_WITH_STATISTICS
 # define DRV_PROFILE_COUNTER(name, dsc)     REGISTER_COUNTER(name, pThis, STAMTYPE_PROFILE, STAMUNIT_TICKS_PER_CALL, dsc)
