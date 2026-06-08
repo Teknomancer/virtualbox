@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx.cpp 114232 2026-06-01 12:50:35Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx.cpp 114266 2026-06-08 15:03:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevSVGA3d - VMWare SVGA device, 3D parts - Common code for DX backend interface.
  */
@@ -134,6 +134,17 @@ void vmsvga3dDXInitContextMobData(SVGADXContextMobFormat *p)
         p->csuaViewIds[i] = SVGA3D_INVALID_ID;
 }
 
+DECLINLINE(void) dxPostDraw(PVMSVGA3DDXCONTEXT pDXContext)
+{
+    RT_ZERO(pDXContext->state.shader[0].shaderResources.au64Modified);
+    RT_ZERO(pDXContext->state.shader[1].shaderResources.au64Modified);
+    RT_ZERO(pDXContext->state.shader[2].shaderResources.au64Modified);
+    RT_ZERO(pDXContext->state.shader[3].shaderResources.au64Modified);
+    RT_ZERO(pDXContext->state.shader[4].shaderResources.au64Modified);
+    RT_ZERO(pDXContext->state.shader[5].shaderResources.au64Modified);
+    RT_ZERO(pDXContext->state.csuav.au64Modified);
+}
+
 /*
  *
  * Command handlers.
@@ -159,7 +170,7 @@ int vmsvga3dDXUnbindContext(PVGASTATECC pThisCC, uint32_t cid, SVGADXContextMobF
 }
 
 
-int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
+int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cidFrom, uint32_t cid)
 {
     int rc;
     PVMSVGAR3STATE const pSvgaR3State = pThisCC->svga.pSvgaR3State;
@@ -171,12 +182,21 @@ int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid)
     rc = vmsvga3dDXContextFromCid(p3dState, cid, &pDXContext);
     AssertRCReturn(rc, rc);
 
+    PVMSVGA3DDXCONTEXT pDXContextFrom;
+    if (cidFrom != SVGA3D_INVALID_ID)
+    {
+        rc = vmsvga3dDXContextFromCid(p3dState, cidFrom, &pDXContextFrom);
+        AssertRCReturn(rc, rc);
+    }
+    else
+        pDXContextFrom = NULL;
+
 #ifdef DX_STATE_TRACKER
     pDXContext->u64ContextFlags |= DX_CTX_F_STATE_ALL;
 #endif
 
     /* Notify the host backend that context is about to be switched. */
-    rc = pSvgaR3State->pFuncsDX->pfnDXSwitchContext(pThisCC, pDXContext);
+    rc = pSvgaR3State->pFuncsDX->pfnDXSwitchContext(pThisCC, pDXContextFrom, pDXContext);
     if (rc == VINF_NOT_IMPLEMENTED || RT_FAILURE(rc))
         return rc;
 
@@ -447,6 +467,9 @@ int vmsvga3dDXDestroyContext(PVGASTATECC pThisCC, uint32_t cid)
     RT_ZERO(*pDXContext);
     pDXContext->cid = SVGA3D_INVALID_ID;
 
+    if (pSvgaR3State->idDXContextCurrent == cid)
+        pSvgaR3State->idDXContextCurrent = SVGA3D_INVALID_ID;
+
     return rc;
 }
 
@@ -555,11 +578,35 @@ int vmsvga3dDXSetShaderResources(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA
     RT_UNTRUSTED_VALIDATED_FENCE();
 
     uint32_t const idxShaderState = pCmd->type - SVGA3D_SHADERTYPE_MIN;
+#ifndef DX_STATE_TRACKER
     for (uint32_t i = 0; i < cShaderResourceViewId; ++i)
     {
         SVGA3dShaderResourceViewId const shaderResourceViewId = paShaderResourceViewId[i];
         pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[pCmd->startView + i] = shaderResourceViewId;
     }
+#else
+    bool fModified = false;
+    int idxLastNotNull = -1;
+    for (uint32_t i = 0; i < cShaderResourceViewId; ++i)
+    {
+        SVGA3dShaderResourceViewId const shaderResourceViewId = paShaderResourceViewId[i];
+        if (pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[pCmd->startView + i] != shaderResourceViewId)
+        {
+            pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[pCmd->startView + i] = shaderResourceViewId;
+            fModified = true;
+            ASMBitSet(pDXContext->state.shader[idxShaderState].shaderResources.au64Modified, pCmd->startView + i);
+        }
+        if (shaderResourceViewId != SVGA3D_INVALID_ID)
+            idxLastNotNull = (int)i;
+    }
+
+    uint32_t const cBound = pCmd->startView + (uint32_t)idxLastNotNull + 1;
+    pDXContext->state.shader[idxShaderState].shaderResources.cMaxBound =
+        RT_MAX(cBound, pDXContext->state.shader[idxShaderState].shaderResources.cMaxBound);
+
+    if (fModified)
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SRV_VS << idxShaderState;
+#endif
 
     rc = pSvgaR3State->pFuncsDX->pfnDXSetShaderResources(pThisCC, pDXContext, pCmd->startView, pCmd->type, cShaderResourceViewId, paShaderResourceViewId);
     return rc;
@@ -683,6 +730,7 @@ int vmsvga3dDXDraw(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDXDraw co
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDraw(pThisCC, pDXContext, pCmd->vertexCount, pCmd->startVertexLocation);
+    dxPostDraw(pDXContext);
 #ifdef DUMP_BITMAPS
     vmsvga3dDXDrawDumpRenderTargets(pThisCC, pDXContext);
 #endif
@@ -703,6 +751,7 @@ int vmsvga3dDXDrawIndexed(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDX
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDrawIndexed(pThisCC, pDXContext, pCmd->indexCount, pCmd->startIndexLocation, pCmd->baseVertexLocation);
+    dxPostDraw(pDXContext);
 #ifdef DUMP_BITMAPS
     vmsvga3dDXDrawDumpRenderTargets(pThisCC, pDXContext);
 #endif
@@ -724,6 +773,7 @@ int vmsvga3dDXDrawInstanced(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmd
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDrawInstanced(pThisCC, pDXContext,
              pCmd->vertexCountPerInstance, pCmd->instanceCount, pCmd->startVertexLocation, pCmd->startInstanceLocation);
+    dxPostDraw(pDXContext);
 #ifdef DUMP_BITMAPS
     vmsvga3dDXDrawDumpRenderTargets(pThisCC, pDXContext);
 #endif
@@ -745,6 +795,7 @@ int vmsvga3dDXDrawIndexedInstanced(PVGASTATECC pThisCC, uint32_t idDXContext, SV
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDrawIndexedInstanced(pThisCC, pDXContext,
              pCmd->indexCountPerInstance, pCmd->instanceCount, pCmd->startIndexLocation, pCmd->baseVertexLocation, pCmd->startInstanceLocation);
+    dxPostDraw(pDXContext);
 #ifdef DUMP_BITMAPS
     vmsvga3dDXDrawDumpRenderTargets(pThisCC, pDXContext);
 #endif
@@ -765,6 +816,7 @@ int vmsvga3dDXDrawAuto(PVGASTATECC pThisCC, uint32_t idDXContext)
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDrawAuto(pThisCC, pDXContext);
+    dxPostDraw(pDXContext);
 #ifdef DUMP_BITMAPS
     vmsvga3dDXDrawDumpRenderTargets(pThisCC, pDXContext);
 #endif
@@ -1661,6 +1713,27 @@ int vmsvga3dDXDefineShaderResourceView(PVGASTATECC pThisCC, uint32_t idDXContext
     ASSERT_GUEST_RETURN(shaderResourceViewId < pDXContext->cot.cSRView, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+#ifdef DX_STATE_TRACKER
+    /* Cleanup the shader resource view. */
+    pSvgaR3State->pFuncsDX->pfnDXDestroyShaderResourceView(pThisCC, pDXContext, shaderResourceViewId);
+
+    /* If a currently set shader resource view is redefined, then tell the backend to re-apply it. */
+    bool fFound = false;
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE && !fFound; ++idxShaderState)
+    {
+        uint32_t const cMaxBound = pDXContext->state.shader[idxShaderState].shaderResources.cMaxBound;
+        for (uint32_t i = 0; i < cMaxBound; ++i)
+        {
+            if (pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[i] == shaderResourceViewId)
+            {
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SRV_VS << idxShaderState;
+                fFound = true;
+                break;
+            }
+        }
+    }
+#endif
+
     SVGACOTableDXSRViewEntry *pEntry = &pDXContext->cot.paSRView[shaderResourceViewId];
     pEntry->sid               = pCmd->sid;
     pEntry->format            = pCmd->format;
@@ -1690,10 +1763,29 @@ int vmsvga3dDXDestroyShaderResourceView(PVGASTATECC pThisCC, uint32_t idDXContex
     ASSERT_GUEST_RETURN(shaderResourceViewId < pDXContext->cot.cSRView, VERR_INVALID_PARAMETER);
     RT_UNTRUSTED_VALIDATED_FENCE();
 
+    pSvgaR3State->pFuncsDX->pfnDXDestroyShaderResourceView(pThisCC, pDXContext, shaderResourceViewId);
+
     SVGACOTableDXSRViewEntry *pEntry = &pDXContext->cot.paSRView[shaderResourceViewId];
     RT_ZERO(*pEntry);
 
-    rc = pSvgaR3State->pFuncsDX->pfnDXDestroyShaderResourceView(pThisCC, pDXContext, shaderResourceViewId);
+#ifdef DX_STATE_TRACKER
+    /* If a currently set shader resource view is destroyed, then unset it. */
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
+    {
+        uint32_t const cMaxBound = pDXContext->state.shader[idxShaderState].shaderResources.cMaxBound;
+        for (uint32_t i = 0; i < cMaxBound; ++i)
+        {
+            if (pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[i] == shaderResourceViewId)
+            {
+                pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[i] = SVGA3D_INVALID_ID;
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SRV_VS << idxShaderState;
+                /* Keep searching. The shader resource view id can be bound to multiple slots
+                 * and all of them must be set to SVGA3D_INVALID_ID.
+                 */
+            }
+        }
+    }
+#endif
     return rc;
 }
 
@@ -2229,8 +2321,7 @@ int vmsvga3dDXDestroySamplerState(PVGASTATECC pThisCC, uint32_t idDXContext, SVG
 
 #ifdef DX_STATE_TRACKER
     /* If a currently set sampler is destroyed, then unset it. */
-    bool fFound = false;
-    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE && !fFound; ++idxShaderState)
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
     {
         for (uint32_t i = 0; i < SVGA3D_DX_MAX_SAMPLERS; ++i)
         {
@@ -2238,8 +2329,9 @@ int vmsvga3dDXDestroySamplerState(PVGASTATECC pThisCC, uint32_t idDXContext, SVG
             {
                 pDXContext->svgaDXContext.shaderState[idxShaderState].samplers[i] = SVGA3D_INVALID_ID;
                 pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SAMPLER_VS << idxShaderState;
-                fFound = true;
-                break;
+                /* Keep searching. The sampler id can be bound to multiple slots
+                 * and all of them must be set to SVGA3D_INVALID_ID.
+                 */
             }
         }
     }
@@ -2689,6 +2781,13 @@ static int dxSetOrGrowCOTable(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext
                                              | DX_CTX_F_STATE_SAMPLER_HS
                                              | DX_CTX_F_STATE_SAMPLER_DS
                                              | DX_CTX_F_STATE_SAMPLER_CS;
+            else if (enmType == SVGA_COTABLE_SRVIEW)
+                pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SRV_VS
+                                             | DX_CTX_F_STATE_SRV_PS
+                                             | DX_CTX_F_STATE_SRV_GS
+                                             | DX_CTX_F_STATE_SRV_HS
+                                             | DX_CTX_F_STATE_SRV_DS
+                                             | DX_CTX_F_STATE_SRV_CS;
 #endif
         }
     }
@@ -3277,6 +3376,7 @@ int vmsvga3dDXSetUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDXS
     pDXContext->svgaDXContext.uavSpliceIndex = pCmd->uavSpliceIndex;
 #else
     bool fModified = false;
+    int idxLastNotNull = -1;
     for (uint32_t i = 0; i < cUAViewId; ++i)
     {
         SVGA3dUAViewId const uaViewId = paUAViewId[i];
@@ -3285,6 +3385,9 @@ int vmsvga3dDXSetUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDXS
             pDXContext->svgaDXContext.uaViewIds[i] = uaViewId;
             fModified = true;
         }
+
+        if (uaViewId != SVGA3D_INVALID_ID)
+            idxLastNotNull = (int)i;
     }
 
     if (pDXContext->svgaDXContext.uavSpliceIndex != pCmd->uavSpliceIndex)
@@ -3292,6 +3395,10 @@ int vmsvga3dDXSetUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDXS
         pDXContext->svgaDXContext.uavSpliceIndex = pCmd->uavSpliceIndex;
         fModified = true;
     }
+
+    uint32_t const cBound = (uint32_t)idxLastNotNull + 1;
+    pDXContext->state.uav.cMaxBound =
+        RT_MAX(cBound, pDXContext->state.uav.cMaxBound);
 
     if (fModified)
         pDXContext->u64ContextFlags |= DX_CTX_F_STATE_RENDERTARGET;
@@ -3315,6 +3422,7 @@ int vmsvga3dDXDrawIndexedInstancedIndirect(PVGASTATECC pThisCC, uint32_t idDXCon
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDrawIndexedInstancedIndirect(pThisCC, pDXContext, pCmd->argsBufferSid, pCmd->byteOffsetForArgs);
+    dxPostDraw(pDXContext);
     return rc;
 }
 
@@ -3332,6 +3440,7 @@ int vmsvga3dDXDrawInstancedIndirect(PVGASTATECC pThisCC, uint32_t idDXContext, S
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDrawInstancedIndirect(pThisCC, pDXContext, pCmd->argsBufferSid, pCmd->byteOffsetForArgs);
+    dxPostDraw(pDXContext);
     return rc;
 }
 
@@ -3349,6 +3458,7 @@ int vmsvga3dDXDispatch(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdDXDis
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDispatch(pThisCC, pDXContext, pCmd->threadGroupCountX, pCmd->threadGroupCountY, pCmd->threadGroupCountZ);
+    dxPostDraw(pDXContext);
     return rc;
 }
 
@@ -3366,6 +3476,7 @@ int vmsvga3dDXDispatchIndirect(PVGASTATECC pThisCC, uint32_t idDXContext)
     AssertRCReturn(rc, rc);
 
     rc = pSvgaR3State->pFuncsDX->pfnDXDispatchIndirect(pThisCC, pDXContext);
+    dxPostDraw(pDXContext);
     return rc;
 }
 
@@ -3575,6 +3686,7 @@ int vmsvga3dDXSetCSUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdD
     }
 #else
     bool fModified = false;
+    int idxLastNotNull = -1;
     for (uint32_t i = 0; i < cUAViewId; ++i)
     {
         SVGA3dUAViewId const uaViewId = paUAViewId[i];
@@ -3582,8 +3694,16 @@ int vmsvga3dDXSetCSUAViews(PVGASTATECC pThisCC, uint32_t idDXContext, SVGA3dCmdD
         {
             pDXContext->svgaDXContext.csuaViewIds[pCmd->startIndex + i] = uaViewId;
             fModified = true;
+            ASMBitSet(pDXContext->state.csuav.au64Modified, pCmd->startIndex + i);
         }
+
+        if (uaViewId != SVGA3D_INVALID_ID)
+            idxLastNotNull = (int)i;
     }
+
+    uint32_t const cBound = pCmd->startIndex + (uint32_t)idxLastNotNull + 1;
+    pDXContext->state.csuav.cMaxBound =
+        RT_MAX(cBound, pDXContext->state.csuav.cMaxBound);
 
     if (fModified)
         pDXContext->u64ContextFlags |= DX_CTX_F_STATE_CSTARGET;

@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-savedstate.cpp 114196 2026-05-28 12:01:52Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-savedstate.cpp 114266 2026-06-08 15:03:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevSVGA3d - VMWare SVGA device, 3D parts - DX backend saved state.
  */
@@ -309,7 +309,7 @@ int vmsvga3dDXLoadExec(PPDMDEVINS pDevIns, PVGASTATE pThis, PVGASTATECC pThisCC,
         p3dState->papDXContexts = NULL;
 
     if (pSvgaR3State->idDXContextCurrent != SVGA_ID_INVALID)
-        vmsvga3dDXSwitchContext(pThisCC, pSvgaR3State->idDXContextCurrent);
+        vmsvga3dDXSwitchContext(pThisCC, SVGA_ID_INVALID, pSvgaR3State->idDXContextCurrent);
 
     return VINF_SUCCESS;
 }

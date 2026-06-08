@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114197 2026-05-28 22:13:09Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114266 2026-06-08 15:03:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -4127,7 +4127,7 @@ static SVGACBStatus vmsvgaR3CmdBufProcessCommands(PPDMDEVINS pDevIns, PVGASTATE 
         if (pSvgaR3State->idDXContextCurrent != idDXContext)
         {
             LogFlow(("DXCTX: buffer %d->%d\n", pSvgaR3State->idDXContextCurrent, idDXContext));
-            vmsvga3dDXSwitchContext(pThisCC, idDXContext);
+            vmsvga3dDXSwitchContext(pThisCC, pSvgaR3State->idDXContextCurrent, idDXContext);
             pSvgaR3State->idDXContextCurrent = idDXContext;
         }
     }

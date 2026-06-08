@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d.h 114196 2026-05-28 12:01:52Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d.h 114266 2026-06-08 15:03:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device - 3D part.
  */
@@ -487,7 +487,7 @@ typedef struct
     DECLCALLBACKMEMBER(int, pfnDXDefineContext,             (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext));
     DECLCALLBACKMEMBER(int, pfnDXDestroyContext,            (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext));
     DECLCALLBACKMEMBER(int, pfnDXBindContext,               (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext));
-    DECLCALLBACKMEMBER(int, pfnDXSwitchContext,             (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext));
+    DECLCALLBACKMEMBER(int, pfnDXSwitchContext,             (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContextFrom, PVMSVGA3DDXCONTEXT pDXContext));
     DECLCALLBACKMEMBER(int, pfnDXReadbackContext,           (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext));
     DECLCALLBACKMEMBER(int, pfnDXInvalidateContext,         (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext));
     DECLCALLBACKMEMBER(int, pfnDXSetSingleConstantBuffer,   (PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, uint32_t slot, SVGA3dShaderType type, SVGA3dSurfaceId sid, uint32_t offsetInBytes, uint32_t sizeInBytes));
@@ -651,7 +651,7 @@ typedef struct VMSVGA3DBACKENDDESC
 #ifdef VMSVGA3D_DX
 /* Helpers. */
 int vmsvga3dDXUnbindContext(PVGASTATECC pThisCC, uint32_t cid, SVGADXContextMobFormat *pSvgaDXContext);
-int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cid);
+int vmsvga3dDXSwitchContext(PVGASTATECC pThisCC, uint32_t cidFrom, uint32_t cid);
 
 /* Command handlers. */
 int vmsvga3dDXDefineContext(PVGASTATECC pThisCC, uint32_t cid);

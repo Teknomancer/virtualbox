@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114253 2026-06-03 16:55:48Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114266 2026-06-08 15:03:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -430,6 +430,16 @@ typedef struct VMSVGA3DBACKEND
     SVGADXContextMobFormat     svgaDXContext;          /* Current state of pipeline. */
 
     DXBOUNDRESOURCES           resources;              /* What is currently applied to the pipeline. */
+
+    struct
+    {
+        /* Calling DSSetShaderResources before Dispatch prevents DXGI_ERROR_DEVICE_REMOVED
+         * when running 3DMark11 Demo in the guest. Pipeline state is exactly the same
+         * with and without the call. The workaround forces setupPipeline to set all shader
+         * resources just in case. It works on AMD and Intel graphics without the workaround.
+         */
+        bool fAlwaysSetShaderResourceViewsForCompute : 1;
+    } workarounds;
 } VMSVGA3DBACKEND;
 
 
@@ -3425,6 +3435,11 @@ static DECLCALLBACK(int) vmsvga3dBackPowerOn(PPDMDEVINS pDevIns, PVGASTATE pThis
 
         if (!pThis->svga.fVMSVGA3dMSAA)
             pBackend->dxDevice.MultisampleCountMask = 0;
+
+#if !defined(VBOX_WITH_DXVK) && !defined(VBOX_WITH_DXMT)
+        /* See comments for VMSVGA3DBACKEND::workarounds. */
+        pBackend->workarounds.fAlwaysSetShaderResourceViewsForCompute = (pBackend->VendorId == 0x10de); /* nvidia */
+#endif
     }
     return rc;
 }
@@ -6351,31 +6366,45 @@ static DECLCALLBACK(int) vmsvga3dBackDXBindContext(PVGASTATECC pThisCC, PVMSVGA3
 }
 
 
-static DECLCALLBACK(int) vmsvga3dBackDXSwitchContext(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
+static DECLCALLBACK(int) vmsvga3dBackDXSwitchContext(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContextFrom, PVMSVGA3DDXCONTEXT pDXContext)
 {
 #ifndef DX_STATE_TRACKER
     /* The new context state will be applied by the generic DX code. */
-    RT_NOREF(pThisCC, pDXContext);
+    RT_NOREF(pThisCC, pDXContextFrom, pDXContext);
 #else
     RT_NOREF(pDXContext);
 
     DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturn(pDXDevice->pDevice, VERR_INVALID_STATE);
 
-    ID3D11ShaderResourceView *papShaderResourceView[SVGA3D_DX_MAX_SRVIEWS];
-    RT_ZERO(papShaderResourceView);
+    union
+    {
+        ID3D11ShaderResourceView *papShaderResourceView[SVGA3D_DX_MAX_SRVIEWS];
+        ID3D11UnorderedAccessView *papUnorderedAccessView[SVGA3D_DX11_1_MAX_UAVIEWS];
+    } u;
+    RT_ZERO(u);
 
     /* Unbind all SRVs remaining from the old context.
      * 'setupPipeline' binds RTVs, DSV and UAVs targets first and then SRVs.
      * So SRVs should not contain resources which might be used for targets.
      */
-    /** @todo Unbind SRVs which were actually used by the previous context.
-     * Needs pDXContextOld param and tracking of actually used SRVs per DXContext. */
     for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
     {
-        SVGA3dShaderType const type = (SVGA3dShaderType)(idxShaderState + SVGA3D_SHADERTYPE_MIN);
-        dxShaderResourceViewSet(pDXDevice, type, 0, SVGA3D_DX_MAX_SRVIEWS, papShaderResourceView);
+        uint32_t const cBoundSRV = pDXContextFrom
+                                 ? pDXContextFrom->state.shader[idxShaderState].shaderResources.cMaxBound
+                                 : SVGA3D_DX_MAX_SRVIEWS;
+        if (cBoundSRV)
+        {
+            SVGA3dShaderType const type = (SVGA3dShaderType)(idxShaderState + SVGA3D_SHADERTYPE_MIN);
+            dxShaderResourceViewSet(pDXDevice, type, 0, cBoundSRV, u.papShaderResourceView);
+        }
     }
+
+    uint32_t const cBoundCSUAV = pDXContextFrom
+                               ? pDXContextFrom->state.csuav.cMaxBound
+                               : SVGA3D_DX11_1_MAX_UAVIEWS;
+    if (cBoundCSUAV)
+        pDXDevice->pImmediateContext->CSSetUnorderedAccessViews(0, cBoundCSUAV, u.papUnorderedAccessView, NULL);
 
     for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
     {
@@ -6604,6 +6633,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetSingleConstantBuffer(PVGASTATECC pThis
 #endif /* DX_CB */
 }
 
+
+#ifndef DX_STATE_TRACKER
 static int dxSetShaderResources(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dShaderType type)
 {
     DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
@@ -6630,6 +6661,7 @@ static int dxSetShaderResources(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXConte
     dxShaderResourceViewSet(pDXDevice, type, 0, SVGA3D_DX_MAX_SRVIEWS, papShaderResourceView);
     return VINF_SUCCESS;
 }
+#endif
 
 
 static DECLCALLBACK(int) vmsvga3dBackDXSetShaderResources(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, uint32_t startView, SVGA3dShaderType type, uint32_t cShaderResourceViewId, SVGA3dShaderResourceViewId const *paShaderResourceViewId)
@@ -6638,21 +6670,22 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetShaderResources(PVGASTATECC pThisCC, P
 #ifndef DX_STATE_TRACKER
     RT_NOREF(pThisCC, pDXContext, startView, type, cShaderResourceViewId, paShaderResourceViewId);
 #else
-    RT_NOREF(pDXContext, paShaderResourceViewId);
+    RT_NOREF(paShaderResourceViewId);
 
     /* Have to unbind changed shader resources immediately, they may be used as render targets in a next Draw.
      * 'setupPipeline' binds RTVs, DSV and UAVs targets first and then SRVs.
      * So SRVs should not contain resources which might be used for targets.
      */
-    /** @todo Keep unchanged. */
     DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturn(pDXDevice->pDevice, VERR_INVALID_STATE);
+
+    uint32_t const idxShaderState = type - SVGA3D_SHADERTYPE_MIN;
 
     ID3D11ShaderResourceView *pNullSRV = NULL;
     for (uint32_t i = 0; i < cShaderResourceViewId; ++i)
     {
-        //SVGA3dShaderResourceViewId const viewId = dxShaderResourceViewId(pDXContext, paShaderResourceViewId[i]);
-        dxShaderResourceViewSet(pDXDevice, type, startView + i, 1, &pNullSRV);
+        if (ASMBitTest(pDXContext->state.shader[idxShaderState].shaderResources.au64Modified, startView + i))
+            dxShaderResourceViewSet(pDXDevice, type, startView + i, 1, &pNullSRV);
     }
 #endif
     return VINF_SUCCESS;
@@ -7815,7 +7848,7 @@ static int dxEnsureUnorderedAccessView(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT p
 
 
 #ifdef DX_STATE_TRACKER
-static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
+static void dxEnsureViews(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
 {
     /*
      * Ensure that all views exist.
@@ -7823,8 +7856,8 @@ static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXC
     int rc;
 
     /* Depth stencil view. */
-    uint32_t viewId = dxDepthStencilViewId(pDXContext, pDXContext->svgaDXContext.renderState.depthStencilViewId);
-    viewId = svgaDepthStencilViewId(pDXContext, viewId);
+    /* dxEnsureDepthStencilView verifies the viewId. */
+    uint32_t viewId = pDXContext->svgaDXContext.renderState.depthStencilViewId;
     if (viewId != SVGA3D_INVALID_ID)
     {
         DXVIEW *pDXView;
@@ -7841,8 +7874,8 @@ static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXC
     /* Render target views. */
     for (uint32_t i = 0; i < SVGA3D_MAX_SIMULTANEOUS_RENDER_TARGETS; ++i)
     {
-        viewId = dxRenderTargetViewId(pDXContext, pDXContext->svgaDXContext.renderState.renderTargetViewIds[i]);
-        viewId = svgaRenderTargetViewId(pDXContext, viewId);
+        /* dxEnsureRenderTargetView verifies the viewId. */
+        viewId = pDXContext->svgaDXContext.renderState.renderTargetViewIds[i];
         if (viewId != SVGA3D_INVALID_ID)
         {
             DXVIEW *pDXView;
@@ -7857,15 +7890,11 @@ static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXC
         }
     }
 
-    uint32_t const cMaxUAViews = pDXDevice->FeatureLevel >= D3D_FEATURE_LEVEL_11_1
-                               ? SVGA3D_DX11_1_MAX_UAVIEWS
-                               : SVGA3D_MAX_UAVIEWS;
-
     /* Unordered access views. */
-    for (uint32_t i = 0; i < cMaxUAViews; ++i)
+    for (uint32_t i = 0; i < pDXContext->state.uav.cMaxBound; ++i)
     {
-        viewId = dxUAViewId(pDXContext, pDXContext->svgaDXContext.uaViewIds[i]);
-        viewId = svgaUAViewId(pDXContext, viewId);
+        /* dxEnsureUnorderedAccessView verifies the viewId. */
+        viewId = pDXContext->svgaDXContext.uaViewIds[i];
         if (viewId != SVGA3D_INVALID_ID)
         {
             DXVIEW *pDXView;
@@ -7881,10 +7910,10 @@ static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXC
     }
 
     /* Compute shader resource views. */
-    for (uint32_t i = 0; i < cMaxUAViews; ++i)
+    for (uint32_t i = 0; i < pDXContext->state.csuav.cMaxBound; ++i)
     {
-        viewId = dxUAViewId(pDXContext, pDXContext->svgaDXContext.csuaViewIds[i]);
-        viewId = svgaUAViewId(pDXContext, viewId);
+        /* dxEnsureUnorderedAccessView verifies the viewId. */
+        viewId = pDXContext->svgaDXContext.csuaViewIds[i];
         if (viewId != SVGA3D_INVALID_ID)
         {
             DXVIEW *pDXView;
@@ -7902,10 +7931,11 @@ static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXC
     /* Shader resource views. */
     for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
     {
-        for (uint32_t i = 0; i < SVGA3D_DX_MAX_SRVIEWS; ++i)
+        uint32_t const cMaxBound = pDXContext->state.shader[idxShaderState].shaderResources.cMaxBound;
+        for (uint32_t i = 0; i < cMaxBound; ++i)
         {
-            viewId = dxShaderResourceViewId(pDXContext, pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[i]);
-            viewId = svgaShaderResourceViewId(pDXContext, viewId);
+            /* dxEnsureShaderResourceView verifies the viewId. */
+            viewId = pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[i];
             if (viewId != SVGA3D_INVALID_ID)
             {
                 DXVIEW *pDXView;
@@ -7920,6 +7950,21 @@ static void dxEnsureViews(PVGASTATECC pThisCC, DXDEVICE *pDXDevice, PVMSVGA3DDXC
                          idxShaderState, i, pDXView->sid, viewId, vmsvgaLookupEnum((int)pSRViewEntry->format, &g_SVGA3dSurfaceFormat2String), pSRViewEntry->format,
                          pSurface->paMipmapLevels[0].cBlocksX * pSurface->cxBlock, pSurface->paMipmapLevels[0].cBlocksY * pSurface->cyBlock));
 #endif
+#ifdef DUMP_BITMAPS
+                SVGA3dSurfaceImageId image;
+                image.sid = pDXView->sid;
+                image.face = 0;
+                image.mipmap = 0;
+                VMSVGA3D_MAPPED_SURFACE map;
+                int rc2 = vmsvga3dSurfaceMap(pThisCC, &image, NULL, VMSVGA3D_SURFACE_MAP_READ, VMSVGA3D_MAP_F_NONE, &map);
+                if (RT_SUCCESS(rc2))
+                {
+                    vmsvga3dMapWriteBmpFile(&map, "sr-");
+                    vmsvga3dSurfaceUnmap(pThisCC, &image, &map, /* fWritten =  */ false);
+                }
+                else
+                    LogFunc(("Map failed %Rrc\n", rc));
+#endif
             }
         }
     }
@@ -7931,15 +7976,15 @@ static void dxBindCSUnorderedAccessViews(PVMSVGA3DDXCONTEXT pDXContext, DXDEVICE
     /*
      * Bind compute shader target views.
      */
+    uint32_t const cMaxBound = pDXContext->state.csuav.cMaxBound;
+    if (!cMaxBound)
+         return;
 
     ID3D11UnorderedAccessView *papUnorderedAccessView[SVGA3D_DX11_1_MAX_UAVIEWS];
     UINT aUAVInitialCounts[SVGA3D_DX11_1_MAX_UAVIEWS];
 
     uint32_t const *paUAIds = &pDXContext->svgaDXContext.csuaViewIds[0];
-    uint32_t const cMaxUAViews = pDXDevice->FeatureLevel >= D3D_FEATURE_LEVEL_11_1
-                               ? SVGA3D_DX11_1_MAX_UAVIEWS
-                               : SVGA3D_MAX_UAVIEWS;
-    for (uint32_t i = 0; i < cMaxUAViews; ++i)
+    for (uint32_t i = 0; i < cMaxBound; ++i)
     {
         SVGA3dUAViewId viewId = dxUAViewId(pDXContext, paUAIds[i]);
         viewId = svgaUAViewId(pDXContext, viewId);
@@ -7960,7 +8005,7 @@ static void dxBindCSUnorderedAccessViews(PVMSVGA3DDXCONTEXT pDXContext, DXDEVICE
         }
     }
 
-    pDXDevice->pImmediateContext->CSSetUnorderedAccessViews(0, cMaxUAViews, papUnorderedAccessView, aUAVInitialCounts);
+    pDXDevice->pImmediateContext->CSSetUnorderedAccessViews(0, cMaxBound, papUnorderedAccessView, aUAVInitialCounts);
 }
 
 
@@ -7977,10 +8022,7 @@ static void dxBindRenderTargetViews(PVMSVGA3DDXCONTEXT pDXContext, DXDEVICE *pDX
     ID3D11UnorderedAccessView *apUnorderedAccessViews[SVGA3D_DX11_1_MAX_UAVIEWS];
     UINT aUAVInitialCounts[SVGA3D_DX11_1_MAX_UAVIEWS];
 
-    uint32_t const cMaxUAViews = pDXDevice->FeatureLevel >= D3D_FEATURE_LEVEL_11_1
-                               ? SVGA3D_DX11_1_MAX_UAVIEWS
-                               : SVGA3D_MAX_UAVIEWS;
-    for (uint32_t i = 0; i < cMaxUAViews; ++i)
+    for (uint32_t i = 0; i < pDXContext->state.uav.cMaxBound; ++i)
     {
         SVGA3dUAViewId viewId = dxUAViewId(pDXContext, pDXContext->svgaDXContext.uaViewIds[i]);
         viewId = svgaUAViewId(pDXContext, viewId);
@@ -8214,6 +8256,30 @@ static void dxUpdateSamplerState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXCont
 }
 
 
+static void dxUpdateShaderResources(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext, SVGA3dShaderType const type)
+{
+    uint32_t const idxShaderState = type - SVGA3D_SHADERTYPE_MIN;
+    uint32_t const *paSRVIds = &pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[0];
+    uint32_t const cMaxBound = pDXContext->state.shader[idxShaderState].shaderResources.cMaxBound;
+
+    ID3D11ShaderResourceView *papShaderResourceView[SVGA3D_DX_MAX_SRVIEWS];
+    for (uint32_t i = 0; i < cMaxBound; ++i)
+    {
+        SVGA3dShaderResourceViewId const shaderResourceViewId = dxShaderResourceViewId(pDXContext, paSRVIds[i]);
+        if (shaderResourceViewId != SVGA3D_INVALID_ID)
+        {
+            DXVIEW *pDXView = &pDXContext->pBackendDXContext->paShaderResourceView[shaderResourceViewId];
+            Assert(pDXView->u.pShaderResourceView);
+            papShaderResourceView[i] = pDXView->u.pShaderResourceView;
+        }
+        else
+            papShaderResourceView[i] = NULL;
+    }
+
+    dxShaderResourceViewSet(pDXDevice, type, 0, cMaxBound, papShaderResourceView);
+}
+
+
 # ifdef DX_STRICT
 #  if defined(_MSC_VER)
 #pragma optimize("", off)
@@ -8254,12 +8320,15 @@ static void dxCheckState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
         {
             ID3D11SamplerState         *paSamplerState[SVGA3D_DX_MAX_SAMPLERS];
         } s;
+        struct
+        {
+            ID3D11ShaderResourceView   *paShaderResourceView[SVGA3D_DX_MAX_SRVIEWS];
+        } sr;
         //ID3D11Buffer               *pConstantBuffer;
         //ID3D11VertexShader         *pVertexShader;
         //ID3D11HullShader           *pHullShader;
         //ID3D11DomainShader         *pDomainShader;
         //ID3D11GeometryShader       *pGeometryShader;
-        //ID3D11ShaderResourceView   *pShaderResourceView;
         //ID3D11PixelShader          *pPixelShader;
         //ID3D11RenderTargetView     *apRenderTargetView[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
         //ID3D11DepthStencilView     *pDepthStencilView;
@@ -8380,6 +8449,50 @@ static void dxCheckState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
         D3D_RELEASE_ARRAY(SVGA3D_DX_MAX_SAMPLERS, p.s.paSamplerState);
     }
 
+    /* Shader resources */
+    RT_ZERO(p);
+    for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
+    {
+        RT_ZERO(p.sr.paShaderResourceView);
+        switch (idxShaderState)
+        {
+            case 0:
+                pImmediateContext->VSGetShaderResources(0, SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+                break;
+            case 1:
+                pImmediateContext->PSGetShaderResources(0, SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+                break;
+            case 2:
+                pImmediateContext->GSGetShaderResources(0, SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+                break;
+            case 3:
+                pImmediateContext->HSGetShaderResources(0, SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+                break;
+            case 4:
+                pImmediateContext->DSGetShaderResources(0, SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+                break;
+            case 5:
+                pImmediateContext->CSGetShaderResources(0, SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+                break;
+            default:
+                break;
+        }
+
+        for (uint32_t i = 0; i < SVGA3D_DX_MAX_SRVIEWS; ++i)
+        {
+            SVGA3dShaderResourceViewId shaderResourceViewId = dxShaderResourceViewId(pDXContext, pDXContext->svgaDXContext.shaderState[idxShaderState].shaderResources[i]);
+            shaderResourceViewId = svgaShaderResourceViewId(pDXContext, shaderResourceViewId);
+            if (shaderResourceViewId != SVGA3D_INVALID_ID)
+            {
+                DXVIEW *pDXView = &pDXContext->pBackendDXContext->paShaderResourceView[shaderResourceViewId];
+                AssertRelease(p.sr.paShaderResourceView[i] == pDXView->u.pShaderResourceView);
+            }
+            else
+                AssertRelease(p.sr.paShaderResourceView[i] == NULL);
+        }
+        D3D_RELEASE_ARRAY(SVGA3D_DX_MAX_SRVIEWS, p.sr.paShaderResourceView);
+    }
+
     //pImmediateContext->VSGetConstantBuffers(0, 1, &p.pConstantBuffer);
     //D3D_RELEASE(p.pConstantBuffer);
 
@@ -8397,9 +8510,6 @@ static void dxCheckState(DXDEVICE *pDXDevice, PVMSVGA3DDXCONTEXT pDXContext)
 
     //pImmediateContext->DSGetShader(&p.pDomainShader, NULL, NULL);
     //D3D_RELEASE(p.pDomainShader);
-
-    //pImmediateContext->PSGetShaderResources(0, 1, &p.pShaderResourceView);
-    //D3D_RELEASE(p.pShaderResourceView);
 
     //pImmediateContext->OMGetRenderTargets(RT_ELEMENTS(p.apRenderTargetView), p.apRenderTargetView, &p.pDepthStencilView);
     //D3D_RELEASE_ARRAY(RT_ELEMENTS(p.apRenderTargetView), p.apRenderTargetView);
@@ -8436,7 +8546,82 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
     DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturnVoid(pDXDevice->pDevice);
 
-    dxEnsureViews(pThisCC, pDXDevice, pDXContext);
+    dxEnsureViews(pThisCC, pDXContext);
+
+    /*
+     * State objects
+     */
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_TOPOLOGY)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_TOPOLOGY;
+        dxUpdateTopology(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_BLENDSTATE)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_BLENDSTATE;
+        dxUpdateBlendState(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_DEPTHSTENCILSTATE)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_DEPTHSTENCILSTATE;
+        dxUpdateDepthStencilState(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_VIEWPORT)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_VIEWPORT;
+        dxUpdateViewports(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SCISSORRECT)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SCISSORRECT;
+        dxUpdateScissorRects(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_RASTERIZERSTATE)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_RASTERIZERSTATE;
+        dxUpdateRasterizerState(pDXDevice, pDXContext);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_VS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_VS;
+        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_VS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_PS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_PS;
+        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_PS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_GS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_GS;
+        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_GS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_HS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_HS;
+        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_HS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_DS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_DS;
+        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_DS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_CS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_CS;
+        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_CS);
+    }
 
     /*
      * Output targets
@@ -8466,6 +8651,7 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
      * Shader resources
      */
 
+#ifndef DX_STATE_TRACKER
     /* Make sure that the shader resource views exist. */
     for (uint32_t idxShaderState = 0; idxShaderState < SVGA3D_NUM_SHADERTYPE; ++idxShaderState)
     {
@@ -8508,6 +8694,43 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
 
         dxSetShaderResources(pThisCC, pDXContext, (SVGA3dShaderType)(idxShaderState + SVGA3D_SHADERTYPE_MIN));
     }
+#else /* DX_STATE_TRACKER */
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SRV_VS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SRV_VS;
+        dxUpdateShaderResources(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_VS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SRV_PS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SRV_PS;
+        dxUpdateShaderResources(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_PS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SRV_GS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SRV_GS;
+        dxUpdateShaderResources(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_GS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SRV_HS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SRV_HS;
+        dxUpdateShaderResources(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_HS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SRV_DS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SRV_DS;
+        dxUpdateShaderResources(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_DS);
+    }
+
+    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SRV_CS)
+    {
+        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SRV_CS;
+        dxUpdateShaderResources(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_CS);
+    }
+#endif /* DX_STATE_TRACKER */
 
 #ifndef DX_STATE_TRACKER
     /*
@@ -8785,78 +9008,6 @@ static void dxSetupPipeline(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext)
 #endif
 
 #ifdef DX_STATE_TRACKER
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_TOPOLOGY)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_TOPOLOGY;
-        dxUpdateTopology(pDXDevice, pDXContext);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_BLENDSTATE)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_BLENDSTATE;
-        dxUpdateBlendState(pDXDevice, pDXContext);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_DEPTHSTENCILSTATE)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_DEPTHSTENCILSTATE;
-        dxUpdateDepthStencilState(pDXDevice, pDXContext);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_VIEWPORT)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_VIEWPORT;
-        dxUpdateViewports(pDXDevice, pDXContext);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SCISSORRECT)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SCISSORRECT;
-        dxUpdateScissorRects(pDXDevice, pDXContext);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_RASTERIZERSTATE)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_RASTERIZERSTATE;
-        dxUpdateRasterizerState(pDXDevice, pDXContext);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_VS)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_VS;
-        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_VS);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_PS)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_PS;
-        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_PS);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_GS)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_GS;
-        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_GS);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_HS)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_HS;
-        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_HS);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_DS)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_DS;
-        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_DS);
-    }
-
-    if (pDXContext->u64ContextFlags & DX_CTX_F_STATE_SAMPLER_CS)
-    {
-        pDXContext->u64ContextFlags &= ~DX_CTX_F_STATE_SAMPLER_CS;
-        dxUpdateSamplerState(pDXDevice, pDXContext, SVGA3D_SHADERTYPE_CS);
-    }
-
 # ifdef DX_STRICT
     dxCheckState(pDXDevice, pDXContext);
 # endif
@@ -12043,6 +12194,20 @@ static DECLCALLBACK(int) vmsvga3dBackDXDispatch(PVGASTATECC pThisCC, PVMSVGA3DDX
     DXDEVICE *pDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturn(pDevice->pDevice, VERR_INVALID_STATE);
 
+#if !defined(VBOX_WITH_DXVK) && !defined(VBOX_WITH_DXMT)
+    if (pThisCC->svga.p3dState->pBackend->workarounds.fAlwaysSetShaderResourceViewsForCompute)
+    {
+        /* See comments for VMSVGA3DBACKEND::workarounds. */
+        pDXContext->u64ContextFlags |= DX_CTX_F_STATE_SRV_VS
+                                     | DX_CTX_F_STATE_SRV_PS
+                                     | DX_CTX_F_STATE_SRV_GS
+                                     | DX_CTX_F_STATE_SRV_HS
+                                     | DX_CTX_F_STATE_SRV_DS
+                                     | DX_CTX_F_STATE_SRV_CS
+                                     ;
+    }
+#endif
+
     dxSetupPipeline(pThisCC, pDXContext);
 
     pDevice->pImmediateContext->Dispatch(threadGroupCountX, threadGroupCountY, threadGroupCountZ);
@@ -12205,19 +12370,17 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCSUAViews(PVGASTATECC pThisCC, PVMSVGA
 
     RT_NOREF(startIndex, cUAViewId, paUAViewId);
 #else
-    RT_NOREF(pDXContext, paUAViewId);
+    RT_NOREF(paUAViewId);
 
     /* Unbind changed compute shader UAVs immediately, they may be used as render/depth targets in a next Draw. */
-    /** @todo Keep unchanged */
     DXDEVICE *pDXDevice = dxDeviceGet(pThisCC->svga.p3dState);
     AssertReturn(pDXDevice->pDevice, VERR_INVALID_STATE);
 
     ID3D11UnorderedAccessView *pNullUA = 0;
     for (uint32_t i = 0; i < cUAViewId; ++i)
     {
-        //SVGA3dUAViewId viewId = dxUAViewId(pDXContext, paUAViewId[i]);
-        //viewId = svgaUAViewId(pDXContext, viewId);
-        pDXDevice->pImmediateContext->CSSetUnorderedAccessViews(startIndex + i, 1, &pNullUA, NULL);
+        if (ASMBitTest(pDXContext->state.csuav.au64Modified, startIndex + i))
+            pDXDevice->pImmediateContext->CSSetUnorderedAccessViews(startIndex + i, 1, &pNullUA, NULL);
     }
 #endif
     return VINF_SUCCESS;
