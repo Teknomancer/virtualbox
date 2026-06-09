@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114316 2026-06-09 16:22:02Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114318 2026-06-09 16:36:13Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1337,9 +1337,9 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   	src-client/VBoxSharedClipboardSvc-darwin.cpp \
   	src-client/darwin-pasteboard.cpp
   ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+   VBoxC_INCS     += $(PATH_ROOT)/src/VBox/HostServices/SharedClipboard
    ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
     VBoxC_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
-    VBoxC_INCS    += $(PATH_ROOT)/src/VBox/HostServices/SharedClipboard
     VBoxC_SOURCES += \
     	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-http.cpp
    endif
