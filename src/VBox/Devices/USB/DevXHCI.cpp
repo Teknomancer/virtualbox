@@ -1,4 +1,4 @@
-/* $Id: DevXHCI.cpp 114290 2026-06-09 13:00:50Z michal.necasek@oracle.com $ */
+/* $Id: DevXHCI.cpp 114296 2026-06-09 13:54:44Z michal.necasek@oracle.com $ */
 /** @file
  * DevXHCI - eXtensible Host Controller Interface for USB.
  */
@@ -3206,7 +3206,9 @@ static DECLCALLBACK(void) xhciR3RhXferCompletion(PVUSBIROOTHUBPORT pInterface, P
                 }
             }
             else
-                ;   /* Packet size may be zero. That is valid and not a problem. */
+            {
+                /* Packet size may be zero. That is valid and not a problem. */
+            }
 
             xhciR3WalkXferTrbChain(pDevIns, pThis, ep_ctx.trdp, xhciR3WalkDataTRBsComplete, &ctxComplete, &uTRDP);
             ep_ctx.last_cc = ctxComplete.uLastCC;
