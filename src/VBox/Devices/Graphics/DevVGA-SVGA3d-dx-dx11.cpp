@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114303 2026-06-09 15:21:58Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114309 2026-06-09 15:37:00Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -6273,17 +6273,17 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyContext(PVGASTATECC pThisCC, PVMSV
         if (pBackendDXContext->paRenderTargetView)
         {
             for (uint32_t i = 0; i < pBackendDXContext->cRenderTargetView; ++i)
-                D3D_RELEASE(pBackendDXContext->paRenderTargetView[i].u.pRenderTargetView);
+                dxViewDestroy(&pBackendDXContext->paRenderTargetView[i]);
         }
         if (pBackendDXContext->paDepthStencilView)
         {
             for (uint32_t i = 0; i < pBackendDXContext->cDepthStencilView; ++i)
-                D3D_RELEASE(pBackendDXContext->paDepthStencilView[i].u.pDepthStencilView);
+                dxViewDestroy(&pBackendDXContext->paDepthStencilView[i]);
         }
         if (pBackendDXContext->paShaderResourceView)
         {
             for (uint32_t i = 0; i < pBackendDXContext->cShaderResourceView; ++i)
-                D3D_RELEASE(pBackendDXContext->paShaderResourceView[i].u.pShaderResourceView);
+                dxViewDestroy(&pBackendDXContext->paShaderResourceView[i]);
         }
         if (pBackendDXContext->paElementLayout)
         {
@@ -6316,7 +6316,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyContext(PVGASTATECC pThisCC, PVMSV
         if (pBackendDXContext->paUnorderedAccessView)
         {
             for (uint32_t i = 0; i < pBackendDXContext->cUnorderedAccessView; ++i)
-                D3D_RELEASE(pBackendDXContext->paUnorderedAccessView[i].u.pUnorderedAccessView);
+                dxViewDestroy(&pBackendDXContext->paUnorderedAccessView[i]);
         }
         if (pBackendDXContext->paVideoProcessor)
         {
@@ -6325,9 +6325,8 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyContext(PVGASTATECC pThisCC, PVMSV
         }
         if (pBackendDXContext->paVideoDecoderOutputView)
         {
-            /** @todo dxViewDestroy? */
             for (uint32_t i = 0; i < pBackendDXContext->cVideoDecoderOutputView; ++i)
-                D3D_RELEASE(pBackendDXContext->paVideoDecoderOutputView[i].u.pVideoDecoderOutputView);
+                dxViewDestroy(&pBackendDXContext->paVideoDecoderOutputView[i]);
         }
         if (pBackendDXContext->paVideoDecoder)
         {
@@ -6337,12 +6336,12 @@ static DECLCALLBACK(int) vmsvga3dBackDXDestroyContext(PVGASTATECC pThisCC, PVMSV
         if (pBackendDXContext->paVideoProcessorInputView)
         {
             for (uint32_t i = 0; i < pBackendDXContext->cVideoProcessorInputView; ++i)
-                D3D_RELEASE(pBackendDXContext->paVideoProcessorInputView[i].u.pVideoProcessorInputView);
+                dxViewDestroy(&pBackendDXContext->paVideoProcessorInputView[i]);
         }
         if (pBackendDXContext->paVideoProcessorOutputView)
         {
             for (uint32_t i = 0; i < pBackendDXContext->cVideoProcessorOutputView; ++i)
-                D3D_RELEASE(pBackendDXContext->paVideoProcessorOutputView[i].u.pVideoProcessorOutputView);
+                dxViewDestroy(&pBackendDXContext->paVideoProcessorOutputView[i]);
         }
 
         RTMemFreeZ(pBackendDXContext->papBlendState, sizeof(pBackendDXContext->papBlendState[0]) * pBackendDXContext->cBlendState);
