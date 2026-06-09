@@ -509,7 +509,7 @@
 
   <enum
     name="SettingsVersion"
-    uuid="85d84a63-bda8-424e-95fe-3650b6cf5a95"
+    uuid="911be0b2-c4c8-49e3-990c-aa564de7e45b"
     >
     <desc>
       Settings version of VirtualBox settings files. This is written to
@@ -27829,7 +27829,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
   -->
   <enum
     name="VBoxEventType"
-    uuid="0c8f8bd7-c5d8-4085-83c2-558a4025b215"
+    uuid="f6849fd1-ae49-4495-b539-e2c80c4a2e85"
     >
 
     <desc>
