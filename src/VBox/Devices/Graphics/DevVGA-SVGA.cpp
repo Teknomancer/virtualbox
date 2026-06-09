@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114266 2026-06-08 15:03:54Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114312 2026-06-09 15:46:10Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -6045,7 +6045,7 @@ static DECLCALLBACK(int) vmsvgaR3FifoLoop(PPDMDEVINS pDevIns, PPDMTHREAD pThread
                         || (offFifoMax & 3) != 0
                         || (offFifoMin & 3) != 0
                         || offCurrentCmd < offFifoMin
-                        || offCurrentCmd > offFifoMax))
+                        || offCurrentCmd >= offFifoMax)) /* FIFO_MAX is exclusive bound. */
         {
             STAM_REL_COUNTER_INC(&pSVGAState->StatFifoErrors);
             LogRelMax(8, ("vmsvgaR3FifoLoop: Bad fifo: min=%#x stop=%#x max=%#x\n", offFifoMin, offCurrentCmd, offFifoMax));
