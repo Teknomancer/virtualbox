@@ -1,4 +1,4 @@
-/* $Id: DevNVMe.cpp 114272 2026-06-09 06:44:33Z alexander.eichner@oracle.com $ */
+/* $Id: DevNVMe.cpp 114273 2026-06-09 06:54:50Z alexander.eichner@oracle.com $ */
 /** @file
  * DevNVMe - Non Volatile Memory express (previous name: NVMHCI)
  */
@@ -5201,6 +5201,11 @@ static int nvmeR3CmdNvmProcess(PPDMDEVINS pDevIns, PNVME pThis, PNVMECC pThisCC,
     LogFlow(("Wrk#%u: Processing NVM command %#x\n", pWrkThrd->uId, pCmdNvm->u.Field.Hdr.u16Cid));
 
     nvmeR3CmdNvmDump(pWrkThrd, pCmdNvm);
+
+    if (RT_UNLIKELY(!NVME_CMD_HDR_PSDT_IS_PRP(pCmdNvm->u.Field.Hdr.u2Psdt)))
+        return nvmeR3CmdCompleteWithStatus(pDevIns, pThis, pThisCC, pQueueSubm, pCmdNvm->u.Field.Hdr.u16Cid,
+                                           NVME_CQ_ENTRY_SCT_CMD_GENERIC, NVME_CQ_ENTRY_SC_GEN_INV_CMD_FIELD,
+                                           0, false /* fMore */, true /* fDnr */);
 
     /* Check that the namespace is valid and has something attached. */
     if (   uNsId == 0
