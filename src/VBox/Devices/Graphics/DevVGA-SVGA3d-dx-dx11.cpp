@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114309 2026-06-09 15:37:00Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114322 2026-06-09 19:52:16Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -11276,6 +11276,7 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCOTable(PVGASTATECC pThisCC, PVMSVGA3D
 #endif
             break;
         case SVGA_COTABLE_SRVIEW:
+#ifndef DX_STATE_TRACKER
             if (pBackendDXContext->paShaderResourceView)
             {
                 for (uint32_t i = 0; i < pBackendDXContext->cShaderResourceView; ++i)
@@ -11304,6 +11305,34 @@ static DECLCALLBACK(int) vmsvga3dBackDXSetCOTable(PVGASTATECC pThisCC, PVMSVGA3D
                 if (pDXView->u.pView)
                     dxViewAddToList(pThisCC, pDXView);
             }
+#else
+            if (!fGrow)
+                cValidEntries = 0;
+
+            /* Clear current entries.  They will be re-created in setupPipeline. */
+            if (pBackendDXContext->paShaderResourceView)
+            {
+                for (uint32_t i = 0; i < pBackendDXContext->cShaderResourceView; ++i)
+                {
+                    DXVIEW *pDXView = &pBackendDXContext->paShaderResourceView[i];
+                    if (i < cValidEntries)
+                        dxViewRemoveFromList(pDXView); /* Remove from list because DXVIEW array will be reallocated. */
+                    else
+                        dxViewDestroy(pDXView);
+                }
+            }
+
+            rc = dxCOTableRealloc((void **)&pBackendDXContext->paShaderResourceView, &pBackendDXContext->cShaderResourceView,
+                                  sizeof(pBackendDXContext->paShaderResourceView[0]), pDXContext->cot.cSRView, cValidEntries);
+            AssertRCBreak(rc);
+
+            for (uint32_t i = 0; i < cValidEntries; ++i)
+            {
+                DXVIEW *pDXView = &pBackendDXContext->paShaderResourceView[i];
+                if (pDXView->u.pView)
+                    dxViewAddToList(pThisCC, pDXView);
+            }
+#endif
             break;
         case SVGA_COTABLE_ELEMENTLAYOUT:
 #ifndef DX_STATE_TRACKER
