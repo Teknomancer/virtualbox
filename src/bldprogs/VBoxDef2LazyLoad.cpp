@@ -1,4 +1,4 @@
-/* $Id: VBoxDef2LazyLoad.cpp 114135 2026-05-14 18:43:29Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxDef2LazyLoad.cpp 114315 2026-06-09 16:16:02Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxDef2LazyLoad - Lazy Library Loader Generator.
  *
@@ -431,9 +431,9 @@ static RTEXITCODE generateOutputInnerX86AndAMD64(FILE *pOutput)
                     "%%ifdef ASM_FORMAT_PE\n"
                     ";@todo\n"
                     "%%endif\n"
-                    "global NAME(g_LazyPtr_%s)\n"
-                    "NAME(g_LazyPtr_%s): RTCCPTR_DEF 0\n",
-                    pExp->pszExportedNm, pExp->pszExportedNm);
+                    "GLOBALNAME_RAW NAME(g_LazyPtr_%s), data, hidden, RTCCPTR_CB\n"
+                    "RTCCPTR_DEF 0\n",
+                    pExp->pszExportedNm);
         else if (pExp->pszUnstdcallName)
             fprintf(pOutput,
                     "%%ifdef ASM_FORMAT_PE\n"
@@ -1190,11 +1190,16 @@ static RTEXITCODE generateOutputInnerArm64(FILE *pOutput)
                     pExp->pszExportedNm);
         else
             fprintf(pOutput,
-                    ".globl NAME(g_LazyPtr_%s)\n"
+                    "#ifdef ASM_FORMAT_MACHO\n"
+                    "    .private_extern NAME(g_LazyPtr_%s)\n"
+                    "#elif defined(ASM_FORMAT_ELF)\n"
+                    "    .hidden NAME(g_LazyPtr_%s)\n"
+                    "#endif\n"
+                    "    .globl NAME(g_LazyPtr_%s)\n"
                     "NAME(g_LazyPtr_%s):\n"
                     "    .quad 0\n"
                     "\n",
-                    pExp->pszExportedNm, pExp->pszExportedNm);
+                    pExp->pszExportedNm, pExp->pszExportedNm, pExp->pszExportedNm, pExp->pszExportedNm);
     fprintf(pOutput,
             "    .quad 0 /* Terminator entry for traversal. */\n"
             "ENDDATA\n"
@@ -1885,7 +1890,7 @@ int main(int argc, char **argv)
             else if (   !strcmp(psz, "--version")
                      || !strcmp(psz, "-V"))
             {
-                printf("$Revision: 114135 $\n");
+                printf("$Revision: 114315 $\n");
                 return RTEXITCODE_SUCCESS;
             }
             else
