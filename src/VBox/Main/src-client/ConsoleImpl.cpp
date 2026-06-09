@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114258 2026-06-04 13:34:20Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114285 2026-06-09 12:19:20Z vadim.galitsyn@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -3307,7 +3307,8 @@ HRESULT Console::createSharedFolder(const com::Utf8Str &aName, const com::Utf8St
         }
 
         /* second, create the given folder */
-        hrc = i_createSharedFolder(aName, SharedFolderData(aHostPath, !!aWritable, !!aAutomount, aAutoMountPoint));
+        hrc = i_createSharedFolder(aName, SharedFolderData(aHostPath, !!aWritable, !!aAutomount, aAutoMountPoint,
+                                                           pSharedFolder->i_getSymlinkPolicy()));
         if (FAILED(hrc))
             return hrc;
     }
@@ -8669,7 +8670,8 @@ HRESULT Console::i_powerUp(IProgress **aProgress, bool aPaused)
                 sharedFolders[it->first] = SharedFolderData(pSF->i_getHostPath(),
                                                             pSF->i_isWritable(),
                                                             pSF->i_isAutoMounted(),
-                                                            pSF->i_getAutoMountPoint());
+                                                            pSF->i_getAutoMountPoint(),
+                                                            pSF->i_getSymlinkPolicy());
             }
         }
 
@@ -9448,9 +9450,14 @@ HRESULT Console::i_fetchSharedFolders(BOOL aGlobal)
                 if (FAILED(hrc)) throw hrc;
                 Utf8Str strAutoMountPoint(bstr);
 
+                SymlinkPolicy_T enmSymlinkPolicy = SymlinkPolicy_None;
+                hrc = pSharedFolder->COMGETTER(SymlinkPolicy)(&enmSymlinkPolicy);
+                if (FAILED(hrc)) throw hrc;
+
                 m_mapGlobalSharedFolders.insert(std::make_pair(strName,
                                                                SharedFolderData(strHostPath, !!writable,
-                                                                                 !!autoMount, strAutoMountPoint)));
+                                                                                !!autoMount, strAutoMountPoint,
+                                                                                enmSymlinkPolicy)));
 
                 /* send changes to HGCM if the VM is running */
                 if (online)
@@ -9476,7 +9483,8 @@ HRESULT Console::i_fetchSharedFolders(BOOL aGlobal)
 
                             /* create the new global folder */
                             hrc = i_createSharedFolder(strName,
-                                                       SharedFolderData(strHostPath, !!writable, !!autoMount, strAutoMountPoint));
+                                                       SharedFolderData(strHostPath, !!writable, !!autoMount, strAutoMountPoint,
+                                                                        enmSymlinkPolicy));
                             if (FAILED(hrc)) throw hrc;
                         }
                     }
@@ -9542,9 +9550,14 @@ HRESULT Console::i_fetchSharedFolders(BOOL aGlobal)
                 if (FAILED(hrc)) throw hrc;
                 Utf8Str strAutoMountPoint(bstr);
 
+                SymlinkPolicy_T enmSymlinkPolicy = SymlinkPolicy_None;
+                hrc = pSharedFolder->COMGETTER(SymlinkPolicy)(&enmSymlinkPolicy);
+                if (FAILED(hrc)) throw hrc;
+
                 m_mapMachineSharedFolders.insert(std::make_pair(strName,
                                                                 SharedFolderData(strHostPath, !!writable,
-                                                                                 !!autoMount, strAutoMountPoint)));
+                                                                                 !!autoMount, strAutoMountPoint,
+                                                                                 enmSymlinkPolicy)));
 
                 /* send changes to HGCM if the VM is running */
                 if (online)
@@ -9571,7 +9584,8 @@ HRESULT Console::i_fetchSharedFolders(BOOL aGlobal)
 
                             /* create the new machine folder */
                             hrc = i_createSharedFolder(strName,
-                                                       SharedFolderData(strHostPath, !!writable, !!autoMount, strAutoMountPoint));
+                                                       SharedFolderData(strHostPath, !!writable, !!autoMount, strAutoMountPoint,
+                                                       enmSymlinkPolicy));
                             if (FAILED(hrc)) throw hrc;
                         }
                     }
@@ -9721,7 +9735,7 @@ HRESULT Console::i_createSharedFolder(const Utf8Str &strName, const SharedFolder
                       | (fSymlinksCreate    ? SHFL_ADD_MAPPING_F_CREATE_SYMLINKS : 0)
                       | (fMissing           ? SHFL_ADD_MAPPING_F_MISSING : 0));
         SHFLSTRING_TO_HGMC_PARAM(&aParams[3], pAutoMountPoint);
-        HGCMSvcSetU32(&aParams[4], SymlinkPolicy_None);
+        HGCMSvcSetU32(&aParams[4], aData.m_enmSymlinkPolicy);
         AssertCompile(SHFL_CPARMS_ADD_MAPPING == 5);
 
         vrc = m_pVMMDev->hgcmHostCall("VBoxSharedFolders", SHFL_FN_ADD_MAPPING, SHFL_CPARMS_ADD_MAPPING, aParams);
