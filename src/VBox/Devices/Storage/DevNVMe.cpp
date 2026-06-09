@@ -1,4 +1,4 @@
-/* $Id: DevNVMe.cpp 113794 2026-04-10 07:11:34Z alexander.eichner@oracle.com $ */
+/* $Id: DevNVMe.cpp 114272 2026-06-09 06:44:33Z alexander.eichner@oracle.com $ */
 /** @file
  * DevNVMe - Non Volatile Memory express (previous name: NVMHCI)
  */
@@ -3811,6 +3811,8 @@ static bool nvmeR3PrpListWalk(PPDMDEVINS pDevIns, PNVME pThis, PNVMECC pThisCC, 
     LogFlowFunc(("pThis=%#p pfnCopyWorker=%#p PrpList=%#llx pSgBuf=%#p cbHost=%zu cbSkip=%zu\n",
                  pThis, pfnCopyWorker, PrpList, pSgBuf, cbHost, cbSkip));
 
+    ASSERT_GUEST_RETURN(cPrpsLeftInPage, false);
+
     do
     {
         NVMEPRP aPrps[32];
@@ -3829,6 +3831,7 @@ static bool nvmeR3PrpListWalk(PPDMDEVINS pDevIns, PNVME pThis, PNVMECC pThisCC, 
             cPrpsLeft -= cPrpsRead;
             GCPhysPrpList = NVME_PRP_TO_GCPHYS(aPrps[cPrpsRead], pThis->uMpsSet);
             cPrpsLeftInPage = RT_MIN(NVME_PRP_GET_SIZE(aPrps[cPrpsRead], pThis->uMpsSet) / sizeof(NVMEPRP), cPrpsLeft);
+            ASSERT_GUEST_RETURN(cPrpsLeftInPage, false);
         }
         else
         {
