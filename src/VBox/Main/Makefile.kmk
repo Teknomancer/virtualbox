@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114284 2026-06-09 12:01:29Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1145,12 +1145,6 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   VBoxC_LIBS += $(PATH_STAGE_LIB)/VBoxDnDHostR3Lib$(VBOX_SUFF_LIB)
  endif
 
- ifdef VBOX_WITH_SHARED_CLIPBOARD
-  if1of ($(KBUILD_TARGET), linux solaris freebsd)
-   VBoxC_LIBS += Xt X11
-  endif
- endif
-
  VBoxC_INTERMEDIATES = \
  	$(VBOX_MAIN_PREREQS) \
  	$(VBOX_XML_SCHEMADEFS_H) \
@@ -1312,6 +1306,36 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
     VBoxC_SOURCES += \
     	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
     	src-client/VBoxSharedClipboardSvc-x11.cpp
+
+    define def_VBoxC_libToLazyLoad
+     VBoxC_SOURCES += \
+    	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
+     VBoxC_CLEAN += \
+    	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
+     $$$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm: $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def $(VBOX_DEF_2_LAZY_LOAD) | $$$$(dir $$@)
+	$$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$$(filter %.def, $$^),$$@)
+	$$(QUIET)$$(RM) -f -- "$$@"
+	$$(VBOX_DEF_2_LAZY_LOAD) --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(filter %.def, $$^)
+    endef
+
+    if1of ($(KBUILD_TARGET), linux)
+     VBOX_VBOXC_LIBX11_VER = 6
+     VBOX_VBOXC_LIBXT_VER  = 6
+    endif
+    $(evalcall2 def_VBoxC_libToLazyLoad,$(PATH_ROOT)/src/VBox/GuestHost/libX11.def,libX11,$(VBOX_VBOXC_LIBX11_VER))
+
+    VBoxC_SOURCES += \
+    	$(VBoxC_0_OUTDIR)/libXtLazyLoad.asm
+    VBoxC_CLEAN += \
+    	$(VBoxC_0_OUTDIR)/libXtLazyLoad.asm \
+    	$(VBoxC_0_OUTDIR)/libXtNoData.def
+    $$(VBoxC_0_OUTDIR)/libXtNoData.def: $(PATH_ROOT)/src/VBox/GuestHost/libXt.def | $$(dir $$@)
+	$(call MSG_GENERATE,VBoxC,$@,$<)
+	$(QUIET)$(SED) -e '/ DATA$$/d' --output "$@" "$<"
+    $$(VBoxC_0_OUTDIR)/libXtLazyLoad.asm: $$(VBoxC_0_OUTDIR)/libXtNoData.def $(VBOX_DEF_2_LAZY_LOAD) | $$(dir $$@)
+	$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$(filter %.def, $^),$@)
+	$(QUIET)$(RM) -f -- "$@"
+	$(VBOX_DEF_2_LAZY_LOAD) --system --library libXt$(SUFF_DLL)$(if $(VBOX_VBOXC_LIBXT_VER),.$(VBOX_VBOXC_LIBXT_VER),) --output "$@" $(filter %.def, $^)
    else
     VBoxC_SOURCES += \
     	src-client/VBoxSharedClipboardSvc-x11-stubs.cpp
