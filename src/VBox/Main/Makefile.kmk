@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114318 2026-06-09 16:36:13Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114320 2026-06-09 17:07:36Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1309,13 +1309,13 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
     VBoxC_DEFS += VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
     define def_VBoxC_libToLazyLoad
      VBoxC_SOURCES += \
-    	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
+     	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
      VBoxC_CLEAN += \
-    	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
-     	$$$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm: $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def $(VBOX_DEF_2_LAZY_LOAD) | $$$$(dir $$@)
-	 $$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$$(filter %.def, $$^),$$@)
-	 $$(QUIET)$$(RM) -f -- "$$@"
-	 $$(VBOX_DEF_2_LAZY_LOAD) --explicit-load-function --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(filter %.def, $$^)
+     	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
+     $$$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm: $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def $(VBOX_DEF_2_LAZY_LOAD) | $$$$(dir $$@)
+	$$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$$(filter %.def, $$^),$$@)
+	$$(QUIET)$$(RM) -f -- "$$@"
+	$$(VBOX_DEF_2_LAZY_LOAD) --explicit-load-function --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(filter %.def, $$^)
     endef
     if1of ($(KBUILD_TARGET), linux)
      # Define library versions to use, depending on the OS we build for.
