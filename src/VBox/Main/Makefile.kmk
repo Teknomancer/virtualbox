@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114284 2026-06-09 12:01:29Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114316 2026-06-09 16:22:02Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1298,49 +1298,38 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   	src-client/GuestShClPrivate.cpp \
   	src-client/VBoxSharedClipboardSvc-utils.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp
-  if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
-   VBoxC_INCS += $(PATH_ROOT)/src/VBox/HostServices/SharedClipboard
-  endif
   if1of ($(KBUILD_TARGET), linux solaris freebsd)
-   ifndef VBOX_HEADLESS
-    VBoxC_SOURCES += \
-    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
-    	src-client/VBoxSharedClipboardSvc-x11.cpp
+   VBoxC_SOURCES += \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
+   	src-client/VBoxSharedClipboardSvc-x11.cpp
 
+   VBOX_WITH_VBOXC_LAZY_LOAD := 1
+
+   ifdef VBOX_WITH_VBOXC_LAZY_LOAD
+    VBoxC_DEFS += VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
     define def_VBoxC_libToLazyLoad
      VBoxC_SOURCES += \
     	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
      VBoxC_CLEAN += \
     	$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm
-     $$$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm: $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def $(VBOX_DEF_2_LAZY_LOAD) | $$$$(dir $$@)
-	$$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$$(filter %.def, $$^),$$@)
-	$$(QUIET)$$(RM) -f -- "$$@"
-	$$(VBOX_DEF_2_LAZY_LOAD) --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(filter %.def, $$^)
+     	$$$$(VBoxC_0_OUTDIR)/$(2)LazyLoad.asm: $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def $(VBOX_DEF_2_LAZY_LOAD) | $$$$(dir $$@)
+	 $$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$$(filter %.def, $$^),$$@)
+	 $$(QUIET)$$(RM) -f -- "$$@"
+	 $$(VBOX_DEF_2_LAZY_LOAD) --explicit-load-function --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(filter %.def, $$^)
     endef
-
     if1of ($(KBUILD_TARGET), linux)
+     # Define library versions to use, depending on the OS we build for.
+     # Note: Solaris does *not* have any of those libs with a version suffix, so simply keep those empty (= unset) then.
      VBOX_VBOXC_LIBX11_VER = 6
      VBOX_VBOXC_LIBXT_VER  = 6
     endif
     $(evalcall2 def_VBoxC_libToLazyLoad,$(PATH_ROOT)/src/VBox/GuestHost/libX11.def,libX11,$(VBOX_VBOXC_LIBX11_VER))
-
-    VBoxC_SOURCES += \
-    	$(VBoxC_0_OUTDIR)/libXtLazyLoad.asm
-    VBoxC_CLEAN += \
-    	$(VBoxC_0_OUTDIR)/libXtLazyLoad.asm \
-    	$(VBoxC_0_OUTDIR)/libXtNoData.def
-    $$(VBoxC_0_OUTDIR)/libXtNoData.def: $(PATH_ROOT)/src/VBox/GuestHost/libXt.def | $$(dir $$@)
-	$(call MSG_GENERATE,VBoxC,$@,$<)
-	$(QUIET)$(SED) -e '/ DATA$$/d' --output "$@" "$<"
-    $$(VBoxC_0_OUTDIR)/libXtLazyLoad.asm: $$(VBoxC_0_OUTDIR)/libXtNoData.def $(VBOX_DEF_2_LAZY_LOAD) | $$(dir $$@)
-	$(call MSG_TOOL,VBoxDef2LazyLoad,VBoxC,$(filter %.def, $^),$@)
-	$(QUIET)$(RM) -f -- "$@"
-	$(VBOX_DEF_2_LAZY_LOAD) --system --library libXt$(SUFF_DLL)$(if $(VBOX_VBOXC_LIBXT_VER),.$(VBOX_VBOXC_LIBXT_VER),) --output "$@" $(filter %.def, $^)
+    $(evalcall2 def_VBoxC_libToLazyLoad,$(PATH_ROOT)/src/VBox/GuestHost/libXt.def,libXt,$(VBOX_VBOXC_LIBXT_VER))
    else
-    VBoxC_SOURCES += \
-    	src-client/VBoxSharedClipboardSvc-x11-stubs.cpp
-   endif
-  endif
+    VBoxC_LIBS += \
+    	libX11 libXt
+   endif # VBOX_WITH_VBOXC_LAZY_LOAD
+  endif # linux solaris freebsd
   VBoxC_SOURCES.win += \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-win.cpp \
   	src-client/VBoxSharedClipboardSvc-win.cpp
@@ -1350,6 +1339,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
    ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
     VBoxC_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
+    VBoxC_INCS    += $(PATH_ROOT)/src/VBox/HostServices/SharedClipboard
     VBoxC_SOURCES += \
     	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-http.cpp
    endif
@@ -1361,8 +1351,8 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardDataObjectImpl-win.cpp \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardEnumFormatEtcImpl-win.cpp \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardStreamImpl-win.cpp
-  endif
- endif
+  endif # VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+ endif # VBOX_WITH_SHARED_CLIPBOARD
  ifdef VBOX_WITH_DRAG_AND_DROP
   VBoxC_SOURCES += \
   	src-client/GuestDnDPrivate.cpp \

@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.cpp 114316 2026-06-09 16:22:02Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC.
  */
@@ -8117,10 +8117,8 @@ HRESULT Machine::initDataAndChildObjects()
     mGuestDebugControl->init(this);
 
     /* create the clipboard control object */
-    hrc = unconst(mClipboard).createObject();
-    ComAssertComRCRetRC(hrc);
-    hrc = mClipboard->init(this);
-    ComAssertComRCRetRC(hrc);
+    unconst(mClipboard).createObject();
+    mClipboard->init(this);
 
     return hrc;
 }

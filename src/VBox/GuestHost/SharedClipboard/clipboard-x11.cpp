@@ -169,7 +169,7 @@ _WidgetClassRec* applicationShellWidgetClass;
 const char XtShellStrings [] = "";
 # endif /* RT_OS_SOLARIS_10 */
 #else /* !TESTCASE */
-# ifdef VBOX_WITH_VBOXCLIENT_LAZY_LOAD
+# ifdef VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
 /* Defines needed for lazy loading global data from the shared objects (.so).
  * See r157060. */
 DECLASM(WidgetClass * ) LazyGetPtr_applicationShellWidgetClass(void);

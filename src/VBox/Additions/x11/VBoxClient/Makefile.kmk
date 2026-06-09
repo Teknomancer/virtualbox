@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 113967 2026-04-22 09:47:12Z vadim.galitsyn@oracle.com $
+# $Id: Makefile.kmk 114316 2026-06-09 16:22:02Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the VirtualBox Guest Addition X11 Client.
 #
@@ -33,7 +33,7 @@ include $(KBUILD_PATH)/subheader.kmk
 VBOX_WITH_DISTRO_XRAND_XINERAMA =
 
 # We want to lazy load as much stuff as possible. See #10427.
-VBOX_WITH_VBOXCLIENT_LAZY_LOAD := 1
+VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD := 1
 
 # We don't yet have a seamless mode compilation flag, so define it here unconditionally.
 VBOX_WITH_SEAMLESS := 1
