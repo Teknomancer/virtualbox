@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114316 2026-06-09 16:22:02Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114317 2026-06-09 16:27:58Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the VirtualBox Guest Addition X11 Client.
 #
@@ -103,13 +103,13 @@ VBoxClient_LIBS.netbsd = \
 	crypt
 VBoxClient_LIBS.solaris = \
 	dl
-ifndef VBOX_WITH_VBOXCLIENT_LAZY_LOAD
+ifndef VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
  VBoxClient_LIBS = \
  	X11 Xt Xext Xmu
 endif
 ifdef VBOX_WITH_DISTRO_XRAND_XINERAMA
  VBoxClient_DEFS += WITH_DISTRO_XRAND_XINERAMA
- ifndef VBOX_WITH_VBOXCLIENT_LAZY_LOAD
+ ifndef VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
   VBoxClient_LIBS += Xrandr
  endif
 endif
@@ -218,7 +218,7 @@ ifdef VBOX_WITH_SHARED_CLIPBOARD
  endif
 endif
 
-ifdef VBOX_WITH_VBOXCLIENT_LAZY_LOAD
+ifdef VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
  # Macro for generating the lazy loading assembly stub loader for a specific .def file.
  #
  # @param 1  Absolute path of the .def file to use as a template.
@@ -235,7 +235,7 @@ ifdef VBOX_WITH_VBOXCLIENT_LAZY_LOAD
 	$$(VBOX_DEF_2_LAZY_LOAD) --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def
  endef # VBOXCLIENT_LAZYLOAD_GEN_ASM_FN
 
- VBoxClient_DEFS    += VBOX_WITH_VBOXCLIENT_LAZY_LOAD
+ VBoxClient_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
 
  # Define library versions to use, depending on the OS we build for.
  # Note: Solaris does *not* have any of those libs with a version suffix, so simply keep those empty (= unset) then.
