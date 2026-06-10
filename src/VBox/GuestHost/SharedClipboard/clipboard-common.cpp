@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114329 2026-06-10 14:28:13Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Some helper function for converting between the various eol.
  */
@@ -1159,6 +1159,10 @@ const char *ShClHostFunctionToStr(uint32_t uFn)
         RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_SET_HEADLESS);
         RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_CANCEL);
         RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_ERROR);
+        RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_READ_DATA);
+        RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_WRITE_FORMATS);
+        RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_WRITE_DATA);
+        RT_CASE_RET_STR(VBOX_SHCL_HOST_FN_RESET);
     }
     return "Unknown";
 }
