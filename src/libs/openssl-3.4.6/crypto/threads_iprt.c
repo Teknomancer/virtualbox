@@ -1,4 +1,4 @@
-/* $Id: threads_iprt.c 114324 2026-06-10 12:45:43Z alexander.rudnev@oracle.com $ */
+/* $Id: threads_iprt.c 114326 2026-06-10 13:57:05Z aleksey.ilyushin@oracle.com $ */
 /** @file
  * Crypto threading and atomic functions built upon IPRT.
  */
@@ -99,16 +99,10 @@ void ossl_rcu_write_unlock(CRYPTO_RCU_LOCK *lock)
 }
 
 
-int ossl_rcu_call(CRYPTO_RCU_LOCK *lock, rcu_cb_fn cb, void *data)
+void ossl_rcu_call(CRYPTO_RCU_LOCK *lock, CRYPTO_RCU_CB_ITEM *item, rcu_cb_fn cb, void *data)
 {
-    struct rcu_cb_item *new =
-        OPENSSL_zalloc(sizeof(*new));
-
-    if (new == NULL)
-        return 0;
-
-    new->data = data;
-    new->fn = cb;
+    item->data = data;
+    item->fn = cb;
     /*
      * Use __ATOMIC_ACQ_REL here to indicate that any prior writes to this
      * list are visible to us prior to reading, and publish the new value
@@ -116,9 +110,7 @@ int ossl_rcu_call(CRYPTO_RCU_LOCK *lock, rcu_cb_fn cb, void *data)
      * VBOX: Our atomic primitives do memory fence, which should be equivalent
      * to __ATOMIC_ACQ_REL behavior.
      */
-    new->next = ASMAtomicXchgPtrT(&lock->cb_items, new, prcu_cb_item);
-
-    return 1;
+    item->next = ASMAtomicXchgPtrT(&lock->cb_items, item, prcu_cb_item);
 }
 
 /* VBOX: no need to do any synchronization here, as we use simple R/W lock */
