@@ -1,4 +1,4 @@
-/* $Id: DevE1000.cpp 114234 2026-06-01 15:36:39Z alexander.eichner@oracle.com $ */
+/* $Id: DevE1000.cpp 114323 2026-06-10 09:15:14Z aleksey.ilyushin@oracle.com $ */
 /** @file
  * DevE1000 - Intel 82540EM Ethernet Controller Emulation.
  *
@@ -3764,6 +3764,7 @@ static int e1kHandleRxPacket(PPDMDEVINS pDevIns, PE1KSTATE pThis, PE1KSTATECC pT
 
     /* Validate parameters first. */
     bool fVP = pThisCC->pRxOps->pfnGetVP(pWBDesc);
+    /* cbMax does not include FCS! */
     size_t cbMax = ((RCTL & RCTL_LPE) ? E1K_MAX_RX_PKT_SIZE - 4 : 1518) - (fVP ? 0 : 4);
     if (RT_UNLIKELY(cb < 16))
     {
@@ -3807,7 +3808,7 @@ static int e1kHandleRxPacket(PPDMDEVINS pDevIns, PE1KSTATE pThis, PE1KSTATECC pT
         cb = 60;
     }
     /* FCS */
-    if (!(RCTL & RCTL_SECRC) && cb + sizeof(uint32_t) <= cbMax)
+    if (!(RCTL & RCTL_SECRC) && cb <= cbMax)
     {
         STAM_PROFILE_ADV_START(&pThis->StatReceiveCRC, a);
         /*
@@ -8046,7 +8047,7 @@ static bool e1kR3AddressFilter(PE1KSTATE pThis, PE1KSTATECC pThisCC, const void 
         E1K_INC_CNT32(ROC);
         return false;
     }
-    else if (!(RCTL & RCTL_LPE) && cb > 1522)
+    else if (!(RCTL & RCTL_LPE) && cb > 1522)   /* MTU 1500 + 14 (ethhdr) + 4 (vlan) + 4 (FCS)*/
     {
         /* When long packet reception is disabled packets over 1522 are discarded */
         E1kLog(("%s Discarding incoming packet (LPE=0), cb=%d\n",
