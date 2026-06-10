@@ -1,4 +1,4 @@
-/* $Id: threads_iprt.c 114326 2026-06-10 13:57:05Z aleksey.ilyushin@oracle.com $ */
+/* $Id: threads_iprt.c 114328 2026-06-10 14:13:47Z aleksey.ilyushin@oracle.com $ */
 /** @file
  * Crypto threading and atomic functions built upon IPRT.
  */
@@ -98,6 +98,16 @@ void ossl_rcu_write_unlock(CRYPTO_RCU_LOCK *lock)
     RTSemRWReleaseWrite(lock->rw_lock);
 }
 
+
+CRYPTO_RCU_CB_ITEM *ossl_rcu_cb_item_new(void)
+{
+    return OPENSSL_zalloc(sizeof(CRYPTO_RCU_CB_ITEM));
+}
+
+void ossl_rcu_cb_item_free(CRYPTO_RCU_CB_ITEM *item)
+{
+    OPENSSL_free(item);
+}
 
 void ossl_rcu_call(CRYPTO_RCU_LOCK *lock, CRYPTO_RCU_CB_ITEM *item, rcu_cb_fn cb, void *data)
 {
