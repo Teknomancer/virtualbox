@@ -1,4 +1,4 @@
-/* $Id: VBoxNetSlirpNAT.cpp 114171 2026-05-21 14:31:05Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxNetSlirpNAT.cpp 114336 2026-06-11 07:38:57Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxNetNAT - NAT Service for connecting to IntNet.
  */
@@ -30,9 +30,12 @@
 #ifdef RT_OS_WINDOWS
 # include <iprt/win/winsock2.h>
 # include <iprt/win/ws2tcpip.h>
+# include <iprt/win/windows.h>
 # include "winutils.h"
 # define inet_aton(x, y) inet_pton(2, x, y)
 # define AF_INET6 23
+#else
+# include <signal.h>
 #endif
 
 #if defined(RT_OS_LINUX) || defined(RT_OS_SOLARIS)
@@ -115,6 +118,139 @@
 extern "C" int getrawsock(int type);
 #endif
 
+
+/** Main event queue interrupted by the host signal / console control handler. */
+static com::NativeEventQueue *g_pSignalEventQ = NULL;
+
+
+/**
+ * Interrupts the main native event queue from a process termination signal.
+ *
+ * @note The event queue pointer may be NULL when signal handling is not fully
+ *       installed or after it has been uninstalled.
+ */
+static void signalInterruptEventQueue(void) RT_NOTHROW_DEF
+{
+    com::NativeEventQueue *pQueue = g_pSignalEventQ;
+    if (pQueue != NULL)
+        pQueue->interruptEventQueueProcessing();
+}
+
+
+#ifdef RT_OS_WINDOWS
+/**
+ * Handles Windows console control notifications for VBoxNetSlirpNAT.
+ *
+ * @returns TRUE if the console control event was recognized and shutdown was
+ *          requested, FALSE if the event should be passed to the next handler.
+ * @param   dwCtrlType     Windows console control event identifier.
+ *
+ * @note This function runs on a Windows console control handler thread.  It
+ *       must not perform full NAT teardown directly.
+ */
+static BOOL WINAPI signalHandler(DWORD dwCtrlType) RT_NOTHROW_DEF
+{
+    bool fEventHandled = false;
+    switch (dwCtrlType)
+    {
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_C_EVENT:
+        case CTRL_LOGOFF_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+            signalInterruptEventQueue();
+            fEventHandled = true;
+            break;
+
+        default:
+            break;
+    }
+
+    return fEventHandled;
+}
+#else
+/**
+ * Handles POSIX process termination signals for VBoxNetSlirpNAT.
+ *
+ * @param   iSignal        Signal number delivered by the host OS.
+ *
+ * The signal value is not currently distinguished.  Any installed signal means
+ * that the service should leave the main event loop and shut down cleanly.
+ */
+static void signalHandler(int iSignal) RT_NOTHROW_DEF
+{
+    RT_NOREF(iSignal);
+    signalInterruptEventQueue();
+}
+#endif
+
+
+/**
+ * Installs the platform-specific shutdown signal handler.
+ *
+ * @returns VBox status code.
+ * @retval  VINF_SUCCESS on success.
+ * @param   pEventQ        Main native event queue to interrupt when a shutdown
+ *                         signal or console control event is received.
+ *
+ * The caller must keep @a pEventQ valid until signalHandlerUninstall() has been
+ * called.  The installed handler only interrupts the queue; it does not destroy
+ * NAT resources itself.
+ */
+static int signalHandlerInstall(com::NativeEventQueue *pEventQ)
+{
+    g_pSignalEventQ = pEventQ;
+
+#ifdef RT_OS_WINDOWS
+    if (!SetConsoleCtrlHandler((PHANDLER_ROUTINE)signalHandler, TRUE /* Add handler */))
+        return RTErrConvertFromWin32(GetLastError());
+#else
+    if (   signal(SIGINT,  signalHandler) == SIG_ERR
+        || signal(SIGTERM, signalHandler) == SIG_ERR)
+        return RTErrConvertFromErrno(errno);
+# ifdef SIGBREAK
+    if (signal(SIGBREAK, signalHandler) == SIG_ERR)
+        return RTErrConvertFromErrno(errno);
+# endif
+#endif
+
+    return VINF_SUCCESS;
+}
+
+
+/**
+ * Uninstalls the platform-specific shutdown signal handler.
+ *
+ * @returns VBox status code.  If several handler restoration operations fail,
+ *          the first failure status is returned.
+ * @retval  VINF_SUCCESS on success.
+ *
+ * This resets the process signal state used by VBoxNetSlirpNAT and clears the
+ * saved event queue pointer so later signals cannot access a stale queue.
+ */
+static int signalHandlerUninstall(void)
+{
+    int rc = VINF_SUCCESS;
+
+#ifdef RT_OS_WINDOWS
+    if (!SetConsoleCtrlHandler((PHANDLER_ROUTINE)signalHandler, FALSE /* Remove handler */))
+        rc = RTErrConvertFromWin32(GetLastError());
+#else
+    if (signal(SIGINT, SIG_DFL) == SIG_ERR)
+        rc = RTErrConvertFromErrno(errno);
+    if (signal(SIGTERM, SIG_DFL) == SIG_ERR && RT_SUCCESS(rc))
+        rc = RTErrConvertFromErrno(errno);
+# ifdef SIGBREAK
+    if (signal(SIGBREAK, SIG_DFL) == SIG_ERR && RT_SUCCESS(rc))
+        rc = RTErrConvertFromErrno(errno);
+# endif
+#endif
+
+    g_pSignalEventQ = NULL;
+    return rc;
+}
+
+
 /** The maximum (default) poll/WSAPoll timeout. */
 #define DRVNAT_DEFAULT_TIMEOUT (int)RT_MS_1HOUR
 
@@ -177,6 +313,10 @@ class VBoxNetSlirpNAT
 #endif
 
     volatile uint64_t       m_cWakeupNotifs;
+    /** Initialization indicator.  */
+    volatile bool           m_fInitialized;
+    /** Set when service shutdown has been requested. */
+    volatile bool           m_fShutdown;
 
     SlirpConfig m_ProxyOptions;
     struct sockaddr_in m_src4;
@@ -241,6 +381,7 @@ public:
     RTEXITCODE parseArgs(int argc, char *argv[]);
 
     int init();
+    void destroy();
     int run();
     void shutdown();
 
@@ -313,11 +454,18 @@ VBoxNetSlirpNAT::VBoxNetSlirpNAT()
     m_hPipeRead(NIL_RTPIPE),
 #endif
     m_cWakeupNotifs(0),
+    m_fInitialized(false),
+    m_fShutdown(false),
     m_u16Mtu(1500),
     m_pSlirp(NULL),
     fPassDomain(false)
 {
     LogFlowFuncEnter();
+
+#ifdef RT_OS_WINDOWS
+    m_ahWakeupSockPair[0] = INVALID_SOCKET;
+    m_ahWakeupSockPair[1] = INVALID_SOCKET;
+#endif
 
     RT_ZERO(m_ProxyOptions);
 
@@ -360,18 +508,7 @@ VBoxNetSlirpNAT::VBoxNetSlirpNAT()
 
 VBoxNetSlirpNAT::~VBoxNetSlirpNAT()
 {
-    RTReqQueueDestroy(m_hSlirpReqQueue);
-    m_hSlirpReqQueue = NIL_RTREQQUEUE;
-
-    if (m_ProxyOptions.outbound_addr)
-    {
-        RTMemFree(m_ProxyOptions.outbound_addr);
-        m_ProxyOptions.outbound_addr = NULL;
-    }
-
-    RTMemFree(m_paPollFd);
-    m_paPollFd = NULL;
-    m_cPollFd  = 0;
+    destroy();
 }
 
 
@@ -483,6 +620,16 @@ int VBoxNetSlirpNAT::init()
     /* Get the home folder location.  It's ok if it fails. */
     initHome();
 
+#ifdef RT_OS_WINDOWS
+    WSADATA WsaData = { 0 };
+    int err = WSAStartup(MAKEWORD(2,2), &WsaData);
+    if (err)
+    {
+        reportError("WSAStartup failed (%d)\n", err);
+        return VERR_NET_INIT_FAILED;
+    }
+#endif
+
     /*
      * We get the network name on the command line.  Get hold of its
      * API object to get the rest of the configuration from.
@@ -521,7 +668,7 @@ int VBoxNetSlirpNAT::init()
         com::Utf8StrFmt strTftpRoot("%s%c%s", m_strHome.c_str(), RTPATH_DELIMITER, "TFTP");
         char *pszStrTemp;       // avoid const char ** vs char **
         rc = RTStrUtf8ToCurrentCP(&pszStrTemp, strTftpRoot.c_str());
-        AssertRC(rc);
+        AssertLogRelRCReturn(rc, rc);
         m_ProxyOptions.tftp_path = pszStrTemp;
     }
 
@@ -546,7 +693,8 @@ int VBoxNetSlirpNAT::init()
     if (!m_pSlirp)
         return VERR_NO_MEMORY;
 
-    initComEvents();
+    rc = initComEvents();
+    AssertLogRelRCReturn(rc, rc);
     /* end of COM initialization */
 
     rc = RTReqQueueCreate(&m_hSlirpReqQueue);
@@ -557,11 +705,12 @@ int VBoxNetSlirpNAT::init()
     m_ahWakeupSockPair[0] = INVALID_SOCKET;
     m_ahWakeupSockPair[1] = INVALID_SOCKET;
     rc = RTWinSocketPair(AF_INET, SOCK_DGRAM, 0, m_ahWakeupSockPair);
-    AssertRCReturn(rc, rc);
+    AssertLogRelRCReturn(rc, rc);
+
 #else
     /* Create the control pipe. */
     rc = RTPipeCreate(&m_hPipeRead, &m_hPipeWrite, 0 /*fFlags*/);
-    AssertRCReturn(rc, rc);
+    AssertLogRelRCReturn(rc, rc);
 #endif
 
     /* connect to the intnet */
@@ -569,8 +718,103 @@ int VBoxNetSlirpNAT::init()
     if (RT_SUCCESS(rc))
         rc = IntNetR3IfSetActive(m_hIf, true /*fActive*/);
 
+    if (RT_SUCCESS(rc))
+        m_fInitialized = true;
+
     LogFlowFuncLeaveRC(rc);
     return rc;
+}
+
+
+/**
+ * Stops worker activity and releases resources acquired by init().
+ *
+ * The method requests shutdown, wakes the polling and receive paths, waits for
+ * worker threads to exit, tears down libslirp and the internal-network
+ * interface, closes the wakeup descriptors, destroys the request queue, and
+ * frees dynamically allocated configuration data.
+ *
+ * It is safe to call this more than once.  Calls made before successful
+ * initialization, or after resources have already been released, return without
+ * doing any work.
+ */
+void VBoxNetSlirpNAT::destroy()
+{
+    if (!ASMAtomicReadBool(&m_fInitialized))
+        return;
+
+    ASMAtomicWriteBool(&m_fShutdown, true);
+    if (m_hIf != NULL)
+        IntNetR3IfWaitAbort(m_hIf);
+    if (m_hThrdPoll != NIL_RTTHREAD)
+        slirpNotifyPollThread("destroy");
+
+    if (m_hThrRecv != NIL_RTTHREAD)
+    {
+        int rc = RTThreadWait(m_hThrRecv, RT_INDEFINITE_WAIT, NULL);
+        AssertRC(rc);
+        m_hThrRecv = NIL_RTTHREAD;
+    }
+
+    if (m_hThrdPoll != NIL_RTTHREAD)
+    {
+        int rc = RTThreadWait(m_hThrdPoll, RT_INDEFINITE_WAIT, NULL);
+        AssertRC(rc);
+        m_hThrdPoll = NIL_RTTHREAD;
+    }
+
+    if (m_pSlirp != NULL)
+    {
+        slirp_cleanup(m_pSlirp);
+        m_pSlirp = NULL;
+    }
+
+    if (m_hIf != NULL)
+    {
+        int rc = IntNetR3IfDestroy(m_hIf);
+        AssertRC(rc);
+        m_hIf = NULL;
+    }
+
+#ifdef RT_OS_WINDOWS
+    for (unsigned i = 0; i < RT_ELEMENTS(m_ahWakeupSockPair); ++i)
+        if (m_ahWakeupSockPair[i] != INVALID_SOCKET)
+        {
+            int rc = closesocket(m_ahWakeupSockPair[i]);
+            Assert(rc == 0);
+            RT_NOREF(rc);
+            m_ahWakeupSockPair[i] = INVALID_SOCKET;
+        }
+#else
+    if (m_hPipeRead != NIL_RTPIPE)
+    {
+        int rc = RTPipeClose(m_hPipeRead);
+        AssertRC(rc);
+        m_hPipeRead = NIL_RTPIPE;
+    }
+    if (m_hPipeWrite != NIL_RTPIPE)
+    {
+        int rc = RTPipeClose(m_hPipeWrite);
+        AssertRC(rc);
+        m_hPipeWrite = NIL_RTPIPE;
+    }
+#endif
+
+    int rc = RTReqQueueDestroy(m_hSlirpReqQueue);
+    AssertRC(rc);
+    m_hSlirpReqQueue = NIL_RTREQQUEUE;
+
+    if (m_ProxyOptions.outbound_addr)
+    {
+        RTMemFree(m_ProxyOptions.outbound_addr);
+        m_ProxyOptions.outbound_addr = NULL;
+    }
+
+    RTMemFree(m_paPollFd);
+    m_paPollFd = NULL;
+    m_cPollFd  = 0;
+
+    ASMAtomicWriteBool(&m_fInitialized, false);
 }
 
 
@@ -1218,6 +1462,8 @@ VBoxNetSlirpNAT::run()
     AssertReturn(m_hThrRecv == NIL_RTTHREAD, VERR_INVALID_STATE);
     AssertReturn(m_hThrdPoll == NIL_RTTHREAD, VERR_INVALID_STATE);
 
+    ASMAtomicWriteBool(&m_fShutdown, false);
+
     /* Spawn the I/O polling thread. */
     int rc = RTThreadCreate(&m_hThrdPoll,
                             VBoxNetSlirpNAT::pollThread, this,
@@ -1232,13 +1478,39 @@ VBoxNetSlirpNAT::run()
                         0, /* :cbStack */
                         RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE,
                         "RECV");
-    AssertRCReturn(rc, rc);
+    if (RT_FAILURE(rc))
+    {
+        ASMAtomicWriteBool(&m_fShutdown, true);
+        slirpNotifyPollThread("run-recv-create-failed");
+
+        int rcWait = RTThreadWait(m_hThrdPoll, 5000, NULL);
+        if (RT_SUCCESS(rcWait))
+            m_hThrdPoll = NIL_RTTHREAD;
+        else
+            AssertRC(rcWait);
+        return rc;
+    }
 
     /* main thread will run the API event queue pump */
     com::NativeEventQueue *pQueue = com::NativeEventQueue::getMainEventQueue();
     if (pQueue == NULL)
     {
         LogRel(("run: getMainEventQueue() == NULL\n"));
+        ASMAtomicWriteBool(&m_fShutdown, true);
+        slirpNotifyPollThread("run-no-event-queue");
+        IntNetR3IfWaitAbort(m_hIf);
+
+        int rcWait = RTThreadWait(m_hThrRecv, 5000, NULL);
+        if (RT_SUCCESS(rcWait))
+            m_hThrRecv = NIL_RTTHREAD;
+        else
+            AssertRC(rcWait);
+
+        rcWait = RTThreadWait(m_hThrdPoll, 5000, NULL);
+        if (RT_SUCCESS(rcWait))
+            m_hThrdPoll = NIL_RTTHREAD;
+        else
+            AssertRC(rcWait);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1263,13 +1535,31 @@ VBoxNetSlirpNAT::run()
      * Tell other threads to wrap up.
      */
 
+    ASMAtomicWriteBool(&m_fShutdown, true);
+    slirpNotifyPollThread("run-shutdown");
+
     /* tell the intnet input pump to terminate */
     IntNetR3IfWaitAbort(m_hIf);
 
+    int rcRet = VINF_SUCCESS;
     rc = RTThreadWait(m_hThrRecv, 5000, NULL);
-    m_hThrRecv = NIL_RTTHREAD;
+    if (RT_SUCCESS(rc))
+        m_hThrRecv = NIL_RTTHREAD;
+    else
+    {
+        rcRet = rc;
+    }
 
-    return rc;
+    rc = RTThreadWait(m_hThrdPoll, 5000, NULL);
+    if (RT_SUCCESS(rc))
+        m_hThrdPoll = NIL_RTTHREAD;
+    else
+    {
+        if (RT_SUCCESS(rcRet))
+            rcRet = rc;
+    }
+
+    return rcRet;
 }
 
 
@@ -1277,6 +1567,12 @@ void
 VBoxNetSlirpNAT::shutdown()
 {
     int rc;
+
+    ASMAtomicWriteBool(&m_fShutdown, true);
+    if (m_hThrdPoll != NIL_RTTHREAD)
+        slirpNotifyPollThread("shutdown");
+    if (m_hIf != NULL)
+        IntNetR3IfWaitAbort(m_hIf);
 
     com::NativeEventQueue *pQueue = com::NativeEventQueue::getMainEventQueue();
     if (pQueue == NULL)
@@ -2242,6 +2538,9 @@ VBoxNetSlirpNAT::pollThread(RTTHREAD hThreadSelf, void *pvUser)
     AssertReturn(pvUser != NULL, VERR_INVALID_PARAMETER);
     VBoxNetSlirpNAT *pThis = static_cast<VBoxNetSlirpNAT *>(pvUser);
 
+    if (ASMAtomicReadBool(&pThis->m_fShutdown))
+        return VINF_SUCCESS;
+
     /* Activate the initial port forwarding rules. */
     pThis->natServiceProcessRegisteredPf(pThis->m_vecPortForwardRule4);
     pThis->natServiceProcessRegisteredPf(pThis->m_vecPortForwardRule6);
@@ -2262,7 +2561,7 @@ VBoxNetSlirpNAT::pollThread(RTTHREAD hThreadSelf, void *pvUser)
     /*
      * Polling loop.
      */
-    for (;;)
+    while (!ASMAtomicReadBool(&pThis->m_fShutdown))
     {
         /*
          * To prevent concurrent execution of sending/receiving threads
@@ -2323,15 +2622,15 @@ VBoxNetSlirpNAT::pollThread(RTTHREAD hThreadSelf, void *pvUser)
             ASMAtomicSubU64(&pThis->m_cWakeupNotifs, cbRead);
         }
 
+        if (ASMAtomicReadBool(&pThis->m_fShutdown))
+            break;
+
         /* process _all_ outstanding requests but don't wait */
         RTReqQueueProcess(pThis->m_hSlirpReqQueue, 0);
         pThis->timersRunExpired();
     }
 
-#if 0
-    LogRel(("pollThread: Exiting\n"));
-    return VERR_INVALID_STATE;
-#endif
+    return VINF_SUCCESS;
 }
 
 
@@ -2662,16 +2961,6 @@ extern "C" DECLEXPORT(int) TrustedMain(int argc, char **argv, char **envp)
     LogFlowFuncEnter();
     NOREF(envp);
 
-#ifdef RT_OS_WINDOWS
-    WSADATA WsaData = {0};
-    int err = WSAStartup(MAKEWORD(2,2), &WsaData);
-    if (err)
-    {
-        fprintf(stderr, "wsastartup: failed (%d)\n", err);
-        return RTEXITCODE_INIT;
-    }
-#endif
-
     VBoxNetSlirpNAT NAT;
 
     int rcExit = NAT.parseArgs(argc, argv);
@@ -2685,7 +2974,23 @@ extern "C" DECLEXPORT(int) TrustedMain(int argc, char **argv, char **envp)
     if (RT_FAILURE(rc))
         return RTEXITCODE_INIT;
 
-    NAT.run();
+    bool fSignalHandlerInstalled = false;
+    com::NativeEventQueue *pQueue = com::NativeEventQueue::getMainEventQueue();
+    if (pQueue != NULL)
+    {
+        rc = signalHandlerInstall(pQueue);
+        if (RT_SUCCESS(rc))
+            fSignalHandlerInstalled = true;
+    }
+    /* ignore rc */ NAT.run();
+
+    if (fSignalHandlerInstalled)
+    {
+        rc = signalHandlerUninstall();
+        AssertRC(rc);
+    }
+
+    NAT.destroy();
 
     LogRel(("Terminating\n"));
     return RTEXITCODE_SUCCESS;
@@ -2693,7 +2998,6 @@ extern "C" DECLEXPORT(int) TrustedMain(int argc, char **argv, char **envp)
 
 
 #ifndef VBOX_WITH_HARDENING
-
 int main(int argc, char **argv, char **envp)
 {
     int rc = RTR3InitExe(argc, &argv, RTR3INIT_FLAGS_SUPLIB);
@@ -2703,7 +3007,6 @@ int main(int argc, char **argv, char **envp)
 }
 
 # if defined(RT_OS_WINDOWS)
-
 /** (We don't want a console usually.) */
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
