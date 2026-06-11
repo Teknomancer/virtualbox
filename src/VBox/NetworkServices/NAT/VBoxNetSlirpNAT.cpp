@@ -1,4 +1,4 @@
-/* $Id: VBoxNetSlirpNAT.cpp 114336 2026-06-11 07:38:57Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxNetSlirpNAT.cpp 114337 2026-06-11 08:12:46Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxNetNAT - NAT Service for connecting to IntNet.
  */
@@ -385,6 +385,9 @@ public:
     int run();
     void shutdown();
 
+    static void logInfo(const char *a_pcszFormat, ...) RT_IPRT_FORMAT_ATTR(1, 2);
+    static void logError(const char *a_pcszFormat, ...) RT_IPRT_FORMAT_ATTR(1, 2);
+
 private:
     RTEXITCODE usage();
 
@@ -399,14 +402,12 @@ private:
     int getExtraData(com::Utf8Str &strValueOut, const char *pcszKey);
     void timersRunExpired(void);
 
-    static void reportError(const char *a_pcszFormat, ...) RT_IPRT_FORMAT_ATTR(1, 2);
-
-    static HRESULT reportComError(ComPtr<IUnknown> iface,
+    static HRESULT logComError(ComPtr<IUnknown> iface,
                                   const com::Utf8Str &strContext,
                                   HRESULT hrc);
-    static void reportErrorInfoList(const com::ErrorInfo &info,
+    static void logErrorInfoList(const com::ErrorInfo &info,
                                     const com::Utf8Str &strContext);
-    static void reportErrorInfo(const com::ErrorInfo &info);
+    static void logErrorInfo(const com::ErrorInfo &info);
 
     HRESULT HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent);
 
@@ -563,7 +564,7 @@ VBoxNetSlirpNAT::parseArgs(int argc, char *argv[])
         {
             case 'n':           /* --network */
                 if (m_strNetworkName.isNotEmpty())
-                    return RTMsgErrorExit(RTEXITCODE_SYNTAX, "multiple --network options");
+                    return RTMsgErrorExit(RTEXITCODE_SYNTAX, "Multiple --network options");
                 m_strNetworkName = Val.psz;
                 break;
 
@@ -584,7 +585,7 @@ VBoxNetSlirpNAT::parseArgs(int argc, char *argv[])
                 return usage();
 
             case VINF_GETOPT_NOT_OPTION:
-                return RTMsgErrorExit(RTEXITCODE_SYNTAX, "unexpected non-option argument");
+                return RTMsgErrorExit(RTEXITCODE_SYNTAX, "Unexpected non-option argument");
 
             default:
                 return RTGetOptPrintError(ch, &Val);
@@ -592,7 +593,7 @@ VBoxNetSlirpNAT::parseArgs(int argc, char *argv[])
     }
 
     if (m_strNetworkName.isEmpty())
-        return RTMsgErrorExit(RTEXITCODE_SYNTAX, "missing --network option");
+        return RTMsgErrorExit(RTEXITCODE_SYNTAX, "Missing --network option");
 
     m_uVerbosity = uVerbosity;
     return RTEXITCODE_SUCCESS;
@@ -610,22 +611,25 @@ int VBoxNetSlirpNAT::init()
     HRESULT hrc;
     int rc;
 
-    LogFlowFuncEnter();
-
     /* Get the COM API set up. */
     rc = initCom();
     if (RT_FAILURE(rc))
+    {
+        logError("Initializing COM failed, rc=%Rrc", rc);
         return rc;
+    }
 
     /* Get the home folder location.  It's ok if it fails. */
-    initHome();
+    rc = initHome();
+    if (RT_FAILURE(rc))
+        logError("Continuing after home folder lookup failed, rc=%Rrc", rc);
 
 #ifdef RT_OS_WINDOWS
     WSADATA WsaData = { 0 };
     int err = WSAStartup(MAKEWORD(2,2), &WsaData);
     if (err)
     {
-        reportError("WSAStartup failed (%d)\n", err);
+        logError("WSAStartup() failed with %d\n", err);
         return VERR_NET_INIT_FAILED;
     }
 #endif
@@ -638,7 +642,8 @@ int VBoxNetSlirpNAT::init()
                                            m_net.asOutParam());
     if (FAILED(hrc))
     {
-        reportComError(virtualbox, "FindNATNetworkByName", hrc);
+        logComError(virtualbox, "FindNATNetworkByName", hrc);
+        logError("Initialization failed: NAT network \"%s\" was not found", m_strNetworkName.c_str());
         return VERR_NOT_FOUND;
     }
 
@@ -646,28 +651,40 @@ int VBoxNetSlirpNAT::init()
      * Now that we know the network name and have ensured that it
      * indeed exists we can create the release log file.
      */
-    initLog();
+    rc = initLog();
+    if (RT_FAILURE(rc))
+        logError("Continuing after release logger initialization failed, rc=%Rrc", rc);
 
     // resolver changes are reported on vbox but are retrieved from
     // host so stash a pointer for future lookups
     hrc = virtualbox->COMGETTER(Host)(m_host.asOutParam());
+    if (FAILED(hrc))
+        logError("Initialization failed: host object lookup failed, hrc=%Rhrc", hrc);
     AssertComRCReturn(hrc, VERR_INTERNAL_ERROR);
 
     /* Get the settings related to IPv4. */
     rc = initIPv4();
     if (RT_FAILURE(rc))
+    {
+        logError("Initialization failed: IPv4 setup failed, rc=%Rrc", rc);
         return rc;
+    }
 
     /* Get the settings related to IPv6. */
     rc = initIPv6();
     if (RT_FAILURE(rc))
+    {
+        logError("Initialization failed: IPv6 setup failed, rc=%Rrc", rc);
         return rc;
+    }
 
     if (m_strHome.isNotEmpty())
     {
         com::Utf8StrFmt strTftpRoot("%s%c%s", m_strHome.c_str(), RTPATH_DELIMITER, "TFTP");
         char *pszStrTemp;       // avoid const char ** vs char **
         rc = RTStrUtf8ToCurrentCP(&pszStrTemp, strTftpRoot.c_str());
+        if (RT_FAILURE(rc))
+            logError("Initialization failed: TFTP root path conversion failed, rc=%Rrc", rc);
         AssertLogRelRCReturn(rc, rc);
         m_ProxyOptions.tftp_path = pszStrTemp;
     }
@@ -691,13 +708,20 @@ int VBoxNetSlirpNAT::init()
      */
     m_pSlirp = slirp_new(/* cfg */ &m_ProxyOptions, /* callbacks */ &slirpCallbacks, /* opaque */ this);
     if (!m_pSlirp)
+    {
+        logError("Initialization failed: libslirp setup failed, rc=%Rrc", VERR_NO_MEMORY);
         return VERR_NO_MEMORY;
+    }
 
     rc = initComEvents();
+    if (RT_FAILURE(rc))
+        logError("Initialization failed: COM event listener setup failed, rc=%Rrc", rc);
     AssertLogRelRCReturn(rc, rc);
     /* end of COM initialization */
 
     rc = RTReqQueueCreate(&m_hSlirpReqQueue);
+    if (RT_FAILURE(rc))
+        logError("Initialization failed: request queue creation failed, rc=%Rrc", rc);
     AssertLogRelRCReturn(rc, rc);
 
 #ifdef RT_OS_WINDOWS
@@ -705,23 +729,37 @@ int VBoxNetSlirpNAT::init()
     m_ahWakeupSockPair[0] = INVALID_SOCKET;
     m_ahWakeupSockPair[1] = INVALID_SOCKET;
     rc = RTWinSocketPair(AF_INET, SOCK_DGRAM, 0, m_ahWakeupSockPair);
+    if (RT_FAILURE(rc))
+        logError("Initialization failed: wakeup socket pair creation failed, rc=%Rrc", rc);
     AssertLogRelRCReturn(rc, rc);
 
 #else
     /* Create the control pipe. */
     rc = RTPipeCreate(&m_hPipeRead, &m_hPipeWrite, 0 /*fFlags*/);
+    if (RT_FAILURE(rc))
+        logError("Initialization failed: wakeup pipe creation failed, rc=%Rrc", rc);
     AssertLogRelRCReturn(rc, rc);
 #endif
 
     /* connect to the intnet */
     rc = IntNetR3IfCreate(&m_hIf, m_strNetworkName.c_str());
+    if (RT_FAILURE(rc))
+        logError("Initialization failed: internal network interface creation failed, rc=%Rrc", rc);
     if (RT_SUCCESS(rc))
+    {
         rc = IntNetR3IfSetActive(m_hIf, true /*fActive*/);
+        if (RT_FAILURE(rc))
+            logError("Initialization failed: internal network interface activation failed, rc=%Rrc", rc);
+    }
 
     if (RT_SUCCESS(rc))
+    {
         m_fInitialized = true;
+        logInfo("Initialization completed\n");
+    }
+    else
+        logError("Initialization failed with rc=%Rrc", rc);
 
-    LogFlowFuncLeaveRC(rc);
     return rc;
 }
 
@@ -743,6 +781,8 @@ void VBoxNetSlirpNAT::destroy()
     if (!ASMAtomicReadBool(&m_fInitialized))
         return;
 
+    logInfo("Destroying NAT network \"%s\"\n", m_strNetworkName.c_str());
+
     ASMAtomicWriteBool(&m_fShutdown, true);
     if (m_hIf != NULL)
         IntNetR3IfWaitAbort(m_hIf);
@@ -752,6 +792,8 @@ void VBoxNetSlirpNAT::destroy()
     if (m_hThrRecv != NIL_RTTHREAD)
     {
         int rc = RTThreadWait(m_hThrRecv, RT_INDEFINITE_WAIT, NULL);
+        if (RT_FAILURE(rc))
+            logError("Destruction failed: receive thread wait failed, rc=%Rrc", rc);
         AssertRC(rc);
         m_hThrRecv = NIL_RTTHREAD;
     }
@@ -759,12 +801,15 @@ void VBoxNetSlirpNAT::destroy()
     if (m_hThrdPoll != NIL_RTTHREAD)
     {
         int rc = RTThreadWait(m_hThrdPoll, RT_INDEFINITE_WAIT, NULL);
+        if (RT_FAILURE(rc))
+            logError("Destruction failed: poll thread wait failed, rc=%Rrc", rc);
         AssertRC(rc);
         m_hThrdPoll = NIL_RTTHREAD;
     }
 
     if (m_pSlirp != NULL)
     {
+        logInfo("Destroying libslirp instance\n");
         slirp_cleanup(m_pSlirp);
         m_pSlirp = NULL;
     }
@@ -772,6 +817,8 @@ void VBoxNetSlirpNAT::destroy()
     if (m_hIf != NULL)
     {
         int rc = IntNetR3IfDestroy(m_hIf);
+        if (RT_FAILURE(rc))
+            logError("Destruction failed: internal network interface destruction failed, rc=%Rrc", rc);
         AssertRC(rc);
         m_hIf = NULL;
     }
@@ -781,6 +828,8 @@ void VBoxNetSlirpNAT::destroy()
         if (m_ahWakeupSockPair[i] != INVALID_SOCKET)
         {
             int rc = closesocket(m_ahWakeupSockPair[i]);
+            if (rc != 0)
+                logError("Destruction failed: wakeup socket close failed, rc=%d", rc);
             Assert(rc == 0);
             RT_NOREF(rc);
             m_ahWakeupSockPair[i] = INVALID_SOCKET;
@@ -789,18 +838,24 @@ void VBoxNetSlirpNAT::destroy()
     if (m_hPipeRead != NIL_RTPIPE)
     {
         int rc = RTPipeClose(m_hPipeRead);
+        if (RT_FAILURE(rc))
+            logError("Destruction failed: wakeup pipe read end close failed, rc=%Rrc", rc);
         AssertRC(rc);
         m_hPipeRead = NIL_RTPIPE;
     }
     if (m_hPipeWrite != NIL_RTPIPE)
     {
         int rc = RTPipeClose(m_hPipeWrite);
+        if (RT_FAILURE(rc))
+            logError("Destruction failed: wakeup pipe write end close failed, rc=%Rrc", rc);
         AssertRC(rc);
         m_hPipeWrite = NIL_RTPIPE;
     }
 #endif
 
     int rc = RTReqQueueDestroy(m_hSlirpReqQueue);
+    if (RT_FAILURE(rc))
+        logError("Destruction failed: request queue destruction failed, rc=%Rrc", rc);
     AssertRC(rc);
     m_hSlirpReqQueue = NIL_RTREQQUEUE;
 
@@ -815,6 +870,8 @@ void VBoxNetSlirpNAT::destroy()
     m_cPollFd  = 0;
 
     ASMAtomicWriteBool(&m_fInitialized, false);
+
+    logInfo("Destruction completed\n");
 }
 
 
@@ -858,14 +915,14 @@ int VBoxNetSlirpNAT::initCom()
     hrc = virtualboxClient.createInprocObject(CLSID_VirtualBoxClient);
     if (FAILED(hrc))
     {
-        reportError("Failed to create VirtualBox Client object: %Rhra", hrc);
+        logError("Failed to create VirtualBox Client object: %Rhra", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
     hrc = virtualboxClient->COMGETTER(VirtualBox)(virtualbox.asOutParam());
     if (FAILED(hrc))
     {
-        reportError("Failed to obtain VirtualBox object: %Rhra", hrc);
+        logError("Failed to obtain VirtualBox object: %Rhra", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -928,7 +985,7 @@ int VBoxNetSlirpNAT::initIPv4()
     hrc = m_net->COMGETTER(Network)(bstrIPv4Prefix.asOutParam());
     if (FAILED(hrc))
     {
-        reportComError(m_net, "Network", hrc);
+        logComError(m_net, "Network", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -938,13 +995,13 @@ int VBoxNetSlirpNAT::initIPv4()
                             &Net4, &iPrefixLength);
     if (RT_FAILURE(rc))
     {
-        reportError("Failed to parse IPv4 prefix %ls\n", bstrIPv4Prefix.raw());
+        logError("Failed to parse IPv4 prefix %ls\n", bstrIPv4Prefix.raw());
         return rc;
     }
 
     if (iPrefixLength > 30 || 0 >= iPrefixLength)
     {
-        reportError("Invalid IPv4 prefix length %d\n", iPrefixLength);
+        logError("Invalid IPv4 prefix length %d\n", iPrefixLength);
         return VERR_INVALID_PARAMETER;
     }
 
@@ -970,19 +1027,18 @@ int VBoxNetSlirpNAT::initIPv4()
     m_ProxyOptions.cRealNameservers = cRealNameservers;
     if (cRealNameservers > 0)
     {
-        LogRel(("Transferred %zu nameservers to NAT engine.\n", cRealNameservers));
+        logInfo("Transferred %zu nameservers to NAT engine.\n", cRealNameservers);
     }
     else
     {
-        LogRel(("Nameserver is either on 127/8 network or failed to obtain from host. "
-                "Falling back to libslirp DNS proxy.\n"));
+        logInfo("No usable host IPv4 nameserver available; using libslirp DNS proxy\n");
 
         RTNETADDRIPV4 Nameserver4;
         Nameserver4.u = Net4.u | RT_H2N_U32_C(0x00000003);
 
         memcpy(&m_ProxyOptions.vnameserver, &Nameserver4, sizeof(in_addr));
         m_ProxyOptions.cRealNameservers = 0; /* Ensures libslirp uses fallback. */
-        LogRel(("Using fallback virtual nameserver: %RTnaipv4\n", Nameserver4.u));
+        logInfo("Using fallback virtual nameserver: %RTnaipv4\n", Nameserver4.u);
     }
 
     rc = fetchNatPortForwardRules(m_vecPortForwardRule4, /* :fIsIPv6 */ false);
@@ -1002,13 +1058,12 @@ int VBoxNetSlirpNAT::initIPv4()
             m_ProxyOptions.outbound_addr->sin_family = AF_INET;
             m_ProxyOptions.outbound_addr->sin_port = 0;
 
-            LogRel(("Will use %RTnaipv4 as IPv4 source address\n",
-                    m_src4.sin_addr.s_addr));
+            logInfo("Will use %RTnaipv4 as IPv4 source address\n",
+                    m_src4.sin_addr.s_addr);
         }
         else
         {
-            LogRel(("Failed to parse \"%s\" IPv4 source address specification\n",
-                    strSourceIp4.c_str()));
+            logError("Failed to parse IPv4 source address specification \"%s\"", strSourceIp4.c_str());
         }
     }
 
@@ -1033,7 +1088,7 @@ int VBoxNetSlirpNAT::initIPv4LoopbackMap()
     hrc = m_net->COMGETTER(LocalMappings)(ComSafeArrayAsOutParam(aStrLocalMappings));
     if (FAILED(hrc))
     {
-        reportComError(m_net, "LocalMappings", hrc);
+        logComError(m_net, "LocalMappings", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1052,40 +1107,40 @@ int VBoxNetSlirpNAT::initIPv4LoopbackMap()
     {
         com::Utf8Str strMapping(aStrLocalMappings[i]);
         const char *pcszRule = strMapping.c_str();
-        LogRel(("IPv4 loopback mapping %zu: %s\n", i, pcszRule));
+        logInfo("IPv4 loopback mapping %zu: %s\n", i, pcszRule);
 
         RTNETADDRIPV4 Loopback4;
         char *pszNext;
         rc = RTNetStrToIPv4AddrEx(pcszRule, &Loopback4, &pszNext);
         if (RT_FAILURE(rc))
         {
-            LogRel(("Failed to parse IPv4 address: %Rra\n", rc));
+            logError("Failed to parse IPv4 address, rc=%Rra", rc);
             continue;
         }
 
         if (Loopback4.au8[0] != 127)
         {
-            LogRel(("Not an IPv4 loopback address\n"));
+            logInfo("Not an IPv4 loopback address\n");
             continue;
         }
 
         if (rc != VWRN_TRAILING_CHARS)
         {
-            LogRel(("Missing right hand side\n"));
+            logInfo("Missing right hand side\n");
             continue;
         }
 
         pcszRule = RTStrStripL(pszNext);
         if (*pcszRule != '=')
         {
-            LogRel(("Invalid rule format\n"));
+            logError("Invalid rule format");
             continue;
         }
 
         pcszRule = RTStrStripL(pcszRule+1);
         if (*pszNext == '\0')
         {
-            LogRel(("Empty right hand side\n"));
+            logInfo("Empty right hand side\n");
             continue;
         }
 
@@ -1093,25 +1148,25 @@ int VBoxNetSlirpNAT::initIPv4LoopbackMap()
         rc = RTStrToUInt32Ex(pcszRule, &pszNext, 10, &u32Offset);
         if (rc != VINF_SUCCESS && rc != VWRN_TRAILING_SPACES)
         {
-            LogRel(("Invalid offset\n"));
+            logError("Invalid offset");
             continue;
         }
 
         if (u32Offset <= 1 || u32Offset == ~uMask)
         {
-            LogRel(("Offset maps to a reserved address\n"));
+            logInfo("Offset maps to a reserved address\n");
             continue;
         }
 
         if ((u32Offset & uMask) != 0)
         {
-            LogRel(("Offset exceeds the network size\n"));
+            logInfo("Offset exceeds the network size\n");
             continue;
         }
 
         if (dst >= RT_ELEMENTS(m_lo2off))
         {
-            LogRel(("Ignoring the mapping, too many mappings already\n"));
+            logInfo("Ignoring the mapping, too many mappings already\n");
             continue;
         }
 
@@ -1147,7 +1202,7 @@ int VBoxNetSlirpNAT::initIPv6()
     hrc = m_net->COMGETTER(IPv6Enabled)(&fIPv6Enabled);
     if (FAILED(hrc))
     {
-        reportComError(m_net, "IPv6Enabled", hrc);
+        logComError(m_net, "IPv6Enabled", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1163,7 +1218,7 @@ int VBoxNetSlirpNAT::initIPv6()
     hrc = m_net->COMGETTER(IPv6Prefix)(bstrIPv6Prefix.asOutParam());
     if (FAILED(hrc))
     {
-        reportComError(m_net, "IPv6Prefix", hrc);
+        logComError(m_net, "IPv6Prefix", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1173,7 +1228,7 @@ int VBoxNetSlirpNAT::initIPv6()
                             &Net6, &iPrefixLength);
     if (RT_FAILURE(rc))
     {
-        reportError("Failed to parse IPv6 prefix %ls\n", bstrIPv6Prefix.raw());
+        logError("Failed to parse IPv6 prefix %ls\n", bstrIPv6Prefix.raw());
         return rc;
     }
 
@@ -1182,7 +1237,7 @@ int VBoxNetSlirpNAT::initIPv6()
         iPrefixLength = 64;     /*   take it to mean /64 which we require anyway */
     else if (iPrefixLength != 64)
     {
-        reportError("Invalid IPv6 prefix length %d,"
+        logError("Invalid IPv6 prefix length %d,"
                     " must be 64.\n", iPrefixLength);
         return rc;
     }
@@ -1191,14 +1246,14 @@ int VBoxNetSlirpNAT::initIPv6()
     if (   ((Net6.au8[0] & 0xe0) != 0x20)  /* global 2000::/3 */
         && ((Net6.au8[0] & 0xfe) != 0xfc)) /* local  fc00::/7 */
     {
-        reportError("IPv6 prefix %RTnaipv6 is not unicast.\n", &Net6);
+        logError("IPv6 prefix %RTnaipv6 is not unicast.\n", &Net6);
         return VERR_INVALID_PARAMETER;
     }
 
     /* Verify the interfaces ID part is zero */
     if (Net6.au64[1] != 0)
     {
-        reportError("Non-zero bits in the interface ID part"
+        logError("Non-zero bits in the interface ID part"
                     " of the IPv6 prefix %RTnaipv6/64.\n", &Net6);
         return VERR_INVALID_PARAMETER;
     }
@@ -1222,10 +1277,10 @@ int VBoxNetSlirpNAT::initIPv6()
     m_ProxyOptions.cIPv6RealNameservers = cRealNameservers6;
     if (cRealNameservers6 > 0)
     {
-        LogRel(("Transfered %u IPv6 nameservers to NAT engine.\n", (unsigned)cRealNameservers6));
+        logInfo("Transfered %u IPv6 nameservers to NAT engine.\n", (unsigned)cRealNameservers6);
     }
     else
-        LogRel(("No IPv6 nameservers available from the host, using the virtual IPv6 DNS proxy address.\n"));
+        logInfo("No IPv6 nameservers available from the host, using the virtual IPv6 DNS proxy address.\n");
 
     /*
      * Should we advertise ourselves as default IPv6 route?  If the
@@ -1240,7 +1295,7 @@ int VBoxNetSlirpNAT::initIPv6()
     hrc = m_net->COMGETTER(AdvertiseDefaultIPv6RouteEnabled)(&fIPv6DefaultRoute);
     if (FAILED(hrc))
     {
-        reportComError(m_net, "AdvertiseDefaultIPv6RouteEnabled", hrc);
+        logComError(m_net, "AdvertiseDefaultIPv6RouteEnabled", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1262,13 +1317,12 @@ int VBoxNetSlirpNAT::initIPv6()
         {
             memcpy(&m_ProxyOptions.outbound_addr6->sin6_addr.s6_addr, &addr, sizeof(uint128_t));
 
-            LogRel(("Will use %RTnaipv6 as IPv6 source address\n",
-                    m_src6.sin6_addr.s6_addr));
+            logInfo("Will use %RTnaipv6 as IPv6 source address\n",
+                    m_src6.sin6_addr.s6_addr);
         }
         else
         {
-            LogRel(("Failed to parse \"%s\" IPv6 source address specification\n",
-                    strSourceIp6.c_str()));
+            logError("Failed to parse IPv6 source address specification \"%s\"", strSourceIp6.c_str());
         }
     }
 
@@ -1316,7 +1370,7 @@ VBoxNetSlirpNAT::Listener::init(VBoxNetSlirpNAT *pNAT)
     hrc = m_pListenerImpl->init(new Adapter(), pNAT);
     if (FAILED(hrc))
     {
-        VBoxNetSlirpNAT::reportComError(m_pListenerImpl, "init", hrc);
+        VBoxNetSlirpNAT::logComError(m_pListenerImpl, "Init", hrc);
         return hrc;
     }
 
@@ -1350,7 +1404,7 @@ VBoxNetSlirpNAT::Listener::listen(const ComPtr<IEventful> &pEventful,
     hrc = pEventful->COMGETTER(EventSource)(pEventSource.asOutParam());
     if (FAILED(hrc))
     {
-        VBoxNetSlirpNAT::reportComError(pEventful, "EventSource", hrc);
+        VBoxNetSlirpNAT::logComError(pEventful, "EventSource", hrc);
         return hrc;
     }
 
@@ -1379,7 +1433,7 @@ VBoxNetSlirpNAT::Listener::doListen(const ComPtr<IEventSource> &pEventSource,
                                          fActive);
     if (FAILED(hrc))
     {
-        VBoxNetSlirpNAT::reportComError(m_pEventSource, "RegisterListener", hrc);
+        VBoxNetSlirpNAT::logComError(m_pEventSource, "RegisterListener", hrc);
         return hrc;
     }
 
@@ -1402,7 +1456,7 @@ VBoxNetSlirpNAT::Listener::unlisten()
     hrc = pEventSource->UnregisterListener(m_pListenerImpl);
     if (FAILED(hrc))
     {
-        VBoxNetSlirpNAT::reportComError(pEventSource, "UnregisterListener", hrc);
+        VBoxNetSlirpNAT::logComError(pEventSource, "UnregisterListener", hrc);
         return hrc;
     }
 
@@ -1464,12 +1518,16 @@ VBoxNetSlirpNAT::run()
 
     ASMAtomicWriteBool(&m_fShutdown, false);
 
+    logInfo("Starting worker threads\n");
+
     /* Spawn the I/O polling thread. */
     int rc = RTThreadCreate(&m_hThrdPoll,
                             VBoxNetSlirpNAT::pollThread, this,
                             0, /* :cbStack */
                             RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE,
                             "Poll");
+    if (RT_FAILURE(rc))
+        logError("Startup failed: poll thread creation failed, rc=%Rrc", rc);
     AssertRCReturn(rc, rc);
 
     /* spawn intnet input pump */
@@ -1487,7 +1545,10 @@ VBoxNetSlirpNAT::run()
         if (RT_SUCCESS(rcWait))
             m_hThrdPoll = NIL_RTTHREAD;
         else
+        {
+            logError("Startup failed: poll thread wait after receive thread creation failure failed, rc=%Rrc", rcWait);
             AssertRC(rcWait);
+        }
         return rc;
     }
 
@@ -1495,7 +1556,7 @@ VBoxNetSlirpNAT::run()
     com::NativeEventQueue *pQueue = com::NativeEventQueue::getMainEventQueue();
     if (pQueue == NULL)
     {
-        LogRel(("run: getMainEventQueue() == NULL\n"));
+        logError("Startup failed: main event queue is not available");
         ASMAtomicWriteBool(&m_fShutdown, true);
         slirpNotifyPollThread("run-no-event-queue");
         IntNetR3IfWaitAbort(m_hIf);
@@ -1504,13 +1565,19 @@ VBoxNetSlirpNAT::run()
         if (RT_SUCCESS(rcWait))
             m_hThrRecv = NIL_RTTHREAD;
         else
+        {
+            logError("Startup failed: receive thread wait after event queue failure failed, rc=%Rrc", rcWait);
             AssertRC(rcWait);
+        }
 
         rcWait = RTThreadWait(m_hThrdPoll, 5000, NULL);
         if (RT_SUCCESS(rcWait))
             m_hThrdPoll = NIL_RTTHREAD;
         else
+        {
+            logError("Startup failed: poll thread wait after event queue failure failed, rc=%Rrc", rcWait);
             AssertRC(rcWait);
+        }
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1520,13 +1587,13 @@ VBoxNetSlirpNAT::run()
         rc = pQueue->processEventQueue(RT_INDEFINITE_WAIT);
         if (rc == VERR_INTERRUPTED)
         {
-            LogRel(("run: shutdown\n"));
+            logInfo("Shutdown requested by event queue\n");
             break;
         }
         else if (rc != VINF_SUCCESS)
         {
             /* note any unexpected rc */
-            LogRel(("run: processEventQueue: %Rrc\n", rc));
+            logError("Event queue processing failed, rc=%Rrc", rc);
         }
     }
 
@@ -1534,6 +1601,8 @@ VBoxNetSlirpNAT::run()
      * We are out of the event loop, so we were told to shut down.
      * Tell other threads to wrap up.
      */
+
+    logInfo("Stopping worker threads\n");
 
     ASMAtomicWriteBool(&m_fShutdown, true);
     slirpNotifyPollThread("run-shutdown");
@@ -1547,6 +1616,7 @@ VBoxNetSlirpNAT::run()
         m_hThrRecv = NIL_RTTHREAD;
     else
     {
+        logError("Shutdown failed: receive thread wait failed, rc=%Rrc", rc);
         rcRet = rc;
     }
 
@@ -1555,10 +1625,13 @@ VBoxNetSlirpNAT::run()
         m_hThrdPoll = NIL_RTTHREAD;
     else
     {
+        logError("Shutdown failed: poll thread wait failed, rc=%Rrc", rc);
         if (RT_SUCCESS(rcRet))
             rcRet = rc;
     }
 
+    if (RT_SUCCESS(rcRet))
+        logInfo("Worker threads stopped\n");
     return rcRet;
 }
 
@@ -1567,6 +1640,8 @@ void
 VBoxNetSlirpNAT::shutdown()
 {
     int rc;
+
+    logInfo("Shutdown requested\n");
 
     ASMAtomicWriteBool(&m_fShutdown, true);
     if (m_hThrdPoll != NIL_RTTHREAD)
@@ -1577,7 +1652,7 @@ VBoxNetSlirpNAT::shutdown()
     com::NativeEventQueue *pQueue = com::NativeEventQueue::getMainEventQueue();
     if (pQueue == NULL)
     {
-        LogRel(("shutdown: getMainEventQueue() == NULL\n"));
+        logError("Shutdown warning: main event queue is not available");
         return;
     }
 
@@ -1589,7 +1664,9 @@ VBoxNetSlirpNAT::shutdown()
     /* tell the event loop in run() to stop */
     rc = pQueue->interruptEventQueueProcessing();
     if (RT_FAILURE(rc))
-        LogRel(("shutdown: interruptEventQueueProcessing: %Rrc\n", rc));
+        logError("Shutdown failed: event queue interrupt failed, rc=%Rrc", rc);
+    else
+        logInfo("Shutdown notification sent\n");
 }
 
 
@@ -1691,15 +1768,15 @@ HRESULT VBoxNetSlirpNAT::HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent)
                     break;
 
                 default:
-                    LogRel(("Event: %s %s port-forwarding rule \"%s\": invalid protocol %d\n",
+                    logInfo("Event: %s %s port-forwarding rule \"%s\": invalid protocol %d\n",
                             fCreateFW ? "Add" : "Remove",
                             fIPv6FW ? "IPv6" : "IPv4",
                             com::Utf8Str(name).c_str(),
-                            (int)proto));
+                            (int)proto);
                     goto port_forward_done;
             }
 
-            LogRel(("Event: %s %s port-forwarding rule \"%s\": %s %s%s%s:%d -> %s%s%s:%d\n",
+            logInfo("Event: %s %s port-forwarding rule \"%s\": %s %s%s%s:%d -> %s%s%s:%d\n",
                     fCreateFW ? "Add" : "Remove",
                     fIPv6FW ? "IPv6" : "IPv4",
                     com::Utf8Str(name).c_str(),
@@ -1713,7 +1790,7 @@ HRESULT VBoxNetSlirpNAT::HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent)
                     fIPv6FW ? "[" : "",
                     com::Utf8Str(strGuestAddr).c_str(),
                     fIPv6FW ? "]" : "",
-                    lGuestPort));
+                    lGuestPort);
 
             if (name.length() > sizeof(pNatPf->szPfrName))
             {
@@ -1764,12 +1841,11 @@ HRESULT VBoxNetSlirpNAT::HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent)
                 slirp_set_RealNameservers(m_pSlirp, m_ProxyOptions.cRealNameservers,
                                           m_ProxyOptions.aRealNameservers);
 
-                LogRel(("Transfered %u nameservers to NAT engine.\n", (unsigned)cRealNameservers));
+                logInfo("Transfered %u nameservers to NAT engine.\n", (unsigned)cRealNameservers);
             }
             else
             {
-                LogRel(("Nameserver is either on 127/8 network or failed to obtain from host. "
-                        "Falling back to libslirp DNS proxy.\n"));
+                logInfo("No usable host IPv4 nameserver available; using libslirp DNS proxy\n");
 
                 RTNETADDRIPV4 Nameserver4;
                 Nameserver4.u = m_ProxyOptions.vnetwork.s_addr | RT_H2N_U32_C(0x00000003);
@@ -1797,14 +1873,14 @@ HRESULT VBoxNetSlirpNAT::HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent)
                 slirp_set_IPv6RealNameservers(m_pSlirp, m_ProxyOptions.cIPv6RealNameservers,
                                               m_ProxyOptions.aIPv6RealNameservers);
 
-                LogRel(("Transfered %u IPv6 nameservers to NAT engine.\n", (unsigned)cRealNameservers6));
+                logInfo("Transfered %u IPv6 nameservers to NAT engine.\n", (unsigned)cRealNameservers6);
             }
             else
             {
                 m_ProxyOptions.aIPv6RealNameservers = NULL;
                 m_ProxyOptions.cIPv6RealNameservers = 0;
                 slirp_set_IPv6RealNameservers(m_pSlirp, 0, NULL);
-                LogRel(("No IPv6 nameservers available from the host, using the virtual IPv6 DNS proxy address.\n"));
+                logInfo("No IPv6 nameservers available from the host, using the virtual IPv6 DNS proxy address.\n");
             }
             break;
         }
@@ -1830,7 +1906,7 @@ HRESULT VBoxNetSlirpNAT::HandleEvent(VBoxEventType_T aEventType, IEvent *pEvent)
 
         case VBoxEventType_OnVBoxSVCAvailabilityChanged:
         {
-            LogRel(("VBoxSVC became unavailable, exiting.\n"));
+            logInfo("VBoxSVC became unavailable, exiting.\n");
             shutdown();
             break;
         }
@@ -1877,7 +1953,7 @@ int VBoxNetSlirpNAT::getHostNameservers(struct in_addr **ppaNameservers, size_t 
     struct in_addr *paNameservers = (struct in_addr *)RTMemAllocZ(cNameservers * sizeof(*paNameservers));
     if (!paNameservers)
     {
-        reportError("Nameserver array construction failed. Out of memory.\n");
+        logError("Nameserver array construction failed. Out of memory.\n");
         return VERR_NO_MEMORY;
     }
 
@@ -1888,7 +1964,7 @@ int VBoxNetSlirpNAT::getHostNameservers(struct in_addr **ppaNameservers, size_t 
         int rc = RTNetStrToIPv4Addr(com::Utf8Str(aRawNameservers[idx]).c_str(), &tmpNameserver);
         if (RT_FAILURE(rc))
         {
-            LogRel(("Failed to parse IPv4 nameserver %ls\n", aRawNameservers[idx]));
+            logError("Failed to parse IPv4 nameserver %ls", aRawNameservers[idx]);
             continue;
         }
 
@@ -1947,7 +2023,7 @@ int VBoxNetSlirpNAT::getHostNameservers6(struct in6_addr **ppaNameservers, size_
     struct in6_addr *paNameservers = (struct in6_addr *)RTMemAllocZ(cNameservers * sizeof(*paNameservers));
     if (!paNameservers)
     {
-        reportError("IPv6 nameserver array construction failed. Out of memory.\n");
+        logError("IPv6 nameserver array construction failed. Out of memory.\n");
         return VERR_NO_MEMORY;
     }
 
@@ -1958,7 +2034,7 @@ int VBoxNetSlirpNAT::getHostNameservers6(struct in6_addr **ppaNameservers, size_
         int rc = RTNetStrToIPv6AddrEx(com::Utf8Str(aRawNameservers[idx]).c_str(), &tmpNameserver, NULL /* ppszNext */);
         if (RT_FAILURE(rc))
         {
-            LogRel(("Failed to parse IPv6 nameserver %ls\n", aRawNameservers[idx]));
+            logError("Failed to parse IPv6 nameserver %ls", aRawNameservers[idx]);
             continue;
         }
 
@@ -2024,7 +2100,7 @@ int VBoxNetSlirpNAT::natServiceProcessRegisteredPf(VECNATSERVICEPF& vecRules)
     {
         NATSERVICEPORTFORWARDRULE &natPf = *it;
 
-        LogRel(("Loading %s port-forwarding rule \"%s\": %s %s%s%s:%d -> %s%s%s:%d\n",
+        logInfo("Loading %s port-forwarding rule \"%s\": %s %s%s%s:%d -> %s%s%s:%d\n",
                 natPf.Pfr.fPfrIPv6 ? "IPv6" : "IPv4",
                 natPf.Pfr.szPfrName,
                 natPf.Pfr.iPfrProto == IPPROTO_TCP ? "TCP" : "UDP",
@@ -2037,7 +2113,7 @@ int VBoxNetSlirpNAT::natServiceProcessRegisteredPf(VECNATSERVICEPF& vecRules)
                 natPf.Pfr.fPfrIPv6 ? "[" : "",
                 natPf.Pfr.szPfrGuestAddr,
                 natPf.Pfr.fPfrIPv6 ? "]" : "",
-                natPf.Pfr.u16PfrGuestPort));
+                natPf.Pfr.u16PfrGuestPort);
 
         natServicePfRegister(this, &natPf.Pfr, false /*fRemove*/, false /*fRuntime*/);
     }
@@ -2093,9 +2169,9 @@ DECLCALLBACK(void) VBoxNetSlirpNAT::natServicePfRegister(VBoxNetSlirpNAT *pThis,
 
     if (inet_aton(pszGuestAddr, &guestIp) == 0)
     {
-        LogRel(("Unable to convert guest address '%s' for %s rule \"%s\"\n",
-                pszGuestAddr, pNatPf->fPfrIPv6 ? "IPv6" : "IPv4",
-                pNatPf->szPfrName));
+        logError("Unable to convert guest address '%s' for %s rule \"%s\"",
+                    pszGuestAddr, pNatPf->fPfrIPv6 ? "IPv6" : "IPv4",
+                    pNatPf->szPfrName);
         return;
     }
 
@@ -2142,10 +2218,10 @@ DECLCALLBACK(void) VBoxNetSlirpNAT::natServicePfRegister(VBoxNetSlirpNAT *pThis,
             Assert(fRemove == false);
     }
     else
-        LogRel(("Unable to %s %s rule \"%s\"\n",
-                fRemove ? "remove" : "add",
-                pNatPf->fPfrIPv6 ? "IPv6" : "IPv4",
-                pNatPf->szPfrName));
+        logError("Unable to %s %s rule \"%s\"",
+                    fRemove ? "remove" : "add",
+                    pNatPf->fPfrIPv6 ? "IPv6" : "IPv4",
+                    pNatPf->szPfrName);
 
     if (fRuntime)
     {
@@ -2581,7 +2657,7 @@ VBoxNetSlirpNAT::pollThread(RTTHREAD hThreadSelf, void *pvUser)
         {
 #ifdef RT_OS_WINDOWS
             int const iLastErr = WSAGetLastError(); /* (In debug builds LogRel translates to two RTLogLoggerExWeak calls.) */
-            LogRel(("NAT: RTWinPoll returned error=%Rrc (cChangedFDs=%d)\n", iLastErr, cChangedFDs));
+            logError("Poll failed, rc=%Rrc, changed fds=%d", iLastErr, cChangedFDs);
             Log4(("NAT: NSOCK = %d\n", pThis->nsock));
 #else
             if (errno == EINTR)
@@ -2592,7 +2668,7 @@ VBoxNetSlirpNAT::pollThread(RTTHREAD hThreadSelf, void *pvUser)
             }
             else if (cPollNegRet++ > 128)
             {
-                LogRel(("NAT: Poll returns (%s) suppressed %d\n", strerror(errno), cPollNegRet));
+                logError("Poll failed, errno=%s, suppressed count=%u", strerror(errno), cPollNegRet);
                 cPollNegRet = 0;
             }
 #endif
@@ -2630,6 +2706,7 @@ VBoxNetSlirpNAT::pollThread(RTTHREAD hThreadSelf, void *pvUser)
         pThis->timersRunExpired();
     }
 
+    logInfo("Exiting\n");
     return VINF_SUCCESS;
 }
 
@@ -2659,7 +2736,7 @@ VBoxNetSlirpNAT::receiveThread(RTTHREAD hThreadSelf, void *pvUser)
     if (rc == VERR_SEM_DESTROYED)
         return VINF_SUCCESS;
 
-    LogRel(("receiveThread: IntNetR3IfPumpPkts: unexpected %Rrc\n", rc));
+    logError("Packet pump failed unexpectedly, rc=%Rrc", rc);
     return VERR_INVALID_STATE;
 }
 
@@ -2738,7 +2815,7 @@ int VBoxNetSlirpNAT::getExtraData(com::Utf8Str &strValueOut, const char *pcszKey
     hrc = virtualbox->GetExtraData(bstrKey.raw(), bstrValue.asOutParam());
     if (FAILED(hrc))
     {
-        reportComError(virtualbox, "GetExtraData", hrc);
+        logComError(virtualbox, "GetExtraData", hrc);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -2748,21 +2825,21 @@ int VBoxNetSlirpNAT::getExtraData(com::Utf8Str &strValueOut, const char *pcszKey
 
 
 /* static */
-HRESULT VBoxNetSlirpNAT::reportComError(ComPtr<IUnknown> iface,
+HRESULT VBoxNetSlirpNAT::logComError(ComPtr<IUnknown> iface,
                                        const com::Utf8Str &strContext,
                                        HRESULT hrc)
 {
     const com::ErrorInfo info(iface, COM_IIDOF(IUnknown));
     if (info.isFullAvailable() || info.isBasicAvailable())
     {
-        reportErrorInfoList(info, strContext);
+        logErrorInfoList(info, strContext);
     }
     else
     {
         if (strContext.isNotEmpty())
-            reportError("%s: %Rhra", strContext.c_str(), hrc);
+            logError("%s: %Rhra", strContext.c_str(), hrc);
         else
-            reportError("%Rhra", hrc);
+            logError("%Rhra", hrc);
     }
 
     return hrc;
@@ -2770,11 +2847,11 @@ HRESULT VBoxNetSlirpNAT::reportComError(ComPtr<IUnknown> iface,
 
 
 /* static */
-void VBoxNetSlirpNAT::reportErrorInfoList(const com::ErrorInfo &info,
+void VBoxNetSlirpNAT::logErrorInfoList(const com::ErrorInfo &info,
                                          const com::Utf8Str &strContext)
 {
     if (strContext.isNotEmpty())
-        reportError("%s", strContext.c_str());
+        logError("%s", strContext.c_str());
 
     bool fFirst = true;
     for (const com::ErrorInfo *pInfo = &info;
@@ -2784,15 +2861,15 @@ void VBoxNetSlirpNAT::reportErrorInfoList(const com::ErrorInfo &info,
         if (fFirst)
             fFirst = false;
         else
-            reportError("--------");
+            logError("--------");
 
-        reportErrorInfo(*pInfo);
+        logErrorInfo(*pInfo);
     }
 }
 
 
 /* static */
-void VBoxNetSlirpNAT::reportErrorInfo(const com::ErrorInfo &info)
+void VBoxNetSlirpNAT::logErrorInfo(const com::ErrorInfo &info)
 {
 #if defined (RT_OS_WIN)
     bool haveResultCode = info.isFullAvailable();
@@ -2839,12 +2916,25 @@ void VBoxNetSlirpNAT::reportErrorInfo(const com::ErrorInfo &info)
         //pcszSeparator = pcszComma; unused
     }
 
-    reportError("%s", message.c_str());
+    logError("%s", message.c_str());
 }
 
 
 /* static */
-void VBoxNetSlirpNAT::reportError(const char *a_pcszFormat, ...)
+void VBoxNetSlirpNAT::logInfo(const char *a_pcszFormat, ...)
+{
+    va_list ap;
+
+    va_start(ap, a_pcszFormat);
+    com::Utf8Str message(a_pcszFormat, ap);
+    va_end(ap);
+
+    LogRel(("%s", message.c_str()));
+}
+
+
+/* static */
+void VBoxNetSlirpNAT::logError(const char *a_pcszFormat, ...)
 {
     va_list ap;
 
@@ -2862,9 +2952,9 @@ void VBoxNetSlirpNAT::reportError(const char *a_pcszFormat, ...)
  * Create release logger.
  *
  * The NAT network name is sanitized so that it can be used in a path
- * component.  By default the release log is written to the file
- * ~/.VirtualBox/${netname}.log but its destiation and content can be
- * overridden with VBOXNET_${netname}_RELEASE_LOG family of
+ * component.  By default the release log is written to stdout and to
+ * the file ~/.VirtualBox/${netname}.log but its destination and content
+ * can be overridden with VBOXNET_${netname}_RELEASE_LOG family of
  * environment variables (also ..._DEST and ..._FLAGS).
  */
 /* static */
@@ -2919,15 +3009,17 @@ int VBoxNetSlirpNAT::initLog()
 
     rc = com::VBoxLogRelCreate("NAT Network",
                                pcszLogFile,
-                               RTLOGFLAGS_PREFIX_TIME_PROG,
+                               RTLOGFLAGS_PREFIX_TIME_PROG | RTLOGFLAGS_PREFIX_THREAD,
                                "all all.restrict -default.restrict",
                                pcszEnvVarBase,
-                               RTLOGDEST_FILE,
+                               RTLOGDEST_FILE | RTLOGDEST_STDOUT,
                                32768 /* cMaxEntriesPerGroup */,
                                0 /* cHistory */,
                                0 /* uHistoryFileTime */,
                                0 /* uHistoryFileSize */,
                                NULL /*pErrInfo*/);
+    if (RT_FAILURE(rc))
+        RTMsgError("Failed to create log instance: %Rrc\n", rc);
 
     /*
      * Provide immediate feedback if corresponding LogRel level is
@@ -2958,8 +3050,10 @@ int VBoxNetSlirpNAT::initLog()
  */
 extern "C" DECLEXPORT(int) TrustedMain(int argc, char **argv, char **envp)
 {
-    LogFlowFuncEnter();
     NOREF(envp);
+
+    RTStrmPrintf(g_pStdOut, VBOX_PRODUCT " VBoxNetNAT " VBOX_VERSION_STRING " - r%s\n"
+                 "Copyright (C) " VBOX_C_YEAR " " VBOX_VENDOR "\n\n", RTBldCfgRevisionStr());
 
     VBoxNetSlirpNAT NAT;
 
@@ -2981,18 +3075,25 @@ extern "C" DECLEXPORT(int) TrustedMain(int argc, char **argv, char **envp)
         rc = signalHandlerInstall(pQueue);
         if (RT_SUCCESS(rc))
             fSignalHandlerInstalled = true;
+        else
+            VBoxNetSlirpNAT::logError("Failed to install signal handler, rc=%Rrc", rc);
     }
+    else
+        VBoxNetSlirpNAT::logError("Failed to install signal handler: main event queue is not available");
+
     /* ignore rc */ NAT.run();
 
     if (fSignalHandlerInstalled)
     {
         rc = signalHandlerUninstall();
+        if (RT_FAILURE(rc))
+            VBoxNetSlirpNAT::logError("Failed to uninstall signal handler, rc=%Rrc", rc);
         AssertRC(rc);
     }
 
     NAT.destroy();
 
-    LogRel(("Terminating\n"));
+    VBoxNetSlirpNAT::logInfo("TrustedMain ended\n");
     return RTEXITCODE_SUCCESS;
 }
 
