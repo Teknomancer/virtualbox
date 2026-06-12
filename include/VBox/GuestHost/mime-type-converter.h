@@ -1,4 +1,4 @@
-/* $Id: mime-type-converter.h 114354 2026-06-12 23:04:42Z knut.osmundsen@oracle.com $ */
+/* $Id: mime-type-converter.h 114355 2026-06-12 23:36:56Z knut.osmundsen@oracle.com $ */
 /** @file
  * Mime-type converter for Shared Clipboard and Drag-and-Drop code.
  */
@@ -78,8 +78,7 @@ typedef FNVBFMTCONVMIMEBYID *PFNVBFMTCONVMIMEBYID;
  * @param pfnCb         A callback to trigger.
  * @param pvData        User data.
  */
-extern RTDECL(void) VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFNVBFMTCONVMIMEBYID pfnCb,
-                                                  void *pvData);
+void VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFNVBFMTCONVMIMEBYID pfnCb, void *pvData);
 
 /**
  * Find first matching mime-type by given VBox formats ID.
@@ -87,7 +86,7 @@ extern RTDECL(void) VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFN
  * @returns Mime-type as a string or NULL if not found.
  * @param   uFmtVBox    Formats bitmask in VBox representation.
  */
-extern RTDECL(const char *) VBoxMimeConvGetMimeById(const SHCLFORMAT uFmtVBox);
+const char *VBoxMimeConvGetMimeById(const SHCLFORMAT uFmtVBox);
 
 /**
  * Find VBox format for the given MIME type.
@@ -109,8 +108,7 @@ SHCLFORMAT VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *p
  *                          in specified mime-type format (must be freed by caller).
  * @param   pcbBufOut       Size of output buffer.
  */
-extern RTDECL(int) VBoxMimeConvVBoxToNative(const char *pcszMimeType, void *pvBufIn, int cbBufIn,
-                                            void **ppvBufOut, size_t *pcbBufOut);
+int VBoxMimeConvVBoxToNative(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut);
 
 /**
  * Converts data from native format into VBox internal representation.
@@ -123,8 +121,7 @@ extern RTDECL(int) VBoxMimeConvVBoxToNative(const char *pcszMimeType, void *pvBu
  *                          in VBox internal representation format (must be freed by caller).
  * @param   pcbBufOut       Size of output buffer.
  */
-extern RTDECL(int) VBoxMimeConvNativeToVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn,
-                                            void **ppvBufOut, size_t *pcbBufOut);
+int VBoxMimeConvNativeToVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut);
 
 /**
  * Initializes mapping table cache.
@@ -134,7 +131,7 @@ extern RTDECL(int) VBoxMimeConvNativeToVBox(const char *pcszMimeType, void *pvBu
  * @returns IPRT status code.
  * @param   pCache          Cache handle.
  */
-RTDECL(int) VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache);
+int VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache);
 
 /**
  * Destroys mapping table cache.
@@ -142,7 +139,7 @@ RTDECL(int) VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache);
  * @returns IPRT status code.
  * @param   pCache          Cache handle.
  */
-RTDECL(int) VBoxMimeConvDestroyCache(vbox_mime_conv_cache_t *pCache);
+int VBoxMimeConvDestroyCache(vbox_mime_conv_cache_t *pCache);
 
 /**
  * Clears mapping table cache.
@@ -150,7 +147,7 @@ RTDECL(int) VBoxMimeConvDestroyCache(vbox_mime_conv_cache_t *pCache);
  * @returns IPRT status code.
  * @param   pCache          Cache handle.
  */
-RTDECL(int) VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache);
+int VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache);
 
 /**
  * Adds data into cache using mime-type as a key.
@@ -161,7 +158,7 @@ RTDECL(int) VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache);
  * @param   pvBuf           Input buffer which contains data in specified mime-type format.
  * @param   cbBuf           Size of input buffer in bytes.
  */
-RTDECL(int) VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void *pvBuf, int cbBuf);
+int VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void *pvBuf, int cbBuf);
 
 /**
  * Extracts data from cache using mime-type as a key.
@@ -173,7 +170,7 @@ RTDECL(int) VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const cha
  * @param   ppvBufOut       Data which corresponds to given mime-type.
  * @param   pcbBufOut       Size of output buffer.
  */
-RTDECL(int) VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void **ppvBufOut, size_t *pcbBufOut);
+int VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void **ppvBufOut, size_t *pcbBufOut);
 
 /**
  * Extracts data from cache using format ID as a key.
@@ -185,7 +182,7 @@ RTDECL(int) VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const cha
  * @param   ppvBufOut       Data which corresponds to given mime-type.
  * @param   pcbBufOut       Size of output buffer.
  */
-RTDECL(int) VBoxMimeConvGetCacheById(vbox_mime_conv_cache_t *pCache, const SHCLFORMAT uFmtVBox, void **ppvBufOut, size_t *pcbBufOut);
+int VBoxMimeConvGetCacheById(vbox_mime_conv_cache_t *pCache, const SHCLFORMAT uFmtVBox, void **ppvBufOut, size_t *pcbBufOut);
 
 #endif /* !VBOX_INCLUDED_GuestHost_mime_type_converter_h */
 

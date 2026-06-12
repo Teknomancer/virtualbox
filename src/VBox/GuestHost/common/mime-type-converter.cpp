@@ -363,7 +363,7 @@ static struct VBCONVERTERFMTTABLE
     uint32_t                        uPriority;
     /** Pointer to a function which converts data into internal
      *  VirtualBox representation. */
-    const PFNVBFMTCONVERTOR         pfnConvertToVbox;
+    const PFNVBFMTCONVERTOR         pfnConvertToVBox;
     /** Pointer to a function which converts data from internal
      *  VirtualBox representation into X11/Wayland format. */
     const PFNVBFMTCONVERTOR         pfnConvertToNative;
@@ -392,14 +392,14 @@ static struct VBCONVERTERFMTTABLE
     { "image/x-MS-bmp",               VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp,     NULL, 0, },
 };
 
-RTDECL(void) VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFNVBFMTCONVMIMEBYID pfnCb, void *pvData)
+void VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFNVBFMTCONVMIMEBYID pfnCb, void *pvData)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
         if (uFmtVBox & g_aConverterFormats[i].uFmtVBox)
             pfnCb(g_aConverterFormats[i].pcszMimeType, pvData);
 }
 
-RTDECL(const char *) VBoxMimeConvGetMimeById(const SHCLFORMAT uFmtVBox)
+const char *VBoxMimeConvGetMimeById(const SHCLFORMAT uFmtVBox)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
         if (uFmtVBox & g_aConverterFormats[i].uFmtVBox)
@@ -423,7 +423,7 @@ SHCLFORMAT VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *p
     return VBOX_SHCL_FMT_NONE;
 }
 
-RTDECL(int) VBoxMimeConvVBoxToNative(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut)
+int VBoxMimeConvVBoxToNative(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
         if (RTStrNCmp(g_aConverterFormats[i].pcszMimeType, pcszMimeType, VBOX_WAYLAND_MIME_TYPE_NAME_MAX) == 0)
@@ -432,16 +432,16 @@ RTDECL(int) VBoxMimeConvVBoxToNative(const char *pcszMimeType, void *pvBufIn, in
     return VERR_NOT_FOUND;
 }
 
-RTDECL(int) VBoxMimeConvNativeToVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut)
+int VBoxMimeConvNativeToVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
         if (RTStrNCmp(g_aConverterFormats[i].pcszMimeType, pcszMimeType, VBOX_WAYLAND_MIME_TYPE_NAME_MAX) == 0)
-            return g_aConverterFormats[i].pfnConvertToVbox(pvBufIn, cbBufIn, ppvBufOut, pcbBufOut);
+            return g_aConverterFormats[i].pfnConvertToVBox(pvBufIn, cbBufIn, ppvBufOut, pcbBufOut);
 
     return VERR_NOT_FOUND;
 }
 
-RTDECL(int) VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache)
+int VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache)
 {
     int rc;
 
@@ -465,7 +465,7 @@ RTDECL(int) VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache)
     return rc;
 }
 
-RTDECL(int) VBoxMimeConvDestroyCache(vbox_mime_conv_cache_t *pCache)
+int VBoxMimeConvDestroyCache(vbox_mime_conv_cache_t *pCache)
 {
     int rc;
 
@@ -503,7 +503,7 @@ static int vboxMimeConvValidateCache(vbox_mime_conv_cache_t *pCache)
     return VINF_SUCCESS;
 }
 
-RTDECL(int) VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache)
+int VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache)
 {
     int rc;
 
@@ -527,7 +527,7 @@ RTDECL(int) VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache)
     return rc;
 }
 
-RTDECL(int) VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void *pvBuf, int cbBuf)
+int VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void *pvBuf, int cbBuf)
 {
     int rc;
 
@@ -563,7 +563,7 @@ RTDECL(int) VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const cha
     return rc;
 }
 
-RTDECL(int) VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void **ppvBufOut, size_t *pcbBufOut)
+int VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void **ppvBufOut, size_t *pcbBufOut)
 {
     int rc;
 
@@ -603,7 +603,7 @@ RTDECL(int) VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const cha
     return rc;
 }
 
-RTDECL(int) VBoxMimeConvGetCacheById(vbox_mime_conv_cache_t *pCache, const SHCLFORMAT uFmtVBox, void **ppvBufOut, size_t *pcbBufOut)
+int VBoxMimeConvGetCacheById(vbox_mime_conv_cache_t *pCache, const SHCLFORMAT uFmtVBox, void **ppvBufOut, size_t *pcbBufOut)
 {
     int rc;
 
