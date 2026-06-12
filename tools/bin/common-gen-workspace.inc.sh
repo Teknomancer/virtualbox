@@ -1,5 +1,5 @@
 #!/usr/bin/env kmk_ash
-# $Id: common-gen-workspace.inc.sh 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: common-gen-workspace.inc.sh 114353 2026-06-12 17:25:44Z knut.osmundsen@oracle.com $
 ## @file
 # Script for generating a SlickEdit workspace.
 #
@@ -272,8 +272,8 @@ my_generate_all_projects()
     fi
     my_generate_project "Add-Control"   "src/VBox/Additions/common/VBoxControl" --begin-incs "include" "src/VBox/Additions/common/VBoxControl"  --end-includes "src/VBox/Additions/common/VBoxControl"
     my_generate_project "Add-VBoxGuest" "src/VBox/Additions/common/VBoxGuest"   --begin-incs "include" "src/VBox/Additions/common/VBoxGuest"    --end-includes "src/VBox/Additions/common/VBoxGuest"      "include/VBox/VBoxGuest*.*"
-    my_generate_project "Add-Vbgl"      "src/VBox/Additions/common/VBoxGuest/lib" --begin-incs "include" "src/VBox/Additions/common/VBoxGuest/lib" --end-includes "src/VBox/Additions/common/VBoxGuest/lib" "include/VBox/VBoxGuest/lib/*.*"
-    my_generate_project "Add-VBoxService" "src/VBox/Additions/common/VBoxService" --begin-incs "include" "src/VBox/Additions/common/VBoxService"  --end-includes "src/VBox/Additions/common/VBoxService"
+    my_generate_project "Add-Vbgl"      "src/VBox/Additions/common/VBoxGuest/lib" --begin-incs "include" "src/VBox/Additions/common/VBoxGuest/lib"  --end-includes "src/VBox/Additions/common/VBoxGuest/lib" "include/VBox/VBoxGuest/lib/*.*"
+    my_generate_project "Add-VBoxService" "src/VBox/Additions/common/VBoxService" --begin-incs "include" "src/VBox/Additions/common/VBoxService"    --end-includes "src/VBox/Additions/common/VBoxService"
     my_generate_project "Add-VBoxVideo" "src/VBox/Additions/common/VBoxVideo"   --begin-incs "include" "src/VBox/Additions/common/VBoxVideo"    --end-includes "src/VBox/Additions/common/VBoxVideo"
     my_generate_project "Add-nt-Tray"   "src/VBox/Additions/win/VBoxTray"       --begin-incs "include" "src/VBox/Additions/win/include" "src/VBox/Additions/win/VBoxTray" --end-includes "src/VBox/Additions/win/VBoxTray"
     if test -z "$MY_OPT_MINIMAL"; then
@@ -306,9 +306,9 @@ my_generate_all_projects()
 
     # src/VBox/Frontends
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "FE-VBoxAutostart"   "src/VBox/Frontends/VBoxAutostart"   --begin-incs "include" "src/VBox/Frontends/VBoxAutostart"       --end-includes "src/VBox/Frontends/VBoxAutostart"
-        my_generate_project "FE-VBoxBugReport"   "src/VBox/Frontends/VBoxBugReport"   --begin-incs "include" "src/VBox/Frontends/VBoxBugReport"       --end-includes "src/VBox/Frontends/VBoxBugReport"
-        my_generate_project "FE-VBoxBalloonCtrl" "src/VBox/Frontends/VBoxBalloonCtrl" --begin-incs "include" "src/VBox/Frontends/VBoxBalloonCtrl"     --end-includes "src/VBox/Frontends/VBoxBalloonCtrl"
+        my_generate_project "FE-VBoxAutostart"   "src/VBox/Frontends/VBoxAutostart"   --begin-incs "include" "src/VBox/Frontends/VBoxAutostart"     --end-includes "src/VBox/Frontends/VBoxAutostart"
+        my_generate_project "FE-VBoxBugReport"   "src/VBox/Frontends/VBoxBugReport"   --begin-incs "include" "src/VBox/Frontends/VBoxBugReport"     --end-includes "src/VBox/Frontends/VBoxBugReport"
+        my_generate_project "FE-VBoxBalloonCtrl" "src/VBox/Frontends/VBoxBalloonCtrl" --begin-incs "include" "src/VBox/Frontends/VBoxBalloonCtrl"   --end-includes "src/VBox/Frontends/VBoxBalloonCtrl"
     fi
     my_generate_project "FE-VBoxManage"     "src/VBox/Frontends/VBoxManage"     --begin-incs "include" "src/VBox/Frontends/VBoxManage"          --end-includes "src/VBox/Frontends/VBoxManage"
     my_generate_project "FE-VBoxHeadless"   "src/VBox/Frontends/VBoxHeadless"   --begin-incs "include" "src/VBox/Frontends/VBoxHeadless"        --end-includes "src/VBox/Frontends/VBoxHeadless"
@@ -332,12 +332,7 @@ my_generate_all_projects()
     fi
 
     # src/VBox/GuestHost
-    my_generate_project "HGSMI-GH"      "src/VBox/GuestHost/HGSMI"              --begin-incs "include"                                          --end-includes "src/VBox/GuestHost/HGSMI"
-    if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "DragAndDrop-GH" "src/VBox/GuestHost/DragAndDrop"   --begin-incs "include"                                          --end-includes "src/VBox/GuestHost/DragAndDrop"
-    fi
-    my_generate_project "ShClip-GH"     "src/VBox/GuestHost/SharedClipboard"    --begin-incs "include"                                          --end-includes "src/VBox/GuestHost/SharedClipboard"
-    my_generate_project "Install-GH"    "src/VBox/GuestHost/installation"       --begin-incs "include"                                          --end-includes "src/VBox/GuestHost/installation"
+    my_generate_project "GuestHost"     "src/VBox/GuestHost"                    --begin-incs "include"                                          --end-includes "src/VBox/GuestHost" "include/VBox/GuestHost"
 
     # src/VBox/HostDrivers
     my_generate_project "SUP"           "src/VBox/HostDrivers/Support"          --begin-incs "include" "src/VBox/HostDrivers/Support"           --end-includes "src/VBox/HostDrivers/Support" "include/VBox/sup.h" "include/VBox/sup.mac"
@@ -347,25 +342,25 @@ my_generate_all_projects()
     my_generate_project "AdpCtl"        "src/VBox/HostDrivers/adpctl"           --begin-incs "include"                                          --end-includes "src/VBox/HostDrivers/adpctl"
 
     # src/VBox/HostServices
-    my_generate_project "HS-auth"       "src/VBox/HostServices/auth"            --begin-incs "include" "src/VBox/HostServices/auth"            --end-includes "src/VBox/HostServices/auth"
-    my_generate_project "HS-common"     "src/VBox/HostServices/common"          --begin-incs "include" "src/VBox/HostServices/common"          --end-includes "src/VBox/HostServices/common"
-    my_generate_project "HS-testcase"   "src/VBox/HostServices/testcase"        --begin-incs "include" "src/VBox/HostServices/testcase"        --end-includes "src/VBox/HostServices/testcase"
-    my_generate_project "GstCtl-HS"     "src/VBox/HostServices/GuestControl"    --begin-incs "include" "src/VBox/HostServices/GuestControl"    --end-includes "src/VBox/HostServices/GuestControl"
+    my_generate_project "HS-auth"       "src/VBox/HostServices/auth"            --begin-incs "include" "src/VBox/HostServices/auth"             --end-includes "src/VBox/HostServices/auth"
+    my_generate_project "HS-common"     "src/VBox/HostServices/common"          --begin-incs "include" "src/VBox/HostServices/common"           --end-includes "src/VBox/HostServices/common"
+    my_generate_project "HS-testcase"   "src/VBox/HostServices/testcase"        --begin-incs "include" "src/VBox/HostServices/testcase"         --end-includes "src/VBox/HostServices/testcase"
+    my_generate_project "HS-GstCtl"     "src/VBox/HostServices/GuestControl"    --begin-incs "include" "src/VBox/HostServices/GuestControl"     --end-includes "src/VBox/HostServices/GuestControl"
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "DragAndDrop-HS" "src/VBox/HostServices/DragAndDrop" --begin-incs "include" "src/VBox/HostServices/DragAndDrop"     --end-includes "src/VBox/HostServices/DragAndDrop"
+        my_generate_project "HS-DragAndDrop" "src/VBox/HostServices/DragAndDrop" --begin-incs "include" "src/VBox/HostServices/DragAndDrop"     --end-includes "src/VBox/HostServices/DragAndDrop"
     fi
-    my_generate_project "GuestProps-HS" "src/VBox/HostServices/GuestProperties" --begin-incs "include" "src/VBox/HostServices/GuestProperties" --end-includes "src/VBox/HostServices/GuestProperties"
-    my_generate_project "ShClip-HS"     "src/VBox/HostServices/SharedClipboard" --begin-incs "include" "src/VBox/HostServices/SharedClipboard" --end-includes "src/VBox/HostServices/SharedClipboard"
-    my_generate_project "ShFolders-HS"  "src/VBox/HostServices/SharedFolders"   --begin-incs "include" "src/VBox/HostServices/SharedFolders"   --end-includes "src/VBox/HostServices/SharedFolders" "include/VBox/shflsvc.h"
+    my_generate_project "HS-GuestProps" "src/VBox/HostServices/GuestProperties" --begin-incs "include" "src/VBox/HostServices/GuestProperties"  --end-includes "src/VBox/HostServices/GuestProperties"
+    my_generate_project "HS-ShClip"     "src/VBox/HostServices/SharedClipboard" --begin-incs "include" "src/VBox/HostServices/SharedClipboard"  --end-includes "src/VBox/HostServices/SharedClipboard"
+    my_generate_project "HS-ShFolders"  "src/VBox/HostServices/SharedFolders"   --begin-incs "include" "src/VBox/HostServices/SharedFolders"    --end-includes "src/VBox/HostServices/SharedFolders" "include/VBox/shflsvc.h"
 
     # src/VBox/ImageMounter
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "ImageMounter"  "src/VBox/ImageMounter"             --begin-incs "include" "src/VBox/ImageMounter"              --end-includes "src/VBox/ImageMounter"
+        my_generate_project "ImageMounter"  "src/VBox/ImageMounter"             --begin-incs "include" "src/VBox/ImageMounter"                  --end-includes "src/VBox/ImageMounter"
     fi
 
     # src/VBox/Installer
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "Installers"    "src/VBox/Installer"                --begin-incs "include"                                      --end-includes "src/VBox/Installer"
+        my_generate_project "Installers"    "src/VBox/Installer"                --begin-incs "include"                                          --end-includes "src/VBox/Installer"
     fi
 
     # src/VBox/Main
@@ -379,8 +374,8 @@ my_generate_all_projects()
 
     # src/VBox/RDP
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "RDP-Server"    "src/VBox/RDP/server"               --begin-incs "include" "src/VBox/RDP/server"                --end-includes "src/VBox/RDP/server"
-        my_generate_project "RDP-Misc"      "src/VBox/RDP"                      --begin-incs "include"                                      --end-includes "src/VBox/RDP/auth" "src/VBox/RDP/tscpasswd" "src/VBox/RDP/x11server"
+        my_generate_project "RDP-Server"    "src/VBox/RDP/server"               --begin-incs "include" "src/VBox/RDP/server"                    --end-includes "src/VBox/RDP/server"
+        my_generate_project "RDP-Misc"      "src/VBox/RDP"                      --begin-incs "include"                                          --end-includes "src/VBox/RDP/auth" "src/VBox/RDP/tscpasswd" "src/VBox/RDP/x11server"
     fi
 
     # src/VBox/Storage
@@ -388,7 +383,7 @@ my_generate_all_projects()
 
     # src/VBox/ValidationKit
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "ValidationKit" "src/VBox/ValidationKit"            --begin-incs "include"                                      --end-includes "src/VBox/ValidationKit"
+        my_generate_project "ValidationKit" "src/VBox/ValidationKit"            --begin-incs "include"                                          --end-includes "src/VBox/ValidationKit"
     fi
 
     # src/VBox/ExtPacks
