@@ -1,4 +1,4 @@
-/* $Id: mime-type-converter.h 113967 2026-04-22 09:47:12Z vadim.galitsyn@oracle.com $ */
+/* $Id: mime-type-converter.h 114354 2026-06-12 23:04:42Z knut.osmundsen@oracle.com $ */
 /** @file
  * Mime-type converter for Shared Clipboard and Drag-and-Drop code.
  */
@@ -90,12 +90,13 @@ extern RTDECL(void) VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFN
 extern RTDECL(const char *) VBoxMimeConvGetMimeById(const SHCLFORMAT uFmtVBox);
 
 /**
- * Find VBox format ID by given mime-type.
+ * Find VBox format for the given MIME type.
  *
- * @returns Format ID in VBox representation.
- * @param   pcszMimeType    Mime-type in string representation.
+ * @returns VBox format. VBOX_SHCL_FMT_NONE if no translation found.
+ * @param   pcszMimeType    MIME type to convert.
+ * @param   puPriority      Where to return the format priority. Optional.
  */
-extern RTDECL(SHCLFORMAT) VBoxMimeConvGetIdByMime(const char *pcszMimeType);
+SHCLFORMAT VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *puPriority);
 
 /**
  * Converts data from VBox internal representation into native format.

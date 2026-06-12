@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 113967 2026-04-22 09:47:12Z vadim.galitsyn@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114354 2026-06-12 23:04:42Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -426,7 +426,7 @@ RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx)
     AssertPtrReturn(sMimeType, VERR_INVALID_PARAMETER);
     AssertPtrReturn(pSession, VERR_INVALID_PARAMETER);
 
-    SHCLFORMAT uFmt = VBoxMimeConvGetIdByMime(sMimeType);
+    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(sMimeType, NULL);
 
     int rc = VINF_SUCCESS;;
 
@@ -535,7 +535,7 @@ RTDECL(int) vbcl_wayland_xdcp_set_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
     if (RT_VALID_PTR(pCtx->pClipboardCtx))
     {
         /* Set requested format to the session. */
-        pCtx->Session.clip.uFmt.set(VBoxMimeConvGetIdByMime(sMimeType));
+        pCtx->Session.clip.uFmt.set(VbghMimeConvGetVBoxFormatByMime(sMimeType, NULL));
 
         /* Wait for data in requested format. */
         pvBuf = (void *)pCtx->Session.clip.pvDataBuf.wait();

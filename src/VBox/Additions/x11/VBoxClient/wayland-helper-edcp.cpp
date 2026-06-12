@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 113967 2026-04-22 09:47:12Z vadim.galitsyn@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114354 2026-06-12 23:04:42Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -292,7 +292,7 @@ static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(vbox_wl_dcp_mime_t *pList
 
             VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->pszMimeType);
 
-            fFmts |= VBoxMimeConvGetIdByMime(pEntry->pszMimeType);
+            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->pszMimeType, NULL);
 
             rc = vbcl_wayland_hlp_edcp_receive_offer(&g_EdcpCtx, pOffer, pEntry->pszMimeType);
         }

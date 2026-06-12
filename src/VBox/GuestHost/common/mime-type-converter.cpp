@@ -35,6 +35,14 @@
 
 #include <VBox/GuestHost/mime-type-converter.h>
 
+/** @todo r=bird: Only used with RTStrNCmp, where it is completely
+ *        unnecessary and just a potential bug source.  The reason being that we
+ *        we control one of the two strings, which limits the comparison to the
+ *        length of it.
+ *
+ *        However, if you mean to do something like RTStrStartsWith,
+ *        then RT_MIN(strlen(), VBOX_WAYLAND_MIME_TYPE_NAME_MAX) would be
+ *        better.  It wouldn't be all, that good though. */
 #define VBOX_WAYLAND_MIME_TYPE_NAME_MAX     (32)
 
 /* Declaration of mime-type conversion helper function. */
@@ -59,6 +67,8 @@ static DECLCALLBACK(int) vbConvertUtf8ToUtf16(void *pvBufIn, int cbBufIn, void *
     rc = RTStrValidateEncodingEx((char *)pvBufIn, cbBufIn, 0);
     if (RT_SUCCESS(rc))
     {
+        /** @todo r=bird: Wrong buffer pointer type. Just because you return void
+         *        pointers, doesn't mean you should use that internally. */
         rc = ShClConvUtf8LFToUtf16CRLF((const char *)pvBufIn, cbBufIn, (PRTUTF16 *)&pvDst, &cwDst);
         if (RT_SUCCESS(rc))
         {
@@ -135,6 +145,8 @@ static DECLCALLBACK(int) vbConvertLatin1ToUtf16(void *pvBufIn, int cbBufIn, void
     size_t cwDst;
     void *pvDst = NULL;
 
+    /** @todo r=bird: Wrong buffer pointer type. Just because you return void
+     *        pointers, doesn't mean you should use that internally. */
     rc = ShClConvLatin1LFToUtf16CRLF((char *)pvBufIn, cbBufIn, (PRTUTF16 *)&pvDst, &cwDst);
     if (RT_SUCCESS(rc))
     {
@@ -166,6 +178,7 @@ static DECLCALLBACK(int) vbConvertUtf16ToLatin1(void *pvBufIn, int cbBufIn, void
     rc = RTUtf16ValidateEncodingEx((PCRTUTF16)pvBufIn, cbBufIn / sizeof(RTUTF16),
                                    RTSTR_VALIDATE_ENCODING_ZERO_TERMINATED | RTSTR_VALIDATE_ENCODING_EXACT_LENGTH);
     if (RT_SUCCESS(rc))
+        /** @todo r=bird: Inconsistent handing indent (the one above is preferred). */
         rc = RTUtf16ToLatin1ExTag(
             (PCRTUTF16)pvBufIn, cbBufIn / sizeof(RTUTF16), (char **)ppvBufOut, cbBufIn, pcbBufOut, RTSTR_TAG);
 
@@ -183,6 +196,9 @@ static DECLCALLBACK(int) vbConvertUtf16ToLatin1(void *pvBufIn, int cbBufIn, void
  */
 static DECLCALLBACK(int) vbConvertHtmlToVBox(void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut)
 {
+    /** @todo r=bird: What's with the C coding? This is C++, so declare variables
+     *        where they are used.  Unnecessary initialization of 'rc' is just
+     *        confusing (value is never used). */
     int rc = VERR_PARSE_ERROR;
     void *pvDst = NULL;
     size_t cbDst = 0;
@@ -329,14 +345,22 @@ static DECLCALLBACK(int) vbConvertVBoxToBmp(void *pvBufIn, int cbBufIn, void **p
     return ShClDibToBmp(pvBufIn, cbBufIn, ppvBufOut, pcbBufOut);
 }
 
-/* This table represents mime-types cache and contains its
- * content converted into VirtualBox internal representation. */
+/**
+ * This table represents mime-types cache and contains its
+ * content converted into VirtualBox internal representation.
+ */
 static struct VBCONVERTERFMTTABLE
 {
     /** Content mime-type as reported by X11/Wayland. */
     const char *                    pcszMimeType;
     /** VBox content type representation. */
     const SHCLFORMAT                uFmtVBox;
+    /** The priority of MIME types mapping to the same SHCLFORMAT.
+     * Higher value means higher priority. Range is range 0 thru 15.
+     * @note This assumes that we can use one common priority for all
+     *       clipboard/toolkit implementations. Should we end up with different
+     *       preferences, we'd have to partition it. */
+    uint32_t                        uPriority;
     /** Pointer to a function which converts data into internal
      *  VirtualBox representation. */
     const PFNVBFMTCONVERTOR         pfnConvertToVbox;
@@ -350,22 +374,22 @@ static struct VBCONVERTERFMTTABLE
     size_t                          cbBuf;
 } g_aConverterFormats[] =
 {
-    { "INVALID",                        VBOX_SHCL_FMT_NONE,         NULL,                       NULL,                 NULL, 0, },
+    { "INVALID",                      VBOX_SHCL_FMT_NONE,          0, NULL,                   NULL,                   NULL, 0, },
 
-    { "UTF8_STRING",                    VBOX_SHCL_FMT_UNICODETEXT,  vbConvertUtf8ToUtf16,     vbConvertUtf16ToUtf8,   NULL, 0, },
-    { "text/plain;charset=UTF-8",       VBOX_SHCL_FMT_UNICODETEXT,  vbConvertUtf8ToUtf16,     vbConvertUtf16ToUtf8,   NULL, 0, },
-    { "text/plain;charset=utf-8",       VBOX_SHCL_FMT_UNICODETEXT,  vbConvertUtf8ToUtf16,     vbConvertUtf16ToUtf8,   NULL, 0, },
-    { "STRING",                         VBOX_SHCL_FMT_UNICODETEXT,  vbConvertLatin1ToUtf16,   vbConvertUtf16ToLatin1, NULL, 0, },
-    { "TEXT",                           VBOX_SHCL_FMT_UNICODETEXT,  vbConvertLatin1ToUtf16,   vbConvertUtf16ToLatin1, NULL, 0, },
-    { "text/plain",                     VBOX_SHCL_FMT_UNICODETEXT,  vbConvertLatin1ToUtf16,   vbConvertUtf16ToLatin1, NULL, 0, },
+    { "UTF8_STRING",                  VBOX_SHCL_FMT_UNICODETEXT,  14, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8,   NULL, 0, },
+    { "text/plain;charset=utf-8",     VBOX_SHCL_FMT_UNICODETEXT,  12, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8,   NULL, 0, }, /** @todo r=bird: do case insensitive matching? */
+    { "text/plain;charset=UTF-8",     VBOX_SHCL_FMT_UNICODETEXT,  11, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8,   NULL, 0, },
+    { "STRING",                       VBOX_SHCL_FMT_UNICODETEXT,   3, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1, NULL, 0, },
+    { "TEXT",                         VBOX_SHCL_FMT_UNICODETEXT,   2, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1, NULL, 0, },
+    { "text/plain",                   VBOX_SHCL_FMT_UNICODETEXT,   1, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1, NULL, 0, },
 
-    { "text/html",                      VBOX_SHCL_FMT_HTML,         vbConvertHtmlToVBox,      vbConvertVBoxToHtml,    NULL, 0, },
-    { "text/html;charset=utf-8",        VBOX_SHCL_FMT_HTML,         vbConvertHtmlToVBox,      vbConvertVBoxToHtml,    NULL, 0, },
-    { "application/x-moz-nativehtml",   VBOX_SHCL_FMT_HTML,         vbConvertHtmlToVBox,      vbConvertVBoxToHtml,    NULL, 0, },
+    { "text/html;charset=utf-8",      VBOX_SHCL_FMT_HTML,         14, vbConvertHtmlToVBox,    vbConvertVBoxToHtml,    NULL, 0, },
+    { "application/x-moz-nativehtml", VBOX_SHCL_FMT_HTML,         12, vbConvertHtmlToVBox,    vbConvertVBoxToHtml,    NULL, 0, }, /** @todo priority and what is this format anyway? */
+    { "text/html",                    VBOX_SHCL_FMT_HTML,         10, vbConvertHtmlToVBox,    vbConvertVBoxToHtml,    NULL, 0, },
 
-    { "image/bmp",                      VBOX_SHCL_FMT_BITMAP,       vbConvertBmpToVBox,       vbConvertVBoxToBmp,     NULL, 0, },
-    { "image/x-bmp",                    VBOX_SHCL_FMT_BITMAP,       vbConvertBmpToVBox,       vbConvertVBoxToBmp,     NULL, 0, },
-    { "image/x-MS-bmp",                 VBOX_SHCL_FMT_BITMAP,       vbConvertBmpToVBox,       vbConvertVBoxToBmp,     NULL, 0, },
+    { "image/bmp",                    VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp,     NULL, 0, },
+    { "image/x-bmp",                  VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp,     NULL, 0, },
+    { "image/x-MS-bmp",               VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp,     NULL, 0, },
 };
 
 RTDECL(void) VBoxMimeConvEnumerateMimeById(const SHCLFORMAT uFmtVBox, PFNVBFMTCONVMIMEBYID pfnCb, void *pvData)
@@ -384,12 +408,18 @@ RTDECL(const char *) VBoxMimeConvGetMimeById(const SHCLFORMAT uFmtVBox)
     return NULL;
 }
 
-RTDECL(SHCLFORMAT) VBoxMimeConvGetIdByMime(const char *pcszMimeType)
+SHCLFORMAT VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *puPriority)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
         if (RTStrNCmp(g_aConverterFormats[i].pcszMimeType, pcszMimeType, VBOX_WAYLAND_MIME_TYPE_NAME_MAX) == 0)
+        {
+            if (puPriority)
+                *puPriority = g_aConverterFormats[i].uPriority;
             return g_aConverterFormats[i].uFmtVBox;
+        }
 
+    if (puPriority)
+        *puPriority = 0;
     return VBOX_SHCL_FMT_NONE;
 }
 
