@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114346 2026-06-12 08:45:22Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -4581,7 +4581,7 @@ int ShClTransferInit(PSHCLTRANSFER pTransfer)
         pTransfer->Callbacks.pfnOnInitialized(&pTransfer->CallbackCtx);
 
     if (RT_FAILURE(rc))
-        LogRel(("Shared Clipboard: Initialziation of transfer failed with %Rrc\n", rc));
+        LogRel(("Shared Clipboard: Initializiation of transfer failed with %Rrc\n", rc));
 
     LogFlowFuncLeaveRC(rc);
     return rc;
