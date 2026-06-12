@@ -1,5 +1,5 @@
 #!/usr/bin/env kmk_ash
-# $Id: gen-vscode-workspace.sh 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: gen-vscode-workspace.sh 114347 2026-06-12 13:49:45Z andreas.loeffler@oracle.com $
 ## @file
 # Script for generating a Visual Studio Code (vscode) workspace.
 #
@@ -58,6 +58,213 @@ MY_DBG=""
 MY_WINDOWS_HOST=""
 MY_OPT_MINIMAL=""
 MY_OPT_USE_WILDCARDS="yes"
+MY_HOST_TARGET=""
+MY_HOST_ARCH=""
+
+
+##
+# Emits a string value in a JSON array, adding separators as needed.
+#
+# @param    $1      The output file name.
+# @param    $2      Indentation.
+# @param    $3      The string value.
+my_vscode_array_string()
+{
+    if test -n "${MY_VSCODE_JSON_NEEDS_COMMA}"; then
+        echo "${2}, \"${3}\""                                               >> "${1}"
+    else
+        echo "${2}\"${3}\""                                                  >> "${1}"
+        MY_VSCODE_JSON_NEEDS_COMMA=1
+    fi
+}
+
+
+##
+# Emits one include/search path if the directory exists.
+#
+# @param    $1      The output file name.
+# @param    $2      Indentation.
+# @param    $3      Directory relative to the repository root.
+my_generate_vscode_add_include_if_dir()
+{
+    if test -d "${MY_FILE_ROOT_DIR}/${3}"; then
+        my_vscode_array_string "${1}" "${2}" "${MY_FILE_ROOT_DIR}/${3}"
+    fi
+}
+
+
+##
+# Emits one include/search path for a generated output directory, whether or not
+# it exists yet.  The directory may appear after the first build.
+#
+# @param    $1      The output file name.
+# @param    $2      Indentation.
+# @param    $3      Directory relative to the repository root.
+my_generate_vscode_add_generated_include()
+{
+    my_vscode_array_string "${1}" "${2}" "${MY_FILE_ROOT_DIR}/${3}"
+}
+
+
+##
+# Emits the core VirtualBox preprocessor defines needed by vscode-cpptools for
+# making sense of the common headers when there is no compile_commands.json.
+#
+# @param    $1      The output file name.
+my_generate_vscode_defines()
+{
+    MY_VSCODE_JSON_NEEDS_COMMA=""
+    my_vscode_array_string "${1}" '                ' "VBOX"
+    my_vscode_array_string "${1}" '                ' "IN_RING3"
+    my_vscode_array_string "${1}" '                ' "IN_RT_R3"
+    case "${MY_HOST_TARGET}" in
+        darwin)
+            my_vscode_array_string "${1}" '                ' "RT_OS_DARWIN"
+            ;;
+        freebsd)
+            my_vscode_array_string "${1}" '                ' "RT_OS_FREEBSD"
+            ;;
+        linux)
+            my_vscode_array_string "${1}" '                ' "RT_OS_LINUX"
+            ;;
+        solaris)
+            my_vscode_array_string "${1}" '                ' "RT_OS_SOLARIS"
+            ;;
+        win)
+            my_vscode_array_string "${1}" '                ' "RT_OS_WINDOWS"
+            ;;
+    esac
+    case "${MY_HOST_ARCH}" in
+        amd64)
+            my_vscode_array_string "${1}" '                ' "RT_ARCH_AMD64"
+            ;;
+        arm64)
+            my_vscode_array_string "${1}" '                ' "RT_ARCH_ARM64"
+            ;;
+        x86)
+            my_vscode_array_string "${1}" '                ' "RT_ARCH_X86"
+            ;;
+    esac
+}
+
+
+##
+# Emits the well-known VirtualBox include/search directories.  These are a
+# fallback for editor navigation only; kBuild remains authoritative.
+#
+# @param    $1      The output file name.
+# @param    $2      Indentation.
+my_generate_vscode_common_include_paths()
+{
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "include"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "include/iprt"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "include/VBox"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Runtime/include"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Runtime"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/VMM"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Devices"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Disassembler"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Storage"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Main/include"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Main/src-all"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Main/src-client"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Main/src-server"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Frontends/Common"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Frontends/VirtualBox/src"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Frontends/VirtualBox/src/globals"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Frontends/VirtualBox/src/runtime"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/Frontends/VirtualBox/src/settings"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/HostServices/common"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/GuestHost/HGSMI"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/VBox/GuestHost/SharedClipboard"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/nsprpub/pr/include"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/base"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/components"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/ds"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/glue"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/io"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/proxy"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/string"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/threads"
+    my_generate_vscode_add_include_if_dir "${1}" "${2}" "src/libs/xpcom18a4/xpcom/typelib"
+
+    for MY_LIB_INC in \
+        "${MY_FILE_ROOT_DIR}/src/libs/openssl"*/include \
+        "${MY_FILE_ROOT_DIR}/src/libs/curl"*/include \
+        "${MY_FILE_ROOT_DIR}/src/libs/libpng"* \
+        "${MY_FILE_ROOT_DIR}/src/libs/zlib"*;
+    do
+        if test -d "${MY_LIB_INC}"; then
+            my_vscode_array_string "${1}" "${2}" "${MY_LIB_INC}"
+        fi
+    done
+
+    for MY_OUT_SUBDIR in ${MY_OUT_DIRS};
+    do
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/sdk/bindings/xpcom/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/dist/sdk/bindings/xpcom/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/sdk/bindings/c/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/dist/sdk/bindings/c/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/sdk/bindings/auth/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/dist/sdk/bindings/auth/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/obj/VirtualBox/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/obj/UICommon/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/obj/UICommon/gen/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/additions/src/vboxguest/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/additions/src/vboxsf/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/src/vboxdrv/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/src/vboxnetadp/include"
+        my_generate_vscode_add_generated_include "${1}" "${2}" "${MY_OUT_SUBDIR}/bin/src/vboxnetflt/include"
+    done
+}
+
+
+##
+# Guess host target and architecture if the kBuild environment did not already
+# provide them.
+my_detect_host_defaults()
+{
+    MY_HOST_TARGET="${KBUILD_TARGET}"
+    MY_HOST_ARCH="${KBUILD_TARGET_ARCH}"
+
+    if test -z "${MY_HOST_TARGET}"; then
+        case "`uname -s`" in
+            Darwin)
+                MY_HOST_TARGET="darwin"
+                ;;
+            FreeBSD)
+                MY_HOST_TARGET="freebsd"
+                ;;
+            Linux)
+                MY_HOST_TARGET="linux"
+                ;;
+            SunOS)
+                MY_HOST_TARGET="solaris"
+                ;;
+            *)
+                MY_HOST_TARGET="linux"
+                ;;
+        esac
+    fi
+
+    if test -z "${MY_HOST_ARCH}"; then
+        case "`uname -m`" in
+            x86_64|amd64)
+                MY_HOST_ARCH="amd64"
+                ;;
+            i386|i486|i586|i686)
+                MY_HOST_ARCH="x86"
+                ;;
+            arm64|aarch64)
+                MY_HOST_ARCH="arm64"
+                ;;
+            *)
+                MY_HOST_ARCH="amd64"
+                ;;
+        esac
+    fi
+}
 
 
 ##
@@ -277,6 +484,7 @@ my_generate_project()
     shift
     shift
     shift
+    MY_PRJ_ARGS="$*"
 
     # Make sure that the .vscode project dir exists. But do *NOT* create the
     # parent dir, it must already exist. Duh!
@@ -290,24 +498,58 @@ my_generate_project()
 
     #
     # Generate the C/C++ bits.
-    ## @todo Might needs tweaking a bit more as stuff evolves.
     #
     echo '{'                                                                    >  "${MY_FILE}"
     echo '    "configurations": ['                                              >> "${MY_FILE}"
     echo '        {'                                                            >> "${MY_FILE}"
-    echo '            "name": "Linux",'                                         >> "${MY_FILE}"
+    echo '            "name": "VirtualBox",'                                    >> "${MY_FILE}"
     echo '            "includePath": ['                                         >> "${MY_FILE}"
-    echo '                "${workspaceFolder}/**"'                              >> "${MY_FILE}"
+    MY_VSCODE_JSON_NEEDS_COMMA=""
+    my_vscode_array_string "${MY_FILE}" '                ' '${workspaceFolder}/**'
+    while test $# -ge 1  -a  "${1}" != "--end-includes";
+    do
+        for f in $1;
+        do
+            if test -d "${MY_FILE_ROOT_DIR}/${f}"; then
+                my_vscode_array_string "${MY_FILE}" '                ' "${MY_FILE_ROOT_DIR}/${f}"
+            fi
+        done
+        shift
+    done
+    my_generate_vscode_common_include_paths "${MY_FILE}" '                '
     echo '            ],'                                                       >> "${MY_FILE}"
-    echo '            "defines": [],'                                           >> "${MY_FILE}"
+    echo '            "defines": ['                                            >> "${MY_FILE}"
+    my_generate_vscode_defines "${MY_FILE}"
+    echo '            ],'                                                       >> "${MY_FILE}"
     echo '            "cStandard": "c17",'                                      >> "${MY_FILE}"
     echo '            "cppStandard": "c++14",'                                  >> "${MY_FILE}"
     echo '            "intelliSenseMode": "linux-gcc-x64",'                     >> "${MY_FILE}"
-    echo '            "compilerPath": "/usr/bin/gcc"'                           >> "${MY_FILE}"
+    echo '            "compilerPath": "/usr/bin/gcc",'                          >> "${MY_FILE}"
+    echo '            "browse": {'                                             >> "${MY_FILE}"
+    echo '                "path": ['                                           >> "${MY_FILE}"
+    MY_VSCODE_JSON_NEEDS_COMMA=""
+    my_vscode_array_string "${MY_FILE}" '                    ' '${workspaceFolder}/**'
+    set -- ${MY_PRJ_ARGS}
+    while test $# -ge 1  -a  "${1}" != "--end-includes";
+    do
+        for f in $1;
+        do
+            if test -d "${MY_FILE_ROOT_DIR}/${f}"; then
+                my_vscode_array_string "${MY_FILE}" '                    ' "${MY_FILE_ROOT_DIR}/${f}"
+            fi
+        done
+        shift
+    done
+    my_generate_vscode_common_include_paths "${MY_FILE}" '                    '
+    echo '                ],'                                                   >> "${MY_FILE}"
+    echo '                "limitSymbolsToIncludedHeaders": false'              >> "${MY_FILE}"
+    echo '            }'                                                        >> "${MY_FILE}"
     echo '        }'                                                            >> "${MY_FILE}"
     echo '    ],'                                                               >> "${MY_FILE}"
     echo '    "version": 4'                                                     >> "${MY_FILE}"
     echo '}'                                                                    >> "${MY_FILE}"
+
+    set -- ${MY_PRJ_ARGS}
 
     MY_FILE="${MY_FILE_PATH}/tasks${MY_VSCODE_FILE_DOT_EXT}";
     echo "Generating ${MY_FILE}..."
@@ -518,12 +760,19 @@ MY_FILE_ROOT_DIR=${MY_ABS_DIR} ## @todo r=bird: 'FILE' or 'DIR'? ;-)
 
 
 #
+# Detect host defaults for generated IntelliSense defines.
+#
+my_detect_host_defaults
+
+
+#
 # Determine the invocation to conjure up kmk.
 #
 my_abs_dir "tools"
 if test -n "${MY_WINDOWS_HOST}"; then
     MY_KMK_CMD="cscript.exe"
     MY_KMK_ARGS='"/Nologo", "'${MY_ABS_DIR}/envSub.vbs'", "--quiet", "--", "kmk.exe"'
+    MY_HOST_TARGET="win"
 else
     MY_KMK_CMD="/usr/bin/env"
     MY_KMK_ARGS='"LANG=C", "'${MY_ABS_DIR}/env.sh'", "--quiet", "--no-wine", "kmk"'
