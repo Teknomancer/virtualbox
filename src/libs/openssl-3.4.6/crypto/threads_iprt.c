@@ -1,4 +1,4 @@
-/* $Id: threads_iprt.c 114341 2026-06-12 00:26:13Z knut.osmundsen@oracle.com $ */
+/* $Id: threads_iprt.c 114351 2026-06-12 17:05:29Z knut.osmundsen@oracle.com $ */
 /** @file
  * Crypto threading and atomic functions built upon IPRT.
  */
@@ -173,7 +173,7 @@ void ossl_rcu_lock_free(CRYPTO_RCU_LOCK *lock)
 # endif /* VBOX_OPENSSL_WITH_RCU_SUPPORT */
 
 /* Use read/write sections. */
-/*# define USE_RW_CRITSECT */ /** @todo test the code */
+# define USE_RW_CRITSECT
 
 # ifndef USE_RW_CRITSECT
 /*
