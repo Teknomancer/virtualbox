@@ -1,4 +1,4 @@
-# $Id: Config.kmk 114327 2026-06-10 13:59:47Z alexander.rudnev@oracle.com $
+# $Id: Config.kmk 114350 2026-06-12 17:02:31Z knut.osmundsen@oracle.com $
 ## @file
 # The global build configuration file for VBox.
 #
@@ -7209,6 +7209,10 @@ ifeq ($(KBUILD_TARGET),win) # No CRT!
  TEMPLATE_VBoxR3HardenedExe_LDFLAGS.win.x86    = $(TEMPLATE_VBoxR3Exe_LDFLAGS.win.x86)   /entry:suplibHardenedWindowsMain
  TEMPLATE_VBoxR3HardenedExe_LDFLAGS.win.amd64  = $(TEMPLATE_VBoxR3Exe_LDFLAGS.win.amd64) /entry:suplibHardenedWindowsMain
  TEMPLATE_VBoxR3HardenedExe_LDFLAGS.win.arm64  = $(TEMPLATE_VBoxR3Exe_LDFLAGS.win.arm64) /entry:suplibHardenedWindowsMain
+ ifdef DONT_USE_YASM # NASM doesn't know how to create execute-read-write sections.
+  TEMPLATE_VBoxR3HardenedExe_LDFLAGS.win.x86   += /section:.rwxpg,ERW,ALIGN=4096
+  TEMPLATE_VBoxR3HardenedExe_LDFLAGS.win.amd64 += /section:.rwxpg,ERW,ALIGN=4096
+ endif
  TEMPLATE_VBoxR3HardenedExe_LATE_LIBS.x86      = $(NOT_SUCH_VARIABLE)
  TEMPLATE_VBoxR3HardenedExe_LATE_LIBS.amd64    = $(NOT_SUCH_VARIABLE)
  TEMPLATE_VBoxR3HardenedExe_LATE_LIBS.arm64    = $(NOT_SUCH_VARIABLE)
@@ -9587,7 +9591,7 @@ SVN                    ?= svn$(HOSTSUFF_EXE)
 GIT                    ?= git$(HOSTSUFF_EXE)
 VBOX_SVN_REV_KMK        = $(PATH_OUT)/revision.kmk
 ifndef VBOX_SVN_REV
- VBOX_SVN_REV_CONFIG_FALLBACK := $(patsubst %:,,  $Rev: 114327 $  )
+ VBOX_SVN_REV_CONFIG_FALLBACK := $(patsubst %:,,  $Rev: 114350 $  )
  VBOX_SVN_REV_FALLBACK := $(if-expr $(VBOX_SVN_REV_CONFIG_FALLBACK) > $(VBOX_SVN_REV_VERSION_FALLBACK),$(VBOX_SVN_REV_CONFIG_FALLBACK),$(VBOX_SVN_REV_VERSION_FALLBACK))
  VBOX_SVN_DEP          := $(firstword $(wildcard $(PATH_ROOT)/.svn/wc.db $(abspath $(PATH_ROOT)/../.svn/wc.db) $(abspath $(PATH_ROOT)/../../.svn/wc.db) $(PATH_ROOT)/.svn/entries))
  VBOX_GIT_DEP          := $(firstword $(wildcard $(PATH_ROOT)/.git/config $(abspath $(PATH_ROOT)/../.git/config) $(abspath $(PATH_ROOT)/../../.git/config)))
@@ -9601,7 +9605,7 @@ ifndef VBOX_SVN_REV
  ifneq ($(VBOX_GIT_DEP),)
   #
   # VBOX_SVN_REV_CONFIG_FALLBACK is not properly populated for a git checkout,
-  # as the $Rev: 114327 $ is not expanded, so we have to set it based on the information in the repo.
+  # as the $Rev: 114350 $ is not expanded, so we have to set it based on the information in the repo.
   #
   VBOX_SVN_REV_FALLBACK := $(shell $(GIT) log -1 $(PATH_ROOT)/Config.kmk | $(SED) -e 's/^[ \t]*//' -e '/svn:sync-xref-src-repo-rev\: r/!d' -e 's/svn:sync-xref-src-repo-rev\: r*//; t a; :a q')
  endif

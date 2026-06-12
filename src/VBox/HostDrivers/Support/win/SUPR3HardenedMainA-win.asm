@@ -1,4 +1,4 @@
-; $Id: SUPR3HardenedMainA-win.asm 114133 2026-05-14 13:05:57Z knut.osmundsen@oracle.com $
+; $Id: SUPR3HardenedMainA-win.asm 114350 2026-06-12 17:02:31Z knut.osmundsen@oracle.com $
 ;; @file
 ; VirtualBox Support Library - Hardened main(), Windows assembly bits.
 ;
@@ -624,7 +624,11 @@ NAME(SUPHNTIMP_CONCAT(%1,_Early)):
 ; For simplified LdrLoadDll patching we define a special writable, readable and
 ; exectuable section of 4KB where we can put jump back code.
 ;
+%ifdef __NASM__
+section .rwxpg bss align=4096 ;; @todo NASM: add way to create RXW sections.
+%else
 section .rwxpg bss execute read write align=4096
+%endif
 GLOBALNAME g_abSupHardReadWriteExecPage
         resb    4096
 
