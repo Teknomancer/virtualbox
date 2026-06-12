@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 113914 2026-04-16 20:53:06Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114348 2026-06-12 15:03:49Z knut.osmundsen@oracle.com $
 ## @file
 # Sub-Makefile for the support library and the drivers/modules/kexts it uses.
 #
@@ -252,6 +252,7 @@ ifdef VBOX_WITH_VISTA_NO_SP
  SUPR3HardenedStatic_DEFS.win += VBOX_WITH_VISTA_NO_SP
 endif
 SUPR3HardenedStatic_INCS     = .
+SUPR3HardenedStatic_ASINCS.win = win
 SUPR3HardenedStatic_SOURCES  = \
 	SUPR3HardenedMain.cpp \
 	SUPR3HardenedVerify.cpp \

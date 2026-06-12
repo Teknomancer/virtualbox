@@ -1,4 +1,4 @@
-; $Id: SUPDrvA-win.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: SUPDrvA-win.asm 114348 2026-06-12 15:03:49Z knut.osmundsen@oracle.com $
 ;; @file
 ; VirtualBox Support Driver - Windows NT specific assembly parts.
 ;
@@ -104,14 +104,14 @@ BEGINPROC supdrvNtQueryVirtualMemory_Xxx
 supdrvNtQueryVirtualMemory_Jump:
         cli
         mov     r10, rsp                ; save call frame pointer.
-        mov     r11, [NAME(g_pfnKiServiceLinkage) wrt rip]
+        mov     r11, [RT_WRT_RIP(NAME(g_pfnKiServiceLinkage))]
         push    0
         push    0
         push    r10                     ; call frame pointer (incoming rsp).
         pushfq
         push    10h
         push    r11                     ; r11 = KiServiceLinkage (ret w/ unwind info)
-        jmp     qword [NAME(g_pfnKiServiceInternal) wrt rip]
+        jmp     qword [RT_WRT_RIP(NAME(g_pfnKiServiceInternal))]
 ENDPROC   supdrvNtQueryVirtualMemory_Xxx
  %endif
 
