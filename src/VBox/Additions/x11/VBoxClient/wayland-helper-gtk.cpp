@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114356 2026-06-13 00:14:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -28,7 +28,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+#include <iprt/file.h>
 #include <iprt/localipc.h>
+#include <iprt/path.h>
+#include <iprt/process.h>
 #include <iprt/rand.h>
 #include <iprt/semaphore.h>
 
@@ -117,68 +120,57 @@ static vbox_wl_gtk_ctx_t g_GtkClipCtx;
  */
 static int vbcl_wayland_hlp_gtk_session_popup(vbox_wl_gtk_ipc_session_t *pSession)
 {
-    int rc = VINF_SUCCESS;
-
     /* Make sure valid session is in progress. */
     AssertReturn(pSession->uSessionId > 0, VERR_INVALID_PARAMETER);
 
-    char *pszSessionId = RTStrAPrintf2("%u", pSession->uSessionId);
-    if (RT_VALID_PTR(pszSessionId))
+    char szSessionId[64];
+    RTStrPrintf(szSessionId, sizeof(szSessionId), "%u", pSession->uSessionId);
+
+    /* Determin the vboxwl location. */
+    char szVBoxWlBinary[RTPATH_MAX];
+    int rc = RTPathExecDir(szVBoxWlBinary, sizeof(szVBoxWlBinary));
+    AssertRCReturn(rc, rc);
+    rc = RTPathAppend(szVBoxWlBinary, sizeof(szVBoxWlBinary), VBOXWL_FILENAME);
+    AssertRCReturn(rc, rc);
+    if (!RTFileExists(szVBoxWlBinary))
     {
-        /* List of vboxwl command line arguments.*/
-        const char *apszArgs[] =
-        {
-            VBOXWL_PATH,
-            NULL,
-            VBOXWL_ARG_SESSION_ID,
-            pszSessionId,
-            NULL,
-            NULL
-        };
-
-        /* Log verbosity level to be passed to vboxwl. */
-        char pszVerobsity[  VBOXWL_VERBOSITY_MAX
-                          + 2 /* add space for '-' and '\0' */];
-        RT_ZERO(pszVerobsity);
-
-        /* Select vboxwl action depending on session type. */
-        if      (pSession->Base.enmType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
-            apszArgs[1] = VBOXWL_ARG_CLIP_HG_COPY;
-        else if (pSession->Base.enmType == VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST)
-            apszArgs[1] = VBOXWL_ARG_CLIP_GH_ANNOUNCE;
-        else if (pSession->Base.enmType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST)
-            apszArgs[1] = VBOXWL_ARG_CLIP_GH_COPY;
-        else
-            rc = VERR_INVALID_PARAMETER;
-
-        /* Once VBoxClient was started with log verbosity level, pass the
-         * same verbosity level to vboxwl as well. */
-        if (   RT_SUCCESS(rc)
-            && g_cVerbosity > 0)
-        {
-            pszVerobsity[0] = '-';
-
-            memset(&pszVerobsity[1], 'v',
-                   RT_MIN(g_cVerbosity, VBOXWL_VERBOSITY_MAX));
-
-            /* Insert verbosity level into the rest of vboxwl
-             * command line arguments. */
-            apszArgs[4] = pszVerobsity;
-        }
-
-        /* Run vboxwl in background. */
-        if (RT_SUCCESS(rc))
-            rc = RTProcCreate(VBOXWL_PATH,
-                              apszArgs, RTENV_DEFAULT,
-                              RTPROC_FLAGS_SEARCH_PATH, &pSession->popupProc);
-
-        VBClLogVerbose(2, "start '%s' command [sid=%u]: rc=%Rrc\n",
-                       VBOXWL_PATH, pSession->uSessionId, rc);
-
-        RTStrFree(pszSessionId);
+        AssertCompile(sizeof(szVBoxWlBinary) > sizeof(VBOXWL_PATH));
+        memcpy(szVBoxWlBinary, VBOXWL_PATH, sizeof(VBOXWL_PATH));
     }
+
+    /* Select vboxwl action depending on session type. */
+    const char *pszType = NULL;
+    switch (pSession->Base.enmType)
+    {
+        case VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST:      pszType = VBOXWL_ARG_CLIP_HG_COPY; break;
+        case VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST:   pszType = VBOXWL_ARG_CLIP_GH_ANNOUNCE; break;
+        case VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST:       pszType = VBOXWL_ARG_CLIP_GH_COPY; break;
+        case VBCL_WL_SESSION_TYPE_INVALID: break;
+    }
+    AssertReturn(pszType, VERR_INVALID_PARAMETER);
+
+    /* Pass on the log verbosity level. */
+    char szSetVerbosity[sizeof(VBOXWL_OPT_VERBOSITY) + 64];
+    RTStrPrintf(szSetVerbosity, sizeof(szSetVerbosity), VBOXWL_OPT_VERBOSITY "=%u", g_cVerbosity);
+
+    /* List of vboxwl command line arguments.*/
+    const char *apszArgs[] =
+    {
+        szVBoxWlBinary,
+        pszType,
+        VBOXWL_ARG_SESSION_ID,
+        szSessionId,
+        szSetVerbosity,
+        NULL
+    };
+
+
+    /* Run vboxwl in background. */
+    rc = RTProcCreate(szVBoxWlBinary, apszArgs, RTENV_DEFAULT, RTPROC_FLAGS_SEARCH_PATH, &pSession->popupProc);
+    if (RT_SUCCESS(rc))
+        VBClLogVerbose(2, "started '%s' command [sid=%u]\n", szVBoxWlBinary, pSession->uSessionId);
     else
-        rc = VERR_NO_MEMORY;
+        VBClLogError("failed to start '%s' command [sid=%u]: rc=%Rrc\n", szVBoxWlBinary, pSession->uSessionId, rc);
 
     return rc;
 }
@@ -191,7 +183,7 @@ static int vbcl_wayland_hlp_gtk_session_popup(vbox_wl_gtk_ipc_session_t *pSessio
  */
 static int vbcl_wayland_hlp_gtk_session_prepare(vbox_wl_gtk_ipc_session_t *pSession)
 {
-    int rc = VINF_SUCCESS;
+    int rc;
 
     /* Make sure there is no leftovers from previous session. */
     Assert(pSession->uSessionId == 0);
@@ -203,19 +195,14 @@ static int vbcl_wayland_hlp_gtk_session_prepare(vbox_wl_gtk_ipc_session_t *pSess
     if (RT_VALID_PTR(pSession->oDataIpc))
     {
         pSession->oDataIpc->init(vbcl::ipc::FLOW_DIRECTION_SERVER,
-                                      pSession->uSessionId);
+                                 pSession->uSessionId);
+
+        /* Start the helper tool. */
+        rc = vbcl_wayland_hlp_gtk_session_popup(pSession);
+        VBClLogVerbose(1, "session id=%u: started: rc=%Rrc\n", pSession->uSessionId, rc);
     }
     else
         rc = VERR_NO_MEMORY;
-
-    /* Start helper tool. */
-    if (RT_SUCCESS(rc))
-    {
-        rc = vbcl_wayland_hlp_gtk_session_popup(pSession);
-        VBClLogVerbose(1, "session id=%u: started: rc=%Rrc\n",
-                       pSession->uSessionId, rc);
-    }
-
     return rc;
 }
 
@@ -254,21 +241,17 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_session_end_cb(
     vbox_wl_gtk_ipc_session_t *pSession = (vbox_wl_gtk_ipc_session_t *)pvUser;
     AssertPtrReturn(pSession, VERR_INVALID_PARAMETER);
 
-    int rc;
-
     RT_NOREF(enmSessionType);
 
     /* Make sure valid session is in progress. */
     AssertReturn(pSession->uSessionId > 0, VERR_INVALID_PARAMETER);
 
-    rc = RTProcWait(pSession->popupProc, RTPROCWAIT_FLAGS_BLOCK, NULL);
+    int rc = RTProcWait(pSession->popupProc, RTPROCWAIT_FLAGS_BLOCK, NULL);
     if (RT_FAILURE(rc))
         rc = RTProcTerminate(pSession->popupProc);
     if (RT_FAILURE(rc))
-    {
         VBClLogError("session %u: unable to stop popup window process: rc=%Rrc\n",
                      pSession->uSessionId, rc);
-    }
 
     if (RT_SUCCESS(rc))
     {

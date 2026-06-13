@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-ipc.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-ipc.h 114356 2026-06-13 00:14:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for IPC between VBoxClient and vboxwl tool.
  */
@@ -52,10 +52,13 @@
 #include "VBoxClient.h"
 #include "wayland-helper.h"
 
+/** Binary name of the Gtk helper tool which raises popup window and gets
+ * access to Wayland clipboard. */
+#define VBOXWL_FILENAME                "vboxwl"
 /** Path to Gtk helper tool which raises popup window and gets
  * access to Wayland clipboard. */
 #ifndef VBOXWL_PATH
-# define VBOXWL_PATH                    "/usr/bin/vboxwl"
+# define VBOXWL_PATH                    "/usr/bin/" VBOXWL_FILENAME
 #endif
 /** Limit maximum log verbosity level for popup tool. */
 #define VBOXWL_VERBOSITY_MAX            (5)
@@ -64,13 +67,16 @@
 #define VBOXWL_SRV_NAME_PREFIX_CLIP     "clip"
 #define VBOXWL_SRV_NAME_PREFIX_DND      "dnd"
 
-/** Arguments to vboxwl tool. */
+/** Arguments to vboxwl tool.
+ * @{ */
 #define VBOXWL_ARG_CLIP_HG_COPY         "--clip-hg-copy"
 #define VBOXWL_ARG_CLIP_GH_ANNOUNCE     "--clip-gh-announce"
 #define VBOXWL_ARG_CLIP_GH_COPY         "--clip-gh-copy"
 #define VBOXWL_ARG_DND_GH               "--dnd-gh"
 #define VBOXWL_ARG_DND_HG               "--dnd-hg"
 #define VBOXWL_ARG_SESSION_ID           "--session-id"
+#define VBOXWL_OPT_VERBOSITY            "--verbosity"
+/** @} */
 
 /** Time in milliseconds to wait for IPC socket events. */
 #define VBOX_GTKIPC_RX_TIMEOUT_MS       (VBCL_WAYLAND_DATA_WAIT_TIMEOUT_MS)
