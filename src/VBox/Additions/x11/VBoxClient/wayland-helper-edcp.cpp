@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114354 2026-06-12 23:04:42Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114357 2026-06-13 01:07:47Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -163,7 +163,7 @@ static const struct wl_registry_listener g_vbcl_wayland_hlp_registry_cb =
  * in order to be able to access Wayland clipboard content.
  *
  * This callback adds mime-type just advertised by Wayland into a list
- * of mime-types which in turn later will be advertised to the host.
+ * of MIME types which in turn later will be advertised to the host.
  *
  * @returns IPRT status code.
  * @param   enmSessionType      Session type, must be verified as
@@ -267,10 +267,10 @@ static int vbcl_wayland_hlp_edcp_receive_offer(
 }
 
 /**
- * Convert list of mime-types in string representation into bitmask of VBox formats.
+ * Convert list of MIME types in string representation into bitmask of VBox formats.
  *
  * @returns Formats bitmask.
- * @param   pList       List of mime-types in string representation.
+ * @param   pList       List of MIME types in string representation.
  * @param   pOffer      Wayland offer.
  */
 static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(vbox_wl_dcp_mime_t *pList, struct ext_data_control_offer_v1 *pOffer)
@@ -292,7 +292,7 @@ static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(vbox_wl_dcp_mime_t *pList
 
             VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->pszMimeType);
 
-            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->pszMimeType, NULL);
+            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->pszMimeType, NULL /*pfFlagsAndPriority*/);
 
             rc = vbcl_wayland_hlp_edcp_receive_offer(&g_EdcpCtx, pOffer, pEntry->pszMimeType);
         }
@@ -854,20 +854,18 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb(
 }
 
 /**
- * Enumeration callback used for sending clipboard offers to Wayland client.
+ * @callback_method_impl{FNVBGHMIMECONVENUM,
+ *      Enumeration callback used for sending clipboard offers to Wayland client. }
  *
- * When host announces its clipboard content, this call back is used in order
- * to send corresponding offers to other Wayland clients.
- *
- * Callback must be executed in context of Wayland event thread.
- *
- * @param   pcszMimeType    Mime-type to advertise.
- * @param   pvUser          User data (DCP data source object).
+ * When the host announces its clipboard content, this call back is used to send
+ * corresponding offers to other Wayland clients.
  */
-static DECLCALLBACK(void) vbcl_wayland_hlp_edcp_send_offers(const char *pcszMimeType, void *pvUser)
+static DECLCALLBACK(void)
+vbcl_wayland_hlp_edcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPriority, void *pvUser)
 {
     ext_data_control_source_v1 *pDataSource = (ext_data_control_source_v1 *)pvUser;
     ext_data_control_source_v1_offer(pDataSource, pcszMimeType);
+    RT_NOREF(fFlagsAndPriority);
 }
 
 /**
@@ -913,9 +911,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(
                 ext_data_control_source_v1_add_listener(
                     (struct ext_data_control_source_v1 *)pDataSource, &g_data_source_listener, &g_EdcpCtx);
 
-                VBoxMimeConvEnumerateMimeById(fFmts,
-                                              vbcl_wayland_hlp_edcp_send_offers,
-                                              pDataSource);
+                VbghMimeConvEnumerateByVBoxFormat(fFmts, vbcl_wayland_hlp_edcp_send_offers, pDataSource);
 
                 ext_data_control_device_v1_set_selection(g_EdcpCtx.pDataDevice, pDataSource);
             }

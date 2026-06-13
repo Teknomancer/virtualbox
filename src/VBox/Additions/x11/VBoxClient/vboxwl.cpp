@@ -1,4 +1,4 @@
-/* $Id: vboxwl.cpp 114356 2026-06-13 00:14:02Z knut.osmundsen@oracle.com $ */
+/* $Id: vboxwl.cpp 114357 2026-06-13 01:07:47Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland helper for grabbing input focus, drag-n-drop and clipboard sharing.
  */
@@ -130,7 +130,7 @@ static void vbwlGtkClipboardReadCallback(GtkClipboard *pClipboard, GtkSelectionD
             size_t cbBufOut = 0;
 
             /* Convert guest clipboard into VBox representation. */
-            rc = VBoxMimeConvNativeToVBox(pcszMimeType, pData, cbData, &pvBufOut, &cbBufOut);
+            rc = VbghMimeConvToVBox(pcszMimeType, pData, cbData, &pvBufOut, &cbBufOut);
             if (RT_SUCCESS(rc))
             {
                 g_oDataIpc->m_pvDataBuf.set((uint64_t)pvBufOut);
@@ -164,7 +164,7 @@ static SHCLFORMATS vbwlGtkMapTargetsToVBoxFormats(GdkAtom *paTargets, gint cTarg
         gchar *pszTargetName = gdk_atom_name(paTargets[i]);
         if (RT_VALID_PTR(pszTargetName))
         {
-            SHCLFORMATS const fCvtFmt = VbghMimeConvGetVBoxFormatByMime(pszTargetName, NULL);
+            SHCLFORMATS const fCvtFmt = VbghMimeConvGetVBoxFormatByMime(pszTargetName, NULL /*pfFlagsAndPriority*/);
             VBClLogVerbose(5, "session %u: %#zx/%s -> %#x\n", g_idSession, (size_t)paTargets[i], pszTargetName, fCvtFmt);
             fFmts |= fCvtFmt;
             g_free(pszTargetName);
@@ -193,19 +193,19 @@ static GdkAtom vbwlGtkClipboardMapFromVBoxFormat(GdkAtom *paTargets, gint cTarge
         gchar *pszTargetName = gdk_atom_name(paTargets[i]);
         if (RT_VALID_PTR(pszTargetName))
         {
-            uint32_t uPriority = 0;
-            if (uFmt == VbghMimeConvGetVBoxFormatByMime(pszTargetName, &uPriority))
+            uint32_t fFlagsAndPriority = 0;
+            if (uFmt == VbghMimeConvGetVBoxFormatByMime(pszTargetName, &fFlagsAndPriority))
             {
-                if (uPriority > uMatchPriority)
+                if ((fFlagsAndPriority & VBGH_MIME_CONV_F_PRIORITY_MASK) > uMatchPriority)
                 {
-                    VBClLogVerbose(4, "session %u: uFmt %#x -> %#zx/%s prio %u (was %#zx prio %u)\n", g_idSession, uFmt,
-                                   (size_t)paTargets[i], pszTargetName, uPriority, (size_t)hMatch, uMatchPriority);
+                    VBClLogVerbose(4, "session %u: uFmt %#x -> %#zx/%s prio %#x (was %#zx prio %#x)\n", g_idSession, uFmt,
+                                   (size_t)paTargets[i], pszTargetName, fFlagsAndPriority, (size_t)hMatch, uMatchPriority);
                     hMatch = paTargets[i];
-                    uMatchPriority = uPriority;
+                    uMatchPriority = fFlagsAndPriority & VBGH_MIME_CONV_F_PRIORITY_MASK;
                 }
                 else
-                    VBClLogVerbose(5, "session %u: uFmt %#x rejecting %#zx/%s prio %u, have %#zx prio %u\n", g_idSession, uFmt,
-                                   (size_t)paTargets[i], pszTargetName, uPriority, (size_t)hMatch, uMatchPriority);
+                    VBClLogVerbose(5, "session %u: uFmt %#x rejecting %#zx/%s prio %#x, have %#zx prio %#x\n", g_idSession, uFmt,
+                                   (size_t)paTargets[i], pszTargetName, fFlagsAndPriority, (size_t)hMatch, uMatchPriority);
             }
 
             g_free(pszTargetName);
@@ -281,7 +281,7 @@ static void vboxwl_gtk_clipboard_write(GtkClipboard *pClipboard,
 {
     GdkAtom target = gtk_selection_data_get_target(pSelectionData);
     gchar *sTargetName = gdk_atom_name(target);
-    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(sTargetName, NULL);
+    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(sTargetName, NULL /*pfFlagsAndPriority*/);
     int rc;
 
     RT_NOREF(info, pvUser);
@@ -302,7 +302,7 @@ static void vboxwl_gtk_clipboard_write(GtkClipboard *pClipboard,
         size_t cbOut;
 
         /* Convert clipboard data from VBox representation into guest format. */
-        rc = VBoxMimeConvVBoxToNative(sTargetName, pvBuf, cbBuf, &pBufOut, &cbOut);
+        rc = VbghMimeConvFromVBox(sTargetName, pvBuf, cbBuf, &pBufOut, &cbOut);
         if (RT_SUCCESS(rc))
         {
             gtk_selection_data_set(pSelectionData, target,  8, (const guchar *)pBufOut, cbOut);
@@ -339,20 +339,16 @@ static void vboxwl_gtk_clipboard_write_fini(GtkClipboard *pClipboard, gpointer p
 }
 
 /**
- * Gtk clipboard target list builder,
- *
- * Triggered by VBoxMimeConvEnumerateMimeById() when matching VBox
- * clipboard formats into Gtk representation.
- *
- * @param pcszMimeType  Mime-type in Gtk representation.
- * @param pvUser        Output buffer.
+ * @callback_method_impl{FNVBGHMIMECONVENUM,
+ *      Gtk clipboard target list builder callback.}
  */
-static DECLCALLBACK(void) vboxwl_gtk_build_target_list(const char *pcszMimeType, void *pvUser)
+static DECLCALLBACK(void) vboxwl_gtk_build_target_list(const char *pcszMimeType, uint32_t fFlagsAndPriority, void *pvUser)
 {
-    GtkTargetList *aTargetList = (GtkTargetList *)pvUser;
+    GtkTargetList *pTargetList = (GtkTargetList *)pvUser;
+    RT_NOREF(fFlagsAndPriority);
 
     VBClLogVerbose(2, "session %u: mime-type '%s' -> guest\n", g_idSession, pcszMimeType);
-    gtk_target_list_add(aTargetList, gdk_atom_intern(pcszMimeType, FALSE), 0, 0);
+    gtk_target_list_add(pTargetList, gdk_atom_intern(pcszMimeType, FALSE), 0, 0);
 }
 
 /**
@@ -386,8 +382,8 @@ static gboolean vbwlGtkClipboardSetCallback(GtkWidget* pSelf, GdkEventWindowStat
         GtkTargetEntry *aTargets;
         int cTargets = 0;
 
-        /* Convert host clipboard formats bitmask into Gtk mime-types list. */
-        VBoxMimeConvEnumerateMimeById(fFmts, vboxwl_gtk_build_target_list, aTargetList);
+        /* Convert host clipboard formats bitmask into Gtk MIME types list. */
+        VbghMimeConvEnumerateByVBoxFormat(fFmts, vboxwl_gtk_build_target_list, aTargetList);
 
         aTargets = gtk_target_table_new_from_list(aTargetList, &cTargets);
         if (RT_VALID_PTR(aTargets))

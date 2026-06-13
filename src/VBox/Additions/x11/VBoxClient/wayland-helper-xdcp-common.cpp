@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114354 2026-06-12 23:04:42Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114357 2026-06-13 01:07:47Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -426,7 +426,7 @@ RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx)
     AssertPtrReturn(sMimeType, VERR_INVALID_PARAMETER);
     AssertPtrReturn(pSession, VERR_INVALID_PARAMETER);
 
-    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(sMimeType, NULL);
+    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(sMimeType, NULL /*pfFlagsAndPriority*/);
 
     int rc = VINF_SUCCESS;;
 
@@ -506,7 +506,7 @@ RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
         void *pvBufOut = NULL;
         size_t cbBufOut = 0;
 
-        rc = VBoxMimeConvNativeToVBox(pszMimeType, pvBuf, cbBuf, &pvBufOut, &cbBufOut);
+        rc = VbghMimeConvToVBox(pszMimeType, pvBuf, cbBuf, &pvBufOut, &cbBufOut);
         if (RT_SUCCESS(rc))
         {
             pCtx->Session.clip.pvDataBuf.set((uint64_t)pvBufOut);
@@ -535,7 +535,7 @@ RTDECL(int) vbcl_wayland_xdcp_set_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
     if (RT_VALID_PTR(pCtx->pClipboardCtx))
     {
         /* Set requested format to the session. */
-        pCtx->Session.clip.uFmt.set(VbghMimeConvGetVBoxFormatByMime(sMimeType, NULL));
+        pCtx->Session.clip.uFmt.set(VbghMimeConvGetVBoxFormatByMime(sMimeType, NULL /*pfFlagsAndPriority*/));
 
         /* Wait for data in requested format. */
         pvBuf = (void *)pCtx->Session.clip.pvDataBuf.wait();
@@ -547,7 +547,7 @@ RTDECL(int) vbcl_wayland_xdcp_set_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
             size_t cbOut;
 
             /* Convert clipboard data from VBox representation into guest format. */
-            rc = VBoxMimeConvVBoxToNative(sMimeType, pvBuf, cbBuf, &pvBufOut, &cbOut);
+            rc = VbghMimeConvFromVBox(sMimeType, pvBuf, cbBuf, &pvBufOut, &cbOut);
             if (RT_SUCCESS(rc))
             {
                 rc = vbcl_wayland_hlp_dcp_write_wl_fd(fd, pvBufOut, cbOut);
