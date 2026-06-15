@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114322 2026-06-09 19:52:16Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-dx-dx11.cpp 114361 2026-06-15 14:47:34Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device
  */
@@ -9794,6 +9794,7 @@ static int dxDefineQuery(PVGASTATECC pThisCC, PVMSVGA3DDXCONTEXT pDXContext, SVG
     RT_ZERO(pDXQuery->nodePendingQuery);
     pDXQuery->pDXContext = pDXContext;
     pDXQuery->queryId = queryId;
+    pDXQuery->svgaQueryType = pQueryInfo->svgaQueryType;
 
     return VINF_SUCCESS;
 }
