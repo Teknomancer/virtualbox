@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114372 2026-06-15 20:11:09Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -270,23 +270,21 @@ static int vbcl_wayland_hlp_edcp_receive_offer(
  * Convert list of MIME types in string representation into bitmask of VBox formats.
  *
  * @returns Formats bitmask.
- * @param   pList       List of MIME types in string representation.
+ * @param   pListHead   List of MIME types in string representation.
  * @param   pOffer      Wayland offer.
  */
-static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(vbox_wl_dcp_mime_t *pList, struct ext_data_control_offer_v1 *pOffer)
+static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(PRTLISTANCHOR pListHead, struct ext_data_control_offer_v1 *pOffer)
 {
     SHCLFORMATS fFmts = VBOX_SHCL_FMT_NONE;
 
-    AssertPtrReturn(pList, VBOX_SHCL_FMT_NONE);
+    AssertPtrReturn(pListHead, VBOX_SHCL_FMT_NONE);
     AssertPtrReturn(pOffer, VBOX_SHCL_FMT_NONE);
 
-    if (!RTListIsEmpty(&pList->Node))
+    if (!RTListIsEmpty(pListHead))
     {
         vbox_wl_dcp_mime_t *pEntry;
-        RTListForEach(&pList->Node, pEntry, vbox_wl_dcp_mime_t, Node)
+        RTListForEach(pListHead, pEntry, vbox_wl_dcp_mime_t, Node)
         {
-            int rc;
-
             AssertPtrReturn(pEntry, VBOX_SHCL_FMT_NONE);
             AssertPtrReturn(pEntry->pszMimeType, VBOX_SHCL_FMT_NONE);
 
@@ -294,7 +292,7 @@ static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(vbox_wl_dcp_mime_t *pList
 
             fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->pszMimeType, NULL /*pfFlagsAndPriority*/);
 
-            rc = vbcl_wayland_hlp_edcp_receive_offer(&g_EdcpCtx, pOffer, pEntry->pszMimeType);
+            /*int rc =*/ vbcl_wayland_hlp_edcp_receive_offer(&g_EdcpCtx, pOffer, pEntry->pszMimeType);
         }
     }
 

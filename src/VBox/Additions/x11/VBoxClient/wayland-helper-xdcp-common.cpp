@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -374,16 +374,12 @@ static void vbcl_wayland_xdcp_session_release(vbox_wl_xdcp_base_ctx_t *pCtx)
     if (RT_FAILURE(rc))
         VBClLogVerbose(5, "unable to clear clipboard cache, rc=%Rrc", rc);
 
-    if (!RTListIsEmpty(&pSession->clip.mimeTypesList.Node))
+    vbox_wl_dcp_mime_t *pEntry, *pNextEntry;
+    RTListForEachSafe(&pSession->clip.mimeTypesList, pEntry, pNextEntry, vbox_wl_dcp_mime_t, Node)
     {
-        vbox_wl_dcp_mime_t *pEntry, *pNextEntry;
-
-        RTListForEachSafe(&pSession->clip.mimeTypesList.Node, pEntry, pNextEntry, vbox_wl_dcp_mime_t, Node)
-        {
-            RTListNodeRemove(&pEntry->Node);
-            RTStrFree(pEntry->pszMimeType);
-            RTMemFree(pEntry);
-        }
+        RTListNodeRemove(&pEntry->Node);
+        RTStrFree(pEntry->pszMimeType);
+        RTMemFree(pEntry);
     }
 
     pvData = (void *)pSession->clip.pvDataBuf.reset();
@@ -400,7 +396,7 @@ static void vbcl_wayland_xdcp_session_init(vbox_wl_dcp_session_t *pSession)
 {
     AssertPtrReturnVoid(pSession);
 
-    RTListInit(&pSession->clip.mimeTypesList.Node);
+    RTListInit(&pSession->clip.mimeTypesList);
 
     pSession->clip.fFmts.init(VBOX_SHCL_FMT_NONE, VBCL_WAYLAND_VALUE_WAIT_TIMEOUT_MS);
     pSession->clip.uFmt.init(VBOX_SHCL_FMT_NONE, VBCL_WAYLAND_VALUE_WAIT_TIMEOUT_MS);
@@ -428,26 +424,27 @@ RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx)
 
     SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(pcszMimeType, NULL /*pfFlagsAndPriority*/);
 
-    int rc = VINF_SUCCESS;;
-
+    int rc;
     if (uFmt != VBOX_SHCL_FMT_NONE)
     {
         vbox_wl_dcp_mime_t *pNode = (vbox_wl_dcp_mime_t *)RTMemAllocZ(sizeof(vbox_wl_dcp_mime_t));
-        if (RT_VALID_PTR(pNode))
+        if (pNode)
         {
             VBClLogVerbose(5, "Wayland announces mime-type: %s\n", pcszMimeType);
             pNode->pszMimeType = RTStrDup(pcszMimeType);
-            if (RT_VALID_PTR(pNode->pszMimeType))
-                RTListAppend(&pSession->clip.mimeTypesList.Node, &pNode->Node);
+            if (pNode->pszMimeType)
+            {
+                RTListAppend(&pSession->clip.mimeTypesList, &pNode->Node);
+                rc = VINF_SUCCESS;
+            }
             else
+            {
                 RTMemFree(pNode);
+                rc = VERR_NO_MEMORY;
+            }
         }
-
-        if (   !RT_VALID_PTR(pNode)
-            || !RT_VALID_PTR(pNode->pszMimeType))
-        {
+        else
             rc = VERR_NO_MEMORY;
-        }
     }
     else
         rc = VERR_NO_DATA;

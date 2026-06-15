@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -65,13 +65,15 @@
         AssertPtrReturnVoid(_ctx_member); \
     }
 
-/* Node of mime-types list. */
+/**
+ * MIME type list entry.
+ */
 typedef struct
 {
     /** IPRT list node. */
     RTLISTNODE  Node;
     /** Data mime-type in string representation. */
-    char        *pszMimeType;
+    char       *pszMimeType;
 } vbox_wl_dcp_mime_t;
 
 /**
@@ -92,8 +94,10 @@ typedef struct
      */
     struct
     {
-        /** List of mime-types which are being advertised by guest. */
-        vbox_wl_dcp_mime_t                      mimeTypesList;
+        /** List of MIME types which are being advertised by guest (vbox_wl_dcp_mime_t).
+         * @todo r=bird: This is not how you use the list!!  This should be a
+         *       RTLISTANCHOR instance, not a full node! */
+        RTLISTANCHOR                            mimeTypesList;
 
         /** Bitmask which represents list of clipboard formats which
          *  are being advertised either by host or guest depending
@@ -196,7 +200,7 @@ RTDECL(void) vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx);
  * Collect clipboard format advertised by Wayland.
  *
  * This callback adds mime-type just advertised by Wayland into a list
- * of mime-types which in turn later will be advertised to the host.
+ * of MIME types which in turn later will be advertised to the host.
  *
  * @returns IPRT status code.
  * @param   pEnmCtx             Format enumeration conext data.
