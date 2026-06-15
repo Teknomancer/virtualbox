@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 113967 2026-04-22 09:47:12Z vadim.galitsyn@oracle.com $ */
+/* $Id: wayland.cpp 114366 2026-06-15 19:51:16Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -41,13 +41,13 @@
 /** Relax interval for input focus monitoring task. */
 #define VBCL_WAYLAND_WAIT_HOST_FOCUS_RELAX_MS       (100)
 
-/** List of available Wayland Desktop Environment helpers. Sorted in order of preference. */
+/** Array of Wayland Desktop Environment helpers.
+ * Sorted in order of preference. */
 static const VBCLWAYLANDHELPER *g_apWaylandHelpers[] =
 {
     &g_WaylandHelperEdcp,   /* Ext Data Control Protocol helper. */
     &g_WaylandHelperDcp,    /* Data Control Protocol helper. */
     &g_WaylandHelperGtk,    /* GTK helper. */
-    NULL,                   /* Terminate list. */
 };
 
 /** Global flag to tell service to go shutdown when needed.
@@ -220,24 +220,19 @@ static DECLCALLBACK(int) vbclWaylandHostInputFocusWorker(RTTHREAD hThreadSelf, v
 static DECLCALLBACK(int) vbclWaylandInit(void)
 {
     int rc = VERR_NOT_SUPPORTED;
-    int idxHelper = 0;
 
-    /** Custom log prefix to be used for logger instance of this process. */
+    /* Custom log prefix to be used for logger instance of this process. */
     static const char *pszLogPrefix = "VBoxClient Wayland:";
-
     VBClLogSetLogPrefix(pszLogPrefix);
 
-    /* Go through list of available helpers and try to pick up one. */
-    while (g_apWaylandHelpers[idxHelper])
+    /* Go through the array of available helpers and try to pick up one. */
+    for (uint32_t idxHelper = 0; idxHelper < RT_ELEMENTS(g_apWaylandHelpers); idxHelper++)
     {
         if (RT_VALID_PTR(g_apWaylandHelpers[idxHelper]->pfnProbe))
         {
-            int fCaps = VBOX_WAYLAND_HELPER_CAP_NONE;
+            VBClLogInfo("probing Wayland helper '%s'\n", g_apWaylandHelpers[idxHelper]->pszName);
 
-            VBClLogInfo("probing Wayland helper '%s'\n",
-                         g_apWaylandHelpers[idxHelper]->pszName);
-
-            fCaps = g_apWaylandHelpers[idxHelper]->pfnProbe();
+            int fCaps = g_apWaylandHelpers[idxHelper]->pfnProbe();
 
             /* Try Clipboard helper. */
             if (   fCaps & VBOX_WAYLAND_HELPER_CAP_CLIPBOARD
@@ -280,8 +275,6 @@ static DECLCALLBACK(int) vbclWaylandInit(void)
         if (   RT_VALID_PTR(g_pWaylandHelperClipboard)
             && RT_VALID_PTR(g_pWaylandHelperDnd))
             break;
-
-        idxHelper++;
     }
 
     /* Check result. */
