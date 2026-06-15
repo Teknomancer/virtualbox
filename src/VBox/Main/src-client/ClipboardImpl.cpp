@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114363 2026-06-15 18:46:06Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -54,6 +54,7 @@
 /** Maximum buffer size the Main API live clipboard read path will request or cache. */
 static uint32_t const s_cbClipboardReadMax = _64M;
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
 /**
  * Selects the preferred single Shared Clipboard format from a format mask.
  *
@@ -88,7 +89,6 @@ static const char *clipboardSourceToLogString(ClipboardSource_T enmSource)
     }
 }
 
-
 static const char *clipboardActionToLogString(ClipboardAction_T enmAction)
 {
     switch (enmAction)
@@ -100,6 +100,8 @@ static const char *clipboardActionToLogString(ClipboardAction_T enmAction)
         default:                     return "unknown";
     }
 }
+#endif /* VBOX_WITH_SHARED_CLIPBOARD */
+
 
 /**
  * Converts Shared Clipboard protocol payload data to Main API MIME payload data.

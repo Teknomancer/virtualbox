@@ -1,4 +1,4 @@
-/* $Id: ClipboardSettingsImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardSettingsImpl.cpp 114363 2026-06-15 18:46:06Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard API.
  */
@@ -226,7 +226,7 @@ HRESULT ClipboardSettings::i_setFileTransfersEnabled(BOOL aEnabled)
 {
     AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
 
-    if (mData->bd->fFileTransfersEnabled != aEnabled)
+    if (mData->bd->fFileTransfersEnabled != RT_BOOL(aEnabled))
     {
         LogFunc(("Changing file transfer setting: old=%RTbool, new=%RTbool\n",
                  mData->bd->fFileTransfersEnabled, RT_BOOL(aEnabled)));
@@ -536,4 +536,3 @@ HRESULT ClipboardSettings::setMode(ClipboardMode_T aMode)
 
     return i_setMode(aMode);
 }
-
