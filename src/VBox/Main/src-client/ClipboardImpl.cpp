@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114365 2026-06-15 19:33:46Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114369 2026-06-15 19:59:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -1499,6 +1499,8 @@ HRESULT Clipboard::i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSo
  *
  * @param   fFormats        Shared Clipboard format mask.
  * @param   aSource         Clipboard source reporting the formats.
+ * @param   fForceNotify    Whether to force notification regardless whether the formats or source
+ *                          have been changed or not.
  */
 void Clipboard::i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify)
 {

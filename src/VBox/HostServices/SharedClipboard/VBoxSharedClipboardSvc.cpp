@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114369 2026-06-15 19:59:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -1059,6 +1059,7 @@ static int shClSvcClientMsgCancel(PSHCLCLIENT pClient, uint32_t cParms)
  * @param   pClient             Client to report clipboard formats to.
  * @param   fFormats            The formats to report (VBOX_SHCL_FMT_XXX), zero
  *                              is okay (empty the clipboard).
+ * @param   enmSource           Source the reported formats came from.
  *
  * @thread  Backend thread.
  */
