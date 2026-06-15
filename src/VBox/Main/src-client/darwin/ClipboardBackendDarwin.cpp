@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendDarwin.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendDarwin.cpp 114370 2026-06-15 20:00:32Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host.
  */
@@ -42,7 +42,7 @@
 
 #include "darwin-pasteboard.h"
 #ifdef VBOX_COM_INPROC
-# include "../GuestShClPrivate.h"
+# include "GuestShClPrivate.h"
 #endif
 
 
