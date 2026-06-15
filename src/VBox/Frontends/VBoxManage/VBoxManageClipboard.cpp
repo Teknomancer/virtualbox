@@ -1,4 +1,4 @@
-/* $Id: VBoxManageClipboard.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageClipboard.cpp 114364 2026-06-15 19:23:16Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of the clipboard command.
  */
@@ -39,6 +39,7 @@
 #include <iprt/err.h>
 #include <iprt/ctype.h>
 #include <iprt/getopt.h>
+#include <iprt/mem.h>
 #include <iprt/message.h>
 #include <iprt/stream.h>
 #include <iprt/string.h>
@@ -812,7 +813,7 @@ static bool clipboardEventMatchesWait(const ComPtr<IEvent> &ptrEvent, const char
  * @param   ptrEventSource  Where to return the event source.
  * @param   ptrListener     Where to return the event listener.
  */
-static RTEXITCODE clipboardRegisterListener(const ComPtr<IClipboard> &ptrClipboard, const SafeArray<VBoxEventType_T> &aEventTypes,
+static RTEXITCODE clipboardRegisterListener(const ComPtr<IClipboard> &ptrClipboard, SafeArray<VBoxEventType_T> &aEventTypes,
                                             ComPtr<IEventSource> &ptrEventSource, ComPtr<IEventListener> &ptrListener)
 {
     HRESULT hrc;
@@ -1194,12 +1195,16 @@ static bool clipboardParseEventList(const char *pszEvents, SafeArray<VBoxEventTy
         return true;
     }
 
-    char *pszCopy = RTStrDup(pszEvents);
-    if (!pszCopy)
+    char **papszEvents = NULL;
+    size_t cEvents = 0;
+    int vrc = RTStrSplit(pszEvents, strlen(pszEvents) + 1, ",", &papszEvents, &cEvents);
+    if (RT_FAILURE(vrc))
         return false;
-    char *pszSave = NULL;
-    for (char *psz = strtok_r(pszCopy, ",", &pszSave); psz; psz = strtok_r(NULL, ",", &pszSave))
+
+    bool fSuccess = true;
+    for (size_t i = 0; i < cEvents; i++)
     {
+        const char *psz = papszEvents[i];
         if (   !RTStrICmp(psz, "source")
             || !RTStrICmp(psz, "source-changed"))
             aEventTypes.push_back(VBoxEventType_OnClipboardSourceChanged);
@@ -1219,12 +1224,15 @@ static bool clipboardParseEventList(const char *pszEvents, SafeArray<VBoxEventTy
             aEventTypes.push_back(VBoxEventType_OnClipboardFileTransferModeChanged);
         else
         {
-            RTStrFree(pszCopy);
-            return false;
+            fSuccess = false;
+            break;
         }
     }
-    RTStrFree(pszCopy);
-    return aEventTypes.size() > 0;
+
+    for (size_t i = 0; i < cEvents; i++)
+        RTStrFree(papszEvents[i]);
+    RTMemFree(papszEvents);
+    return fSuccess && aEventTypes.size() > 0;
 }
 
 

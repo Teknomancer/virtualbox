@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114363 2026-06-15 18:46:06Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114364 2026-06-15 19:23:16Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -51,10 +51,11 @@
 # endif
 # include <VBox/HostServices/VBoxClipboardSvc.h>
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
+
 /** Maximum buffer size the Main API live clipboard read path will request or cache. */
 static uint32_t const s_cbClipboardReadMax = _64M;
 
-#ifdef VBOX_WITH_SHARED_CLIPBOARD
 /**
  * Selects the preferred single Shared Clipboard format from a format mask.
  *
@@ -77,6 +78,7 @@ static SHCLFORMAT clipboardPickFormat(SHCLFORMATS fFormats)
     return VBOX_SHCL_FMT_NONE;
 }
 
+# ifdef LOG_ENABLED
 static const char *clipboardSourceToLogString(ClipboardSource_T enmSource)
 {
     switch (enmSource)
@@ -100,6 +102,7 @@ static const char *clipboardActionToLogString(ClipboardAction_T enmAction)
         default:                     return "unknown";
     }
 }
+# endif /* LOG_ENABLED */
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 
 
