@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114364 2026-06-15 19:23:16Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114365 2026-06-15 19:33:46Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -78,7 +78,6 @@ static SHCLFORMAT clipboardPickFormat(SHCLFORMATS fFormats)
     return VBOX_SHCL_FMT_NONE;
 }
 
-# ifdef LOG_ENABLED
 static const char *clipboardSourceToLogString(ClipboardSource_T enmSource)
 {
     switch (enmSource)
@@ -91,6 +90,7 @@ static const char *clipboardSourceToLogString(ClipboardSource_T enmSource)
     }
 }
 
+# ifdef LOG_ENABLED
 static const char *clipboardActionToLogString(ClipboardAction_T enmAction)
 {
     switch (enmAction)
