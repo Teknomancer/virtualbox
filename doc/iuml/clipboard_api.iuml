@@ -1,4 +1,4 @@
-' $Id: clipboard_api.iuml 113990 2026-04-23 14:00:31Z knut.osmundsen@oracle.com $
+' $Id: clipboard_api.iuml 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - VirtualBox Clipboard API - Draft
 '
@@ -174,12 +174,19 @@ abstract class IClipboardTransferManager
     +reset : HRESULT
 }
 
-' Lives as part of IMachine
-' All commands in context (view) of the host side.
-abstract class IClipboard
+' Lives as part of IMachine.
+abstract class IClipboardSettings
 {
     +setMode(ClipboardMode) : HRESULT
     +getMode : ClipboardMode
+    +setFileTransfersEnabled(BOOL) : HRESULT
+    +getFileTransfersEnabled : BOOL
+}
+
+' Lives as part of IConsole.
+' All commands operate on the console clipboard.
+abstract class IClipboard
+{
     +getFileList : SafeArray<wstring>
     +setFileList(SafeArray<wstring>) : HRESULT
     +readData(ClipboardAction) : ClipboardItem
@@ -212,6 +219,11 @@ note left of IClipboard::reset
 end note
 
 class IMachine
+{
+    clipboard : IClipboardSettings
+}
+
+class IConsole
 {
     clipboard : IClipboard
 }

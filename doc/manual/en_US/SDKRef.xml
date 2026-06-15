@@ -3208,6 +3208,72 @@ es.unregisterListener(listener); </screen></para>
 
   </chapter>
 
+  <chapter id="vboxclipboardapi">
+    <title>Main API changes for clipboard support</title>
+
+    <para>VirtualBox 7.XX adds a public Main API for interacting with the
+    clipboard of a running virtual machine and separates console clipboard
+    operations from persistent machine clipboard settings.</para>
+
+    <sect1>
+      <title>Console clipboard API</title>
+
+      <para>The new <link linkend="IConsole__clipboard">IConsole::clipboard</link>
+      attribute returns an <link linkend="IClipboard">IClipboard</link> object for
+      the current console session. This object represents the console clipboard of
+      a running virtual machine and provides methods for reading and writing
+      clipboard formats and data, including raw payload buffers for command-line
+      and scripting clients, checking format availability, resetting clipboard
+      state, and tracking clipboard transfers.</para>
+
+      <para>The IConsole::useHostClipboard attribute has moved to
+      <link linkend="IClipboard__useHostClipboard">IClipboard::useHostClipboard</link>.
+      This is not a persistent setting and must be explicitly set on every VM start
+      or restore.</para>
+
+      <para>The console clipboard API adds the following interfaces:</para>
+
+      <itemizedlist>
+        <listitem>
+          <para><link linkend="IClipboard">IClipboard</link>, the live console
+          clipboard object returned by <link linkend="IConsole__clipboard">IConsole::clipboard</link>.</para>
+        </listitem>
+        <listitem>
+          <para><link linkend="IClipboardFormat">IClipboardFormat</link>, which
+          describes a clipboard MIME format.</para>
+        </listitem>
+        <listitem>
+          <para><link linkend="IClipboardItem">IClipboardItem</link>, which
+          contains clipboard item metadata, format information, and payload data.</para>
+        </listitem>
+        <listitem>
+          <para><link linkend="IClipboardTransfer">IClipboardTransfer</link> and
+          <link linkend="IClipboardTransferManager">IClipboardTransferManager</link>,
+          which describe and manage asynchronous clipboard transfers.</para>
+        </listitem>
+      </itemizedlist>
+
+      <para>The console clipboard API also adds the
+      <link linkend="ClipboardAction">ClipboardAction</link>,
+      <link linkend="ClipboardSource">ClipboardSource</link>,
+      <link linkend="ClipboardTransferState">ClipboardTransferState</link>, and
+      <link linkend="ClipboardError">ClipboardError</link> enumerations.</para>
+    </sect1>
+
+    <sect1>
+      <title>Clipboard settings</title>
+
+      <para>The persistent clipboard configuration of a virtual machine is now
+      exposed through the new <link linkend="IClipboardSettings">IClipboardSettings</link>
+      interface. The <link linkend="IMachine__clipboard">IMachine::clipboard</link>
+      attribute returns this settings object. Its
+      <link linkend="IClipboardSettings__mode">IClipboardSettings::mode</link>
+      attribute controls the configured clipboard direction, and
+      <link linkend="IClipboardSettings__fileTransfersEnabled">IClipboardSettings::fileTransfersEnabled</link>
+      controls whether clipboard file transfers are allowed.</para>
+    </sect1>
+  </chapter>
+
   <xi:include href="SDKRef_apiref.xml" xpointer="xpointer(/book/*)"
     xmlns:xi="http://www.w3.org/2001/XInclude" />
 
@@ -4816,6 +4882,14 @@ AuthResult AUTHCALL AuthEntry(
       <title>Incompatible API changes with version 7.XX </title>
 
       <itemizedlist>
+
+        <listitem><para>The <link linkend="IMachine__clipboard">IMachine::clipboard</link>
+          attribute now returns <link linkend="IClipboardSettings">IClipboardSettings</link>
+          for persistent machine clipboard configuration. The
+          <link linkend="IClipboard">IClipboard</link> interface name is now used for the
+          console clipboard object returned by <link linkend="IConsole__clipboard">IConsole::clipboard</link>.
+          Review the Main API changes made for clipboard support <link linkend="vboxclipboardapi">here</link>.</para>
+        </listitem>
 
         <listitem><para>The recording settings now expose a dedicated stop method via
           <link linkend="IRecordingSettings__stop">IRecordingSettings::stop</link>, which can be used

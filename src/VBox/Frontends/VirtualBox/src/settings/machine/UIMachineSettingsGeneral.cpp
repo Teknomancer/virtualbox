@@ -1,4 +1,4 @@
-/* $Id: UIMachineSettingsGeneral.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: UIMachineSettingsGeneral.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIMachineSettingsGeneral class implementation.
  */
@@ -30,7 +30,7 @@
 #include <QVBoxLayout>
 
 /* COM includes: */
-#include "CClipboard.h"
+#include "CClipboardSettings.h"
 
 /* GUI includes: */
 #include "QITabWidget.h"
@@ -796,7 +796,7 @@ bool UIMachineSettingsGeneral::saveAdvancedData()
         /* Save machine clipboard mode: */
         if (fSuccess && newGeneralData.m_clipboardMode != oldGeneralData.m_clipboardMode)
         {
-            CClipboard comClipboard = m_machine.GetClipboard();
+            CClipboardSettings comClipboard = m_machine.GetClipboard();
             fSuccess = m_machine.isOk();
             if (fSuccess)
             {

@@ -7866,7 +7866,7 @@
 
   <interface
     name="IMachine" extends="$unknown"
-    uuid="ecfe93f4-872c-4e40-abcd-3ef742378555"
+    uuid="d953667b-caea-4428-8b06-c1f63eabe19a"
     wsmap="managed"
     rest="managed"
     wrap-hint-server-addinterfaces="IInternalMachineControl"
@@ -8387,9 +8387,9 @@
       </desc>
     </attribute>
 
-    <attribute name="clipboard" type="IClipboard" readonly="yes">
+    <attribute name="clipboard" type="IClipboardSettings" readonly="yes">
       <desc>
-        Clipboard control interface for this machine.
+        Clipboard settings for this machine.
       </desc>
     </attribute>
 
@@ -11449,7 +11449,7 @@
 
   <interface
     name="IConsole" extends="$unknown"
-    uuid="6ac83d89-6ee7-4e33-8ae6-b257b2e81be8"
+    uuid="019ebb0e-aec6-71a3-9bb7-29548ef5b10c"
     wsmap="managed"
     rest="managed"
     reservedMethods="8" reservedAttributes="8"
@@ -11582,18 +11582,15 @@
       <desc>Array of PCI devices attached to this machine.</desc>
     </attribute>
 
-    <attribute name="useHostClipboard" type="boolean">
-      <desc>
-        Whether the guest clipboard should be connected to the host one or
-        whether it should only be allowed access to the VRDE clipboard. This
-        setting may not affect existing guest clipboard connections which
-        are already connected to the host clipboard.
-      </desc>
-    </attribute>
-
     <attribute name="emulatedUSB" type="IEmulatedUSB" readonly="yes">
       <desc>
         Interface that manages emulated USB devices.
+      </desc>
+    </attribute>
+
+    <attribute name="clipboard" type="IClipboard" readonly="yes">
+      <desc>
+        Clipboard object for this console session.
       </desc>
     </attribute>
 
@@ -15776,28 +15773,13 @@
 
   <interface
     name="IClipboard" extends="$unknown"
-    uuid="3350ba8d-fd5d-46b4-9b7c-a81e3b036218"
+    uuid="27cfe16a-0a4b-4d35-9875-06f388a036c7"
     wsmap="managed"
     reservedMethods="8" reservedAttributes="8"
     >
     <desc>
-      Clipboard control interface for a virtual machine.
+      Clipboard interface for a console session.
     </desc>
-
-    <attribute name="mode" type="ClipboardMode">
-      <desc>
-        Synchronization mode between the host OS clipboard and the guest OS clipboard.
-      </desc>
-    </attribute>
-
-    <attribute name="fileTransfersEnabled" type="boolean">
-      <desc>
-        Sets or retrieves whether clipboard file transfers are allowed or not.
-
-        When set to @a true, clipboard file transfers between supported
-        host and guest OSes are allowed.
-      </desc>
-    </attribute>
 
     <attribute name="fileList" type="wstring" safearray="yes">
       <desc>
@@ -15814,6 +15796,12 @@
     <attribute name="eventSource" type="IEventSource" readonly="yes">
       <desc>
         Event source for clipboard events.
+      </desc>
+    </attribute>
+
+    <attribute name="useHostClipboard" type="boolean">
+      <desc>
+        Whether this console clipboard uses the host clipboard.
       </desc>
     </attribute>
 
@@ -15850,6 +15838,51 @@
       </param>
       <param name="writtenItem" type="IClipboardItem" dir="return">
         <desc>Clipboard item accepted for writing.</desc>
+      </param>
+    </method>
+
+    <method name="readDataRaw">
+      <desc>
+        Reads raw clipboard payload data for the requested clipboard action.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to read data for.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="out">
+        <desc>Clipboard source which supplied the returned data.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="out">
+        <desc>MIME type of the returned data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data returned on success.</desc>
+      </param>
+    </method>
+
+    <method name="writeDataRaw">
+      <desc>
+        Writes raw clipboard payload data for the requested clipboard action.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to write data for.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source of the supplied data.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type of the supplied data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="in">
+        <desc>Clipboard data to write.</desc>
+      </param>
+      <param name="writtenSource" type="ClipboardSource" dir="out">
+        <desc>Clipboard source accepted for the written data.</desc>
+      </param>
+      <param name="writtenMimeType" type="wstring" dir="out">
+        <desc>MIME type accepted for the written data.</desc>
+      </param>
+      <param name="writtenBuffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data accepted for writing.</desc>
       </param>
     </method>
 
@@ -15894,6 +15927,33 @@
         <desc>Supported clipboard formats.</desc>
       </param>
     </method>
+  </interface>
+
+  <interface
+    name="IClipboardSettings" extends="$unknown"
+    uuid="24744823-759f-45e0-a5bc-715d90fef4f6"
+    wsmap="managed"
+    reservedMethods="8" reservedAttributes="8"
+    >
+    <desc>
+      Clipboard settings for a virtual machine.
+    </desc>
+
+    <attribute name="mode" type="ClipboardMode">
+      <desc>
+        Synchronization mode between the host OS clipboard and the guest OS clipboard.
+      </desc>
+    </attribute>
+
+    <attribute name="fileTransfersEnabled" type="boolean">
+      <desc>
+        Sets or retrieves whether clipboard file transfers are allowed or not.
+
+        When set to @a true, clipboard file transfers between supported
+        host and guest OSes are allowed.
+      </desc>
+    </attribute>
+
   </interface>
 
   <interface
@@ -25457,7 +25517,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IInternalSessionControl" extends="$unknown"
-    uuid="84a4e585-4f4a-45bb-99e8-fc9b226376ad"
+    uuid="237abc26-2282-4957-9111-ffb9f763431c"
     internal="yes"
     wsmap="suppress"
     >
@@ -25762,6 +25822,84 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
       </desc>
       <param name="enabled" type="boolean" dir="in">
         <desc>Flag whether clipboard file transfers are allowed or not.</desc>
+      </param>
+    </method>
+
+    <method name="clipboardReadData">
+      <desc>
+        Reads clipboard data from the running VM process.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to read data for.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="out">
+        <desc>Clipboard source which supplied the returned data.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="out">
+        <desc>MIME type of the returned data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data returned on success.</desc>
+      </param>
+    </method>
+
+    <method name="clipboardReadFormats">
+      <desc>
+        Reads clipboard formats known by the running VM process.
+      </desc>
+      <param name="formats" type="wstring" safearray="yes" dir="return">
+        <desc>Available MIME formats.</desc>
+      </param>
+    </method>
+
+    <method name="clipboardWriteData">
+      <desc>
+        Writes clipboard data through the running VM process.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to write data for.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source of the supplied data.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type of the supplied data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="in">
+        <desc>Clipboard data to write.</desc>
+      </param>
+      <param name="writtenSource" type="ClipboardSource" dir="out">
+        <desc>Clipboard source accepted for the written data.</desc>
+      </param>
+      <param name="writtenMimeType" type="wstring" dir="out">
+        <desc>MIME type accepted for the written data.</desc>
+      </param>
+      <param name="writtenBuffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data accepted for writing.</desc>
+      </param>
+    </method>
+
+    <method name="clipboardWriteFormats">
+      <desc>
+        Announces clipboard formats through the running VM process.
+      </desc>
+      <param name="formats" type="wstring" safearray="yes" dir="in">
+        <desc>Available MIME formats.</desc>
+      </param>
+    </method>
+
+    <method name="clipboardReset">
+      <desc>
+        Resets live clipboard state in the running VM process.
+      </desc>
+    </method>
+
+    <method name="clipboardTransferCancel">
+      <desc>
+        Cancels a live clipboard transfer in the running VM process.
+      </desc>
+      <param name="transferId" type="unsigned long" dir="in">
+        <desc>Clipboard transfer identifier to cancel.</desc>
       </param>
     </method>
 
@@ -27829,7 +27967,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
   -->
   <enum
     name="VBoxEventType"
-    uuid="f6849fd1-ae49-4495-b539-e2c80c4a2e85"
+    uuid="6c210303-7ecc-4287-b5a1-9467cd90235b"
     >
 
     <desc>

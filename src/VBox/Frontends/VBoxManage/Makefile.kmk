@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 113423 2026-03-16 14:29:32Z alexander.eichner@oracle.com $
+# $Id: Makefile.kmk 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for VBoxManage (the CLI frontend).
 #
@@ -82,6 +82,8 @@ ifndef VBOX_ONLY_DOCS
  	VBoxInternalManage.cpp \
  	VBoxManageAppliance.cpp \
  	VBoxManageBandwidthControl.cpp \
+ 	$(if $(VBOX_WITH_SHARED_CLIPBOARD),VBoxManageClipboard.cpp) \
+ 	$(if $(VBOX_WITH_SHARED_CLIPBOARD),$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp) \
  	VBoxManageControlVM.cpp \
  	VBoxManageDebugVM.cpp \
  	VBoxManageDHCPServer.cpp \

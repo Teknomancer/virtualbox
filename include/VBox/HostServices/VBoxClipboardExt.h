@@ -88,6 +88,7 @@ typedef struct _SHCLEXTPARMS
         {
             SHCLFORMATS             uFormats;
             PSHCLCLIENT             pClient;
+            SHCLSOURCE              enmSource;
         } ReportFormats;
         /** Reads / writes clipboard data. */
         struct

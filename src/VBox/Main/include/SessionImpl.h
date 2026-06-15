@@ -1,4 +1,4 @@
-/* $Id: SessionImpl.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: SessionImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Client Session COM Class definition
  */
@@ -114,6 +114,21 @@ private:
     HRESULT onVMProcessPriorityChange(VMProcPriority_T priority);
     HRESULT onClipboardModeChange(ClipboardMode_T aClipboardMode);
     HRESULT onClipboardFileTransferModeChange(BOOL aEnabled);
+    HRESULT clipboardReadData(ClipboardAction_T aAction,
+                              ClipboardSource_T *aSource,
+                              com::Utf8Str &aMimeType,
+                              std::vector<BYTE> &aBuffer);
+    HRESULT clipboardReadFormats(std::vector<com::Utf8Str> &aFormats);
+    HRESULT clipboardWriteData(ClipboardAction_T aAction,
+                               ClipboardSource_T aSource,
+                               const com::Utf8Str &aMimeType,
+                               const std::vector<BYTE> &aBuffer,
+                               ClipboardSource_T *aWrittenSource,
+                               com::Utf8Str &aWrittenMimeType,
+                               std::vector<BYTE> &aWrittenBuffer);
+    HRESULT clipboardWriteFormats(const std::vector<com::Utf8Str> &aFormats);
+    HRESULT clipboardReset();
+    HRESULT clipboardTransferCancel(ULONG aTransferId);
     HRESULT onDnDModeChange(DnDMode_T aDndMode);
     HRESULT onCPUChange(ULONG aCpu,
                         BOOL aAdd);

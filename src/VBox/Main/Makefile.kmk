@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114320 2026-06-09 17:07:36Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -642,7 +642,6 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  	src-all/RecordingUtils.cpp \
  	src-all/SecretKeyStore.cpp \
  	src-all/SharedFolderImpl.cpp \
- 	src-all/ClipboardImpl.cpp \
  	src-all/AutoCaller.cpp \
  	src-all/ThreadTask.cpp \
  	src-all/VirtualBoxBase.cpp \
@@ -653,6 +652,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  		,) \
  	$(if $(VBOX_WITH_EXTPACK),src-all/ExtPackManagerImpl.cpp src-all/ExtPackUtil.cpp,) \
  	src-server/CertificateImpl.cpp \
+ 	src-server/ClipboardSettingsImpl.cpp \
  	src-server/ApplianceImpl.cpp \
  	src-server/ApplianceImplExport.cpp \
  	src-server/ApplianceImplImport.cpp \
@@ -1155,7 +1155,6 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  VBoxC_SOURCES += \
  	$(VBoxAPIWrap_0_OUTDIR)/VBoxAPI.d \
  	src-all/AudioUtils.cpp \
- 	src-all/ClipboardImpl.cpp \
  	src-all/CryptoUtils.cpp \
  	src-all/ConsoleSharedFolderImpl.cpp \
  	src-all/DisplayPNGUtil.cpp \
@@ -1185,6 +1184,11 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  	src-client/BusAssignmentManager.cpp \
  	$(if $(VBOX_WITH_PCI_PASSTHROUGH),src-client/PCIRawDevImpl.cpp,) \
  	src-client/ClientTokenHolder.cpp \
+ 	src-client/ClipboardImpl.cpp \
+ 	src-client/ClipboardFormatImpl.cpp \
+ 	src-client/ClipboardItemImpl.cpp \
+ 	src-client/ClipboardTransferImpl.cpp \
+ 	src-client/ClipboardTransferManagerImpl.cpp \
  	src-client/ConsoleImpl.cpp \
  	src-client/ConsoleImplConfigCommon.cpp \
  	src-client/ConsoleImplConfigX86.cpp \
@@ -1301,7 +1305,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   if1of ($(KBUILD_TARGET), linux solaris freebsd)
    VBoxC_SOURCES += \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
-   	src-client/VBoxSharedClipboardSvc-x11.cpp
+   	src-client/linux/ClipboardBackendLinux.cpp
 
    VBOX_WITH_VBOXC_LAZY_LOAD := 1
 
@@ -1332,10 +1336,10 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   endif # linux solaris freebsd
   VBoxC_SOURCES.win += \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-win.cpp \
-  	src-client/VBoxSharedClipboardSvc-win.cpp
+  	src-client/win/ClipboardBackendWin.cpp
   VBoxC_SOURCES.darwin += \
-  	src-client/VBoxSharedClipboardSvc-darwin.cpp \
-  	src-client/darwin-pasteboard.cpp
+  	src-client/darwin/ClipboardBackendDarwin.cpp \
+  	src-client/darwin/darwin-pasteboard.cpp
   ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
    VBoxC_INCS     += $(PATH_ROOT)/src/VBox/HostServices/SharedClipboard
    ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP

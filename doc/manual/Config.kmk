@@ -1,4 +1,4 @@
-# $Id: Config.kmk 113273 2026-03-06 11:42:19Z vadim.galitsyn@oracle.com $
+# $Id: Config.kmk 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
 ## @file
 # kBuild Configuration file for the manual.
 #
@@ -67,6 +67,7 @@ ifndef VBOX_DOC_MANUAL_CONFIG_KMK_INCLUDED
  	man_VBoxManage-encryptvm.xml \
  	man_VBoxManage-startvm.xml \
  	man_VBoxManage-controlvm.xml \
+ 	man_VBoxManage-clipboard.xml \
  	man_VBoxManage-import.xml \
  	man_VBoxManage-export.xml \
  	man_VBoxManage-mediumio.xml \

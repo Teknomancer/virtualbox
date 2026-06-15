@@ -1,4 +1,4 @@
-/* $Id: UISession.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: UISession.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISession class implementation.
  */
@@ -31,7 +31,7 @@
 #include <QWidget>
 
 /* COM includes: */
-#include "CClipboard.h"
+#include "CClipboardSettings.h"
 
 /* GUI includes: */
 #include "UIActionPoolRuntime.h"
@@ -581,7 +581,7 @@ bool UISession::acquireClipboardMode(KClipboardMode &enmMode)
     CMachine comMachine = machine();
     if (comMachine.isNull())
         return false;
-    CClipboard comClipboard = comMachine.GetClipboard();
+    CClipboardSettings comClipboard = comMachine.GetClipboard();
     bool fSuccess = comMachine.isOk();
     if (fSuccess)
     {
@@ -598,7 +598,7 @@ bool UISession::acquireClipboardMode(KClipboardMode &enmMode)
 bool UISession::setClipboardMode(KClipboardMode enmMode)
 {
     CMachine comMachine = machine();
-    CClipboard comClipboard = comMachine.GetClipboard();
+    CClipboardSettings comClipboard = comMachine.GetClipboard();
     bool fSuccess = comMachine.isOk();
     if (fSuccess)
     {
@@ -613,7 +613,7 @@ bool UISession::setClipboardMode(KClipboardMode enmMode)
 bool UISession::toggleClipboardFileTransfer(bool fEnabled)
 {
     CMachine comMachine = machine();
-    CClipboard comClipboard = comMachine.GetClipboard();
+    CClipboardSettings comClipboard = comMachine.GetClipboard();
     bool fSuccess = comMachine.isOk();
     if (fSuccess)
     {
@@ -628,7 +628,7 @@ bool UISession::toggleClipboardFileTransfer(bool fEnabled)
 bool UISession::isClipboardFileTransferEnabled()
 {
     CMachine comMachine = machine();
-    CClipboard comClipboard = comMachine.GetClipboard();
+    CClipboardSettings comClipboard = comMachine.GetClipboard();
     bool fSuccess = comMachine.isOk();
     bool fEnabled = false;
     if (fSuccess)

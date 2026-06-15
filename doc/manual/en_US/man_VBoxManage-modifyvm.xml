@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-modifyvm" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-03-31 11:34:19 +0200 (Tue, 31 Mar 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-15 20:31:38 +0200 (Mon, 15 Jun 2026) $</pubdate>
     <title>VBoxManage modifyvm</title>
   </refentryinfo>
 
@@ -1979,6 +1979,10 @@ it unless this changes. -->
         <varlistentry>
           <term><option>--clipboard-mode=<replaceable>value</replaceable></option></term>
           <listitem><para>
+              Deprecated. Use <command>VBoxManage clipboard
+              <replaceable>vmname</replaceable> set-mode <replaceable>value</replaceable></command>
+              instead. This option will be removed in a future version.
+            </para><para>
               Specifies how to share the guest VM or host system OS's
               clipboard with the host system or guest VM, respectively.
               Valid values are: <literal>disabled</literal>,
@@ -1994,6 +1998,10 @@ it unless this changes. -->
         <varlistentry>
           <term><option>--clipboard-file-transfers=<replaceable>value</replaceable></option></term>
           <listitem><para>
+              Deprecated. Use <command>VBoxManage clipboard
+              <replaceable>vmname</replaceable> set-filetransfers <replaceable>on|off</replaceable></command>
+              instead. This option will be removed in a future version.
+            </para><para>
               Specifies whether file transfers via clipboard between
               the guest VM and the host are enabled or not.
               Valid values are: <literal>disabled</literal>,

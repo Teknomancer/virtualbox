@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114331 2026-06-10 14:32:17Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Some helper function for converting between the various eol.
  */
@@ -34,6 +34,7 @@
 #include <iprt/semaphore.h>
 #include <iprt/path.h>
 #include <iprt/rand.h>
+#include <iprt/string.h>
 #include <iprt/utf16.h>
 
 #include <iprt/formats/bmp.h>

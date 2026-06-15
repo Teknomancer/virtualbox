@@ -1,6 +1,6 @@
-/* $Id: ClipboardImpl.h 114265 2026-06-08 07:52:29Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
- * VirtualBox Main - Clipboard API.
+ * VirtualBox Main - Console clipboard API.
  */
 
 /*
@@ -31,173 +31,14 @@
 # pragma once
 #endif
 
-#include "ClipboardFormatWrap.h"
-#include "ClipboardItemWrap.h"
-#include "ClipboardTransferWrap.h"
-#include "ClipboardTransferManagerWrap.h"
 #include "ClipboardWrap.h"
 
-class Machine;
+#include <vector>
+
+class Console;
 
 /**
- * Clipboard data format object.
- */
-class ATL_NO_VTABLE ClipboardFormat :
-    public ClipboardFormatWrap
-{
-public:
-
-    DECLARE_COMMON_CLASS_METHODS(ClipboardFormat)
-
-    HRESULT FinalConstruct();
-    void FinalRelease();
-
-    HRESULT init(const com::Utf8Str &aMimeType);
-    void uninit();
-
-private:
-
-    /** @name Wrapped IClipboardFormat properties
-     * @{ */
-    HRESULT getMimeType(com::Utf8Str &aMimeType);
-    HRESULT setMimeType(const com::Utf8Str &aMimeType);
-    /** @} */
-
-    struct Data
-    {
-        /** MIME type of the clipboard format. */
-        com::Utf8Str mMimeType;
-    } mData;
-};
-
-/**
- * Clipboard item object.
- */
-class ATL_NO_VTABLE ClipboardItem :
-    public ClipboardItemWrap
-{
-public:
-
-    DECLARE_COMMON_CLASS_METHODS(ClipboardItem)
-
-    HRESULT FinalConstruct();
-    void FinalRelease();
-
-    HRESULT init(ULONG aId,
-                 ClipboardSource_T aSource,
-                 const ComPtr<IClipboardFormat> &aFormat,
-                 const std::vector<BYTE> &aBuffer);
-    void uninit();
-
-private:
-
-    /** @name Wrapped IClipboardItem properties
-     * @{ */
-    HRESULT getId(ULONG *aId);
-    HRESULT setId(ULONG aId);
-    HRESULT getSource(ClipboardSource_T *aSource);
-    HRESULT setSource(ClipboardSource_T aSource);
-    HRESULT getFormat(ComPtr<IClipboardFormat> &aFormat);
-    HRESULT setFormat(const ComPtr<IClipboardFormat> &aFormat);
-    HRESULT getBuffer(std::vector<BYTE> &aBuffer);
-    HRESULT setBuffer(const std::vector<BYTE> &aBuffer);
-    HRESULT getSize(ULONG *aSize);
-    /** @} */
-
-    struct Data
-    {
-        /** Unique item identifier. */
-        ULONG mId;
-        /** Clipboard source. */
-        ClipboardSource_T mSource;
-        /** Clipboard format. */
-        ComPtr<IClipboardFormat> mFormat;
-        /** Clipboard payload. */
-        std::vector<BYTE> mBuffer;
-    } mData;
-};
-
-/**
- * Clipboard transfer object.
- */
-class ATL_NO_VTABLE ClipboardTransfer :
-    public ClipboardTransferWrap
-{
-public:
-
-    DECLARE_COMMON_CLASS_METHODS(ClipboardTransfer)
-
-    HRESULT FinalConstruct();
-    void FinalRelease();
-
-    HRESULT init(ULONG aId,
-                 ClipboardAction_T aAction,
-                 const ComPtr<IClipboardItem> &aItem,
-                 const ComPtr<IProgress> &aProgress);
-    void uninit();
-
-private:
-
-    /** @name Wrapped IClipboardTransfer properties
-     * @{ */
-    HRESULT getId(ULONG *aId);
-    HRESULT getAction(ClipboardAction_T *aAction);
-    HRESULT getItem(ComPtr<IClipboardItem> &aItem);
-    HRESULT getProgress(ComPtr<IProgress> &aProgress);
-    /** @} */
-
-    struct Data
-    {
-        /** Unique transfer identifier. */
-        ULONG mId;
-        /** Clipboard transfer action. */
-        ClipboardAction_T mAction;
-        /** Clipboard item being transferred. */
-        ComPtr<IClipboardItem> mItem;
-        /** Progress object for the transfer. */
-        ComPtr<IProgress> mProgress;
-    } mData;
-};
-
-/**
- * Clipboard transfer manager object.
- */
-class ATL_NO_VTABLE ClipboardTransferManager :
-    public ClipboardTransferManagerWrap
-{
-public:
-
-    DECLARE_COMMON_CLASS_METHODS(ClipboardTransferManager)
-
-    HRESULT FinalConstruct();
-    void FinalRelease();
-
-    HRESULT init();
-    void uninit();
-
-    /** Resets the internally tracked transfer list. */
-    void i_reset();
-
-private:
-
-    /** @name Wrapped IClipboardTransferManager properties and methods
-     * @{ */
-    HRESULT getTransfers(std::vector<ComPtr<IClipboardTransfer> > &aTransfers);
-    HRESULT add(const ComPtr<IClipboardTransfer> &aTransfer);
-    HRESULT remove(const ComPtr<IClipboardTransfer> &aTransfer);
-    HRESULT cancel(const ComPtr<IClipboardTransfer> &aTransfer);
-    HRESULT reset();
-    /** @} */
-
-    struct Data
-    {
-        /** Current clipboard transfers. */
-        std::vector<ComPtr<IClipboardTransfer> > mTransfers;
-    } mData;
-};
-
-/**
- * Clipboard control object.
+ * Client-side implementation of live clipboard operations for a console.
  */
 class ATL_NO_VTABLE Clipboard :
     public ClipboardWrap
@@ -209,35 +50,61 @@ public:
     HRESULT FinalConstruct();
     void FinalRelease();
 
-    HRESULT init(Machine *aParent = NULL);
-    HRESULT initCopy(Machine *aParent, Clipboard *aThat);
+    HRESULT init(Console *aParent);
     void uninit();
 
-    HRESULT i_setMode(ClipboardMode_T aMode);
-    HRESULT i_getFileTransfersEnabled(BOOL *aEnabled);
-    HRESULT i_setFileTransfersEnabled(BOOL aEnabled);
-    HRESULT i_notifyClipboardModeChange(ClipboardMode_T aMode);
-    HRESULT i_notifyClipboardFileTransferModeChange(BOOL aEnable);
-    void i_rollback();
-    void i_commit();
+    HRESULT i_readData(ClipboardAction_T aAction,
+                       ClipboardSource_T *aSource,
+                       com::Utf8Str &aMimeType,
+                       std::vector<BYTE> &aBuffer);
+    HRESULT i_readFormats(std::vector<com::Utf8Str> &aFormats);
+    HRESULT i_writeData(ClipboardAction_T aAction,
+                        ClipboardSource_T aSource,
+                        const com::Utf8Str &aMimeType,
+                        const std::vector<BYTE> &aBuffer,
+                        ClipboardSource_T *aWrittenSource,
+                        com::Utf8Str &aWrittenMimeType,
+                        std::vector<BYTE> &aWrittenBuffer);
+    HRESULT i_writeFormats(const std::vector<com::Utf8Str> &aFormats);
+    HRESULT i_reset();
+    HRESULT i_transferCancel(ULONG aTransferId);
+    HRESULT i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual);
+    HRESULT i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSource, uint32_t fFormat, const void *pvData, uint32_t cbData);
+    bool i_useHostClipboard();
+
+    void i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify = false);
+    void i_fireClipboardError(const com::Utf8Str &aId, const com::Utf8Str &aErrMsg, LONG aRc);
+    void i_fireClipboardModeChanged(ClipboardMode_T aClipboardMode);
+    void i_fireClipboardFileTransferModeChanged(bool fEnabled);
+    int i_changeMode(ClipboardMode_T aClipboardMode);
+    int i_changeFileTransferMode(bool fEnabled);
 
 private:
 
     /** @name Wrapped IClipboard properties and methods
      * @{ */
-    HRESULT getMode(ClipboardMode_T *aMode);
-    HRESULT setMode(ClipboardMode_T aMode);
-    HRESULT getFileTransfersEnabled(BOOL *aEnabled);
-    HRESULT setFileTransfersEnabled(BOOL aEnabled);
     HRESULT getFileList(std::vector<com::Utf8Str> &aFileList);
     HRESULT setFileList(const std::vector<com::Utf8Str> &aFileList);
     HRESULT getTransfers(ComPtr<IClipboardTransferManager> &aTransfers);
     HRESULT getEventSource(ComPtr<IEventSource> &aEventSource);
+    HRESULT getUseHostClipboard(BOOL *aUseHostClipboard);
+    HRESULT setUseHostClipboard(BOOL aUseHostClipboard);
     HRESULT readData(ClipboardAction_T aAction, ComPtr<IClipboardItem> &aItem);
     HRESULT readFormats(std::vector<ComPtr<IClipboardFormat> > &aFormats);
     HRESULT writeData(ClipboardAction_T aAction,
                       const ComPtr<IClipboardItem> &aItem,
                       ComPtr<IClipboardItem> &aWrittenItem);
+    HRESULT readDataRaw(ClipboardAction_T aAction,
+                        ClipboardSource_T *aSource,
+                        com::Utf8Str &aMimeType,
+                        std::vector<BYTE> &aBuffer);
+    HRESULT writeDataRaw(ClipboardAction_T aAction,
+                         ClipboardSource_T aSource,
+                         const com::Utf8Str &aMimeType,
+                         const std::vector<BYTE> &aBuffer,
+                         ClipboardSource_T *aWrittenSource,
+                         com::Utf8Str &aWrittenMimeType,
+                         std::vector<BYTE> &aWrittenBuffer);
     HRESULT writeFormats(const std::vector<ComPtr<IClipboardFormat> > &aFormats);
     HRESULT reset();
     HRESULT isFormatAvailable(ClipboardSource_T aSource,
@@ -247,39 +114,28 @@ private:
                                 std::vector<ComPtr<IClipboardFormat> > &aFormats);
     /** @} */
 
-    struct Data
-    {
-        /** Clipboard settings. */
-        struct Settings
-        {
-            Settings()
-                : mode(ClipboardMode_Disabled)
-                , fFileTransfersEnabled(false)
-            { }
+    HRESULT i_createFormat(const com::Utf8Str &aMimeType, ComPtr<IClipboardFormat> &aFormat);
+    HRESULT i_createItem(ClipboardSource_T aSource,
+                         const com::Utf8Str &aMimeType,
+                         const std::vector<BYTE> &aBuffer,
+                         ComPtr<IClipboardItem> &aItem);
+    void i_storeData(ClipboardAction_T aAction,
+                     ClipboardSource_T aSource,
+                     const com::Utf8Str &aMimeType,
+                     const std::vector<BYTE> &aBuffer);
+    void i_fireDataChanged(ClipboardAction_T aAction,
+                           ClipboardSource_T aSource,
+                           const com::Utf8Str &aMimeType,
+                           const std::vector<BYTE> &aBuffer);
 
-            /** Clipboard mode. */
-            ClipboardMode_T mode;
-            /** Whether clipboard file transfers are enabled. */
-            bool fFileTransfersEnabled;
-        };
+    struct Data;
+    Data *mData;
 
-        /** Parent machine. */
-        Machine *mParent;
-        /** Clipboard settings. */
-        Backupable<Settings> bd;
-        /** Clipboard file list. */
-        std::vector<com::Utf8Str> mFileList;
-        /** Transfer manager object. */
-        ComObjPtr<ClipboardTransferManager> mTransfers;
-        /** Clipboard event source. */
-        ComPtr<IEventSource> mEventSource;
-        /** Current available Shared Clipboard format mask (VBOX_SHCL_FMT_XXX). */
-        uint32_t mFormats;
-        /** Next clipboard item identifier to assign. */
-        ULONG mNextItemId;
-        /** Current clipboard data items. */
-        std::vector<ComPtr<IClipboardItem> > mItems;
-    } mData;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
+    /** Last Shared Clipboard format mask reported through the active service extension. */
+    uint32_t m_fFormats;
+#endif
 };
 
 #endif /* !MAIN_INCLUDED_ClipboardImpl_h */
+/* vi: set tabstop=4 shiftwidth=4 expandtab: */

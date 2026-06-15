@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114278 2026-06-09 07:17:52Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the VBox API testcases.
 #
@@ -337,15 +337,23 @@ tstClipboard_INCS          = \
 	../include \
 	$(VBOX_MAIN_APIWRAPPER_INCS) \
 	$(dir $(VBOX_AUTOGEN_EVENT_H))
+tstClipboard_DEFS          = \
+	VBOX_WITH_HGCM \
+	VBOX_WITH_SHARED_CLIPBOARD
 tstClipboard_SOURCES       = \
 	tstClipboard.cpp \
-	../src-all/ClipboardImpl.cpp \
+	../src-server/ClipboardSettingsImpl.cpp \
+	../src-client/ClipboardFormatImpl.cpp \
+	../src-client/ClipboardItemImpl.cpp \
+	../src-client/ClipboardTransferImpl.cpp \
+	../src-client/ClipboardTransferManagerImpl.cpp \
 	../src-all/EventImpl.cpp \
 	../src-all/ObjectsTracker.cpp \
 	../src-all/VirtualBoxBase.cpp \
 	../src-all/VirtualBoxErrorInfoImpl.cpp \
 	../src-all/AutoCaller.cpp \
 	../src-all/GlobalStatusConversion.cpp \
+	../src-client/ClipboardImpl.cpp \
 	$(VBOX_AUTOGEN_EVENT_CPP)
 tstClipboard_LIBS          = \
 	$(PATH_STAGE_LIB)/VBoxAPIWrap$(VBOX_SUFF_LIB)

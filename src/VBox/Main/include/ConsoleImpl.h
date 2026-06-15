@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.h 114285 2026-06-09 12:19:20Z vadim.galitsyn@oracle.com $ */
+/* $Id: ConsoleImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class definition
  */
@@ -64,6 +64,7 @@ class AudioVideoRec;
 class UsbCardReader;
 #endif
 class ConsoleVRDPServer;
+class Clipboard;
 class VMMDev;
 class Progress;
 class BusAssignmentManager;
@@ -217,7 +218,14 @@ public:
     const ComPtr<IMachine> &i_machine() const { return mMachine; }
     const Bstr &i_getId() const { return mstrUuid; }
 
-    bool i_useHostClipboard() { return mfUseHostClipboard; }
+    bool i_useHostClipboard();
+
+    /**
+     * Returns the live console clipboard object.
+     *
+     * @returns Clipboard object, or NULL if unavailable.
+     */
+    Clipboard *i_getClipboard() const { return mClipboard; }
 
     /** Method is called only from ConsoleVRDPServer */
     IVRDEServer *i_getVRDEServer() const { return mVRDEServer; }
@@ -388,6 +396,7 @@ private:
     HRESULT getKeyboard(ComPtr<IKeyboard> &aKeyboard);
     HRESULT getMouse(ComPtr<IMouse> &aMouse);
     HRESULT getDisplay(ComPtr<IDisplay> &aDisplay);
+    HRESULT getClipboard(ComPtr<IClipboard> &aClipboard);
     HRESULT getDebugger(ComPtr<IMachineDebugger> &aDebugger);
     HRESULT getUSBDevices(std::vector<ComPtr<IUSBDevice> > &aUSBDevices);
     HRESULT getRemoteUSBDevices(std::vector<ComPtr<IHostUSBDevice> > &aRemoteUSBDevices);
@@ -395,8 +404,6 @@ private:
     HRESULT getVRDEServerInfo(ComPtr<IVRDEServerInfo> &aVRDEServerInfo);
     HRESULT getEventSource(ComPtr<IEventSource> &aEventSource);
     HRESULT getAttachedPCIDevices(std::vector<ComPtr<IPCIDeviceAttachment> > &aAttachedPCIDevices);
-    HRESULT getUseHostClipboard(BOOL *aUseHostClipboard);
-    HRESULT setUseHostClipboard(BOOL aUseHostClipboard);
     HRESULT getEmulatedUSB(ComPtr<IEmulatedUSB> &aEmulatedUSB);
 
     // wrapped IConsole methods
@@ -900,8 +907,6 @@ private:
                                                        unsigned uInstance, unsigned uLun, INetworkAdapter *aNetworkAdapter);
     static DECLCALLBACK(int) i_changeSerialPortAttachment(Console *pThis, PUVM pUVM, PCVMMR3VTABLE pVMM, ISerialPort *pSerialPort);
 
-    int i_changeClipboardMode(ClipboardMode_T aClipboardMode);
-    int i_changeClipboardFileTransferMode(bool aEnabled);
     int i_changeDnDMode(DnDMode_T aDnDMode);
 
 #ifdef VBOX_WITH_USB
@@ -1213,7 +1218,7 @@ private:
 
     bool mVMStateChangeCallbackDisabled;
 
-    bool mfUseHostClipboard;
+    const ComObjPtr<Clipboard> mClipboard;
 
     /** Local machine state value. */
     MachineState_T mMachineState;
@@ -1290,6 +1295,7 @@ private:
 
     friend class VMTask;
     friend class ConsoleVRDPServer;
+    friend class Clipboard;
 };
 
 

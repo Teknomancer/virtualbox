@@ -1,4 +1,4 @@
-/* $Id: VBoxManage.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxManage.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - VirtualBox command-line interface, internal header file.
  */
@@ -172,6 +172,9 @@ RTEXITCODE handleInternalCommands(HandlerArg *a);
 
 /* VBoxManageControlVM.cpp */
 RTEXITCODE handleControlVM(HandlerArg *a);
+
+/* VBoxManageClipboard.cpp */
+RTEXITCODE handleClipboard(HandlerArg *a);
 
 /* VBoxManageModifyVM.cpp */
 void parseGroups(const char *pcszGroups, com::SafeArray<BSTR> *pGroups);

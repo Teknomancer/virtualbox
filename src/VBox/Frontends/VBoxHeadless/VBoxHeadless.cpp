@@ -1,4 +1,4 @@
-/* $Id: VBoxHeadless.cpp 114034 2026-04-27 10:41:17Z alexander.eichner@oracle.com $ */
+/* $Id: VBoxHeadless.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxHeadless - The VirtualBox Headless frontend for running VMs on servers.
  */
@@ -1449,7 +1449,9 @@ extern "C" DECLEXPORT(int) TrustedMain(int argc, char **argv, char **envp)
         }
 
         /* Disable the host clipboard before powering up */
-        console->COMSETTER(UseHostClipboard)(false);
+        ComPtr<IClipboard> clipboard;
+        CHECK_ERROR_BREAK(console, COMGETTER(Clipboard)(clipboard.asOutParam()));
+        CHECK_ERROR_BREAK(clipboard, COMSETTER(UseHostClipboard)(FALSE));
 
         Log(("VBoxHeadless: Powering up the machine...\n"));
 

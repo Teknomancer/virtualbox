@@ -1,4 +1,4 @@
-/* $Id: Settings.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: Settings.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Settings File Manipulation API.
  *
@@ -1697,14 +1697,6 @@ bool SharedFolder::operator==(const SharedFolder &g) const
 }
 
 
-/**
- * Constructor. Needs to set sane defaults which stand the test of time.
- */
-Clipboard::Clipboard() :
-    mode(ClipboardMode_Disabled),
-    fFileTransfersEnabled(false)
-{
-}
 
 
 /**
@@ -5274,8 +5266,9 @@ void MachineConfigFile::readAudioAdapter(const xml::ElementNode &elmAudioAdapter
  * Parses a clipboard mode XML attribute value.
  */
 static ClipboardMode_T parseClipboardModeValue(const ConfigFileBase *pFile, const xml::ElementNode *pElm,
-                                                const char *pszAttribute, const Utf8Str &strValue)
+                                               const char *pszAttribute, const Utf8Str &strValue)
 {
+    /* Note: Do not change those values for legacy reasons! */
     if (strValue == "Disabled")
         return ClipboardMode_Disabled;
     if (strValue == "HostToGuest")

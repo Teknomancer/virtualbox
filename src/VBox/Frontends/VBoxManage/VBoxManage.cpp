@@ -1,4 +1,4 @@
-/* $Id: VBoxManage.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxManage.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - VirtualBox's command-line interface.
  */
@@ -223,6 +223,9 @@ static const VBMGCMD g_aCommands[] =
     { "modifyvm",           HELP_CMD_MODIFYVM,          handleModifyVM,             0 },
     { "startvm",            HELP_CMD_STARTVM,           handleStartVM,              0 },
     { "controlvm",          HELP_CMD_CONTROLVM,         handleControlVM,            0 },
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
+    { "clipboard",          HELP_CMD_CLIPBOARD,         handleClipboard,            0 },
+#endif
     { "unattended",         HELP_CMD_UNATTENDED,        handleUnattended,           0 },
     { "discardstate",       HELP_CMD_DISCARDSTATE,      handleDiscardState,         0 },
     { "adoptstate",         HELP_CMD_ADOPTSTATE,        handleAdoptState,           0 },

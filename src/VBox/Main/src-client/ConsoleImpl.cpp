@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114285 2026-06-09 12:19:20Z vadim.galitsyn@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -58,6 +58,7 @@
 
 #include "ConsoleImpl.h"
 
+#include "ClipboardImpl.h"
 #include "Global.h"
 #include "VirtualBoxErrorInfoImpl.h"
 #include "GuestImpl.h"
@@ -146,6 +147,7 @@
 #include <VBox/VMMDev.h>
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
+# include <VBox/GuestHost/SharedClipboard.h>
 # include <VBox/HostServices/VBoxClipboardSvc.h>
 #endif
 #include <VBox/HostServices/DragAndDropSvc.h>
@@ -443,7 +445,6 @@ Console::Console()
     , mpIfSecKey(NULL)
     , mpIfSecKeyHlp(NULL)
     , mVMStateChangeCallbackDisabled(false)
-    , mfUseHostClipboard(true)
     , mMachineState(MachineState_PoweredOff)
     , mhLdrModCrypto(NIL_RTLDRMOD)
     , mcRefsCrypto(0)
@@ -664,6 +665,10 @@ HRESULT Console::initWithMachine(IMachine *aMachine, IInternalMachineControl *aC
 
         unconst(mDisplay).createObject();
         hrc = mDisplay->init(this);
+        AssertComRCReturnRC(hrc);
+
+        unconst(mClipboard).createObject();
+        hrc = mClipboard->init(this);
         AssertComRCReturnRC(hrc);
 
         unconst(mVRDEServerInfo).createObject();
@@ -892,6 +897,12 @@ void Console::uninit()
     {
         mBusMgr->Release();
         mBusMgr = NULL;
+    }
+
+    if (mClipboard)
+    {
+        mClipboard->uninit();
+        unconst(mClipboard).setNull();
     }
 
     if (m_pKeyStore)
@@ -2178,6 +2189,33 @@ HRESULT Console::getDisplay(ComPtr<IDisplay> &aDisplay)
     return S_OK;
 }
 
+/**
+ * Returns the live console clipboard object.
+ *
+ * @returns COM status code.
+ * @param   aClipboard      Where to return the clipboard object.
+ */
+HRESULT Console::getClipboard(ComPtr<IClipboard> &aClipboard)
+{
+    /* mClipboard is constant during life time, no need to lock */
+    mClipboard.queryInterfaceTo(aClipboard.asOutParam());
+
+    return S_OK;
+}
+
+
+/**
+ * Checks whether the console clipboard uses the host clipboard.
+ *
+ * @returns true if the host clipboard should be used, false otherwise.
+ */
+bool Console::i_useHostClipboard()
+{
+    AssertReturn(mClipboard, true);
+    return mClipboard->i_useHostClipboard();
+}
+
+
 HRESULT Console::getDebugger(ComPtr<IMachineDebugger> &aDebugger)
 {
     /* we need a write lock because of the lazy mDebugger initialization*/
@@ -2285,26 +2323,6 @@ HRESULT Console::getAttachedPCIDevices(std::vector<ComPtr<IPCIDeviceAttachment> 
     }
     else
         aAttachedPCIDevices.resize(0);
-
-    return S_OK;
-}
-
-HRESULT Console::getUseHostClipboard(BOOL *aUseHostClipboard)
-{
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-
-    *aUseHostClipboard = mfUseHostClipboard;
-
-    return S_OK;
-}
-
-HRESULT Console::setUseHostClipboard(BOOL aUseHostClipboard)
-{
-    if (mfUseHostClipboard != RT_BOOL(aUseHostClipboard))
-    {
-        mfUseHostClipboard = RT_BOOL(aUseHostClipboard);
-        LogRel(("Shared Clipboard: %s using host clipboard\n", mfUseHostClipboard ? "Enabled" : "Disabled"));
-    }
 
     return S_OK;
 }
@@ -5904,6 +5922,8 @@ HRESULT Console::i_onClipboardError(const Utf8Str &aId, const Utf8Str &aErrMsg, 
     {
         alock.release();
         ::FireClipboardErrorEvent(mEventSource, aId, NULL /* aItem */, FALSE /* aVeto */, aErrMsg, aRc);
+        if (mClipboard.isNotNull())
+            mClipboard->i_fireClipboardError(aId, aErrMsg, aRc);
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));
@@ -5922,32 +5942,41 @@ HRESULT Console::i_onClipboardModeChange(ClipboardMode_T aClipboardMode)
     AutoCaller autoCaller(this);
     AssertComRCReturnRC(autoCaller.hrc());
 
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-
     HRESULT hrc = S_OK;
+    bool fChangeMode = false;
+    bool fInvalidMachineState = false;
 
     /* don't trigger the clipboard mode change if the VM isn't running */
     SafeVMPtrQuiet ptrVM(this);
     if (ptrVM.isOk())
     {
-        if (   mMachineState == MachineState_Running
-            || mMachineState == MachineState_Teleporting
-            || mMachineState == MachineState_LiveSnapshotting)
         {
-            int vrc = i_changeClipboardMode(aClipboardMode);
+            AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+            if (   mMachineState == MachineState_Running
+                || mMachineState == MachineState_Teleporting
+                || mMachineState == MachineState_LiveSnapshotting)
+                fChangeMode = true;
+            else
+                fInvalidMachineState = true;
+        }
+
+        if (fInvalidMachineState)
+            hrc = i_setInvalidMachineStateError();
+        else if (fChangeMode)
+        {
+            int vrc = mClipboard->i_changeMode(aClipboardMode);
             if (RT_FAILURE(vrc))
                 hrc = E_FAIL; /** @todo r=andy Set error info here! */
         }
-        else
-            hrc = i_setInvalidMachineStateError();
         ptrVM.release();
     }
 
     /* notify console callbacks on success */
     if (SUCCEEDED(hrc))
     {
-        alock.release();
         ::FireClipboardModeChangedEvent(mEventSource, aClipboardMode);
+        if (mClipboard.isNotNull())
+            mClipboard->i_fireClipboardModeChanged(aClipboardMode);
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));
@@ -5966,32 +5995,41 @@ HRESULT Console::i_onClipboardFileTransferModeChange(bool aEnabled)
     AutoCaller autoCaller(this);
     AssertComRCReturnRC(autoCaller.hrc());
 
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-
     HRESULT hrc = S_OK;
+    bool fChangeMode = false;
+    bool fInvalidMachineState = false;
 
     /* don't trigger the change if the VM isn't running */
     SafeVMPtrQuiet ptrVM(this);
     if (ptrVM.isOk())
     {
-        if (   mMachineState == MachineState_Running
-            || mMachineState == MachineState_Teleporting
-            || mMachineState == MachineState_LiveSnapshotting)
         {
-            int vrc = i_changeClipboardFileTransferMode(aEnabled);
+            AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+            if (   mMachineState == MachineState_Running
+                || mMachineState == MachineState_Teleporting
+                || mMachineState == MachineState_LiveSnapshotting)
+                fChangeMode = true;
+            else
+                fInvalidMachineState = true;
+        }
+
+        if (fInvalidMachineState)
+            hrc = i_setInvalidMachineStateError();
+        else if (fChangeMode)
+        {
+            int vrc = mClipboard->i_changeFileTransferMode(aEnabled);
             if (RT_FAILURE(vrc))
                 hrc = E_FAIL; /** @todo r=andy Set error info here! */
         }
-        else
-            hrc = i_setInvalidMachineStateError();
         ptrVM.release();
     }
 
     /* notify console callbacks on success */
     if (SUCCEEDED(hrc))
     {
-        alock.release();
         ::FireClipboardFileTransferModeChangedEvent(mEventSource, aEnabled ? TRUE : FALSE);
+        if (mClipboard.isNotNull())
+            mClipboard->i_fireClipboardFileTransferModeChanged(aEnabled);
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));
@@ -10225,82 +10263,6 @@ Console::i_vmstateChangeCallback(PUVM pUVM, PCVMMR3VTABLE pVMM, VMSTATE enmState
         default: /* shut up gcc */
             break;
     }
-}
-
-/**
- * Changes the clipboard mode.
- *
- * @returns VBox status code.
- * @param   aClipboardMode  new clipboard mode.
- */
-int Console::i_changeClipboardMode(ClipboardMode_T aClipboardMode)
-{
-#ifdef VBOX_WITH_SHARED_CLIPBOARD
-    VMMDev *pVMMDev = m_pVMMDev;
-    AssertPtrReturn(pVMMDev, VERR_INVALID_POINTER);
-
-    VBOXHGCMSVCPARM parm;
-    parm.type = VBOX_HGCM_SVC_PARM_32BIT;
-
-    switch (aClipboardMode)
-    {
-        default:
-        case ClipboardMode_Disabled:
-            LogRel(("Shared Clipboard: Mode: Off\n"));
-            parm.u.uint32 = VBOX_SHCL_MODE_OFF;
-            break;
-        case ClipboardMode_GuestToHost:
-            LogRel(("Shared Clipboard: Mode: Guest to Host\n"));
-            parm.u.uint32 = VBOX_SHCL_MODE_GUEST_TO_HOST;
-            break;
-        case ClipboardMode_HostToGuest:
-            LogRel(("Shared Clipboard: Mode: Host to Guest\n"));
-            parm.u.uint32 = VBOX_SHCL_MODE_HOST_TO_GUEST;
-            break;
-        case ClipboardMode_Bidirectional:
-            LogRel(("Shared Clipboard: Mode: Bidirectional\n"));
-            parm.u.uint32 = VBOX_SHCL_MODE_BIDIRECTIONAL;
-            break;
-    }
-
-    int vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_SET_MODE, 1, &parm);
-    if (RT_FAILURE(vrc))
-        LogRel(("Shared Clipboard: Error changing mode: %Rrc\n", vrc));
-
-    return vrc;
-#else
-    RT_NOREF(aClipboardMode);
-    return VERR_NOT_IMPLEMENTED;
-#endif
-}
-
-/**
- * Changes the clipboard file transfer mode.
- *
- * @returns VBox status code.
- * @param   aEnabled    Whether clipboard file transfers are enabled or not.
- */
-int Console::i_changeClipboardFileTransferMode(bool aEnabled)
-{
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-    VMMDev *pVMMDev = m_pVMMDev;
-    AssertPtrReturn(pVMMDev, VERR_INVALID_POINTER);
-
-    VBOXHGCMSVCPARM parm;
-    RT_ZERO(parm);
-
-    parm.type     = VBOX_HGCM_SVC_PARM_32BIT;
-    parm.u.uint32 = aEnabled ? VBOX_SHCL_TRANSFER_MODE_F_ENABLED : VBOX_SHCL_TRANSFER_MODE_F_NONE;
-
-    int vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE, 1 /* cParms */, &parm);
-    if (RT_FAILURE(vrc))
-        LogRel(("Shared Clipboard: Error changing file transfer mode: %Rrc\n", vrc));
-
-    return vrc;
-#else
-    RT_NOREF(aEnabled);
-    return VERR_NOT_IMPLEMENTED;
-#endif
 }
 
 /**

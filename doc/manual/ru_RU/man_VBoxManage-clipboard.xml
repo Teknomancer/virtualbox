@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    manpage, user manual, usage: VBoxManage clipboard
+-->
+<!--
+    Copyright (C) 2026 Oracle and/or its affiliates.
+
+    This file is part of VirtualBox base platform packages, as
+    available from https://www.virtualbox.org.
+
+    This program is free software; you can redistribute it and/or
+    modify it under the terms of the GNU General Public License
+    as published by the Free Software Foundation, in version 3 of the
+    License.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+    General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, see <https://www.gnu.org/licenses>.
+
+    SPDX-License-Identifier: GPL-3.0-only
+-->
+<!DOCTYPE refentry PUBLIC "-//OASIS//DTD DocBook XML V4.5//EN"
+  "http://www.oasis-open.org/docbook/xml/4.5/docbookx.dtd"[
+<!ENTITY % all.entities SYSTEM "all-entities.ent">
+%all.entities;
+]>
+<refentry id="vboxmanage-clipboard" lang="en">
+  <refentryinfo>
+    <pubdate>$Date: 2026-06-15 20:31:38 +0200 (Mon, 15 Jun 2026) $</pubdate>
+    <title>VBoxManage clipboard</title>
+  </refentryinfo>
+
+  <refmeta>
+    <refentrytitle>VBoxManage-clipboard</refentrytitle>
+    <manvolnum>1</manvolnum>
+  </refmeta>
+
+  <refnamediv>
+    <refname>VBoxManage-clipboard</refname>
+    <refpurpose>read and write live virtual machine clipboard data</refpurpose>
+    <refclass>&product-name;</refclass>
+  </refnamediv>
+
+  <refsynopsisdiv>
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-copy">
+<!-- The 'id' is mandatory and must start with 'synopsis-'. -->
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">copy</arg>
+      <arg>--format=<replaceable>mime-type</replaceable></arg>
+      <arg>--raw</arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-paste">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">paste</arg>
+      <arg>--format=<replaceable>mime-type</replaceable></arg>
+      <arg>--wait=<replaceable>ms</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-formats">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">formats</arg>
+      <arg>--machinereadable</arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-reset">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">reset</arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-listen">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">listen</arg>
+      <arg>--events=<replaceable>event-list</replaceable></arg>
+      <arg>--format=human|json|machinereadable</arg>
+      <arg>--timeout=<replaceable>ms</replaceable></arg>
+      <arg>--count=<replaceable>n</replaceable></arg>
+      <arg>--machinereadable</arg>
+    </cmdsynopsis>
+  </refsynopsisdiv>
+
+  <refsect1 id="vboxmanage-clipboard-description">
+    <title>Description</title>
+    <para>
+      The <command>VBoxManage clipboard</command> command reads and writes
+      live clipboard data for a running virtual machine.  The command uses
+      standard input and standard output by default, which makes it suitable
+      for shell pipelines.
+    </para>
+    <para>
+      Clipboard data transfer requires the virtual machine to be running and
+      the shared clipboard mode to allow the requested direction.  The command
+      does not enable shared clipboard access by itself.
+    </para>
+
+    <refsect2 id="vboxmanage-clipboard-copy">
+      <title>Copy Host Data to the Virtual Machine Clipboard</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard copy</command> command copies data
+        from host standard input to the live clipboard of the virtual machine.
+        Use shell pipes or input redirection to copy data from a host file.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>--format=<replaceable>mime-type</replaceable></option></term>
+          <listitem><para>
+              Specifies the MIME type for the clipboard data.  The default is
+              <literal>text/plain;charset=utf-8</literal>.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--raw</option></term>
+          <listitem><para>
+              Treats the input as binary data.  If no explicit MIME type was
+              specified, the command uses <literal>application/octet-stream</literal>.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        For example:
+      </para>
+<screen>$ echo "hello from host" | VBoxManage clipboard "Ubuntu VM" copy</screen>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-paste">
+      <title>Paste Virtual Machine Clipboard Data to the Host</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard paste</command> command reads data
+        from the live clipboard of the virtual machine and writes it to host
+        standard output.  It does not synthesize a paste keystroke in the
+        guest.  Use shell redirection to write the clipboard payload to a host
+        file, for example <command>VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt</command>.
+      </para>
+      <para>
+        If the command would print multiline text to an interactive terminal, it
+        displays a safe preview on standard error and asks for confirmation
+        before writing the clipboard payload to standard output.  Redirect or
+        pipe standard output to avoid this prompt.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>--format=<replaceable>mime-type</replaceable></option></term>
+          <listitem><para>
+              Requires the clipboard data to have the specified MIME type.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--wait=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Waits up to the specified number of milliseconds for new guest
+              clipboard data before writing it to the host.  If no matching
+              data arrives before the timeout, the command exits with an error
+              and writes no clipboard payload to standard output.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        For example:
+      </para>
+<screen>$ VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt
+$ VBoxManage clipboard "Ubuntu VM" paste --wait=10000 &gt; foo.txt</screen>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-formats">
+      <title>List Clipboard Formats</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard formats</command> command lists MIME
+        formats currently available from the live virtual machine clipboard.
+      </para>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-reset">
+      <title>Reset Clipboard State</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard reset</command> command resets live
+        clipboard data and transfer state for the virtual machine console.
+      </para>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-listen">
+      <title>Listen for Clipboard Events</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard listen</command> command listens for
+        live clipboard events from the virtual machine console.  It prints
+        event metadata only; it does not print clipboard payloads.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>--events=<replaceable>event-list</replaceable></option></term>
+          <listitem><para>
+              Specifies a comma-separated list of events to listen for.  Valid
+              values are <literal>source</literal>, <literal>format</literal>,
+              <literal>data</literal>, <literal>transfer</literal>,
+              <literal>error</literal>, <literal>mode</literal>, and
+              <literal>file-transfer-mode</literal>.  The
+              <literal>source-changed</literal>, <literal>format-changed</literal>,
+              and <literal>data-changed</literal> aliases are also accepted for
+              the corresponding changed events.  The default is
+              <literal>source,format,data,transfer,error,mode,file-transfer-mode</literal>.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--format=human|json|machinereadable</option></term>
+          <listitem><para>
+              Specifies the event output format.  JSON output is written as
+              one JSON object per line.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--timeout=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Stops listening after the specified number of milliseconds.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--count=<replaceable>n</replaceable></option></term>
+          <listitem><para>
+              Stops listening after printing the specified number of events.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+    </refsect2>
+  </refsect1>
+</refentry>

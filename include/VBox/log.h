@@ -440,6 +440,8 @@ typedef enum VBOXLOGGROUP
     LOG_GROUP_MAIN_CLIPBOARDTRANSFEREVENT,
     /** Main group, IClipboardTransferManager. */
     LOG_GROUP_MAIN_CLIPBOARDTRANSFERMANAGER,
+    /** Main group, IClipboardSettings. */
+    LOG_GROUP_MAIN_CLIPBOARDSETTINGS,
     /** Main group, ICloudClient. */
     LOG_GROUP_MAIN_CLOUDCLIENT,
     /** Main group, ICloudMachine. */
@@ -1095,6 +1097,7 @@ typedef enum VBOXLOGGROUP
     "MAIN_CLIPBOARDTRANSFER", \
     "MAIN_CLIPBOARDTRANSFEREVENT", \
     "MAIN_CLIPBOARDTRANSFERMANAGER", \
+    "MAIN_CLIPBOARDSETTINGS", \
     "MAIN_CLOUDCLIENT", \
     "MAIN_CLOUDMACHINE", \
     "MAIN_CLOUDNETWORK", \

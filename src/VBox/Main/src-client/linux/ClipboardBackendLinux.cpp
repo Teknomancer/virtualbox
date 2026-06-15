@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-x11.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendLinux.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Linux host.
  */
@@ -43,6 +43,10 @@
 #include <VBox/HostServices/VBoxClipboardSvc.h>
 #include <VBox/HostServices/VBoxSharedClipboardSvc.h>
 #include <iprt/errcore.h>
+
+#ifdef VBOX_COM_INPROC
+# include "GuestShClPrivate.h"
+#endif
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 # include <VBox/GuestHost/SharedClipboard-transfers.h>
@@ -313,6 +317,16 @@ int ShClBackendReportFormatsToGuest(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, 
     return vrc;
 }
 
+static int shClBackendReportFormatsToGuestAndMain(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
+{
+#ifdef VBOX_COM_INPROC
+    GuestShCl *pShCl = GuestShCl::tryGetInstance();
+    if (pShCl)
+        return pShCl->reportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
+#endif
+    return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+}
+
 /**
  * Reads data from the host clipboard.
  *
@@ -386,9 +400,7 @@ static DECLCALLBACK(int) shClSvcX11ReportFormatsCallback(PSHCLCONTEXT pCtx, uint
     else
         return VINF_SUCCESS;
 
-    fFormats = shClSvcHandleFormats(true /* fHostToGuest */, pClient, fFormats);
-
-    vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+    vrc = shClBackendReportFormatsToGuestAndMain(pClient, fFormats);
 
     LogFlowFuncLeaveRC(vrc);
     return vrc;

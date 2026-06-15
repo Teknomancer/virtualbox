@@ -1,4 +1,4 @@
-/* $Id: ConsoleImplConfigCommon.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImplConfigCommon.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation - VM Configuration Bits.
  *
@@ -44,6 +44,7 @@
 #endif
 
 #include "ConsoleImpl.h"
+#include "ClipboardImpl.h"
 #include "DisplayImpl.h"
 #include "NvramStoreImpl.h"
 #include "BusAssignmentManager.h"
@@ -3984,7 +3985,7 @@ int Console::i_configVmmDev(ComPtr<IMachine> pMachine, BusAssignmentManager *pBu
      * Shared Clipboard.
      */
     {
-        ComPtr<IClipboard> pClipboard;
+        ComPtr<IClipboardSettings> pClipboard;
         hrc = pMachine->COMGETTER(Clipboard)(pClipboard.asOutParam()); H();
 
         ClipboardMode_T enmClipboardMode = ClipboardMode_Disabled;
@@ -4001,7 +4002,8 @@ int Console::i_configVmmDev(ComPtr<IMachine> pMachine, BusAssignmentManager *pBu
             LogRel(("Shared Clipboard: Service loaded\n"));
 
             /* Set initial clipboard mode. */
-            vrc = i_changeClipboardMode(enmClipboardMode);
+            AssertPtrReturn(i_getClipboard(), VERR_INVALID_POINTER);
+            vrc = i_getClipboard()->i_changeMode(enmClipboardMode);
             AssertLogRelMsg(RT_SUCCESS(vrc), ("Shared Clipboard: Failed to set initial clipboard mode (%d): vrc=%Rrc\n",
                                              enmClipboardMode, vrc));
 
@@ -4013,7 +4015,8 @@ int Console::i_configVmmDev(ComPtr<IMachine> pMachine, BusAssignmentManager *pBu
                                              !i_useHostClipboard(), vrc));
 
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-            vrc = i_changeClipboardFileTransferMode(RT_BOOL(fFileTransfersEnabled));
+            AssertPtrReturn(i_getClipboard(), VERR_INVALID_POINTER);
+            vrc = i_getClipboard()->i_changeFileTransferMode(!!fFileTransfersEnabled);
             AssertLogRelMsg(RT_SUCCESS(vrc), ("Shared Clipboard: Failed to set initial file transfer mode (%u): vrc=%Rrc\n",
                                              fFileTransfersEnabled, vrc));
 # endif

@@ -253,7 +253,13 @@ typedef std::list<SharedFolder> SharedFoldersList;
  */
 struct Clipboard
 {
-    Clipboard();
+    /**
+     * Constructs clipboard settings with default values.
+     */
+    Clipboard()
+        : mode(ClipboardMode_Disabled)
+        , fFileTransfersEnabled(false)
+    { }
 
     bool operator==(const Clipboard &rOther) const;
 

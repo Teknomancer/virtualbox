@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -31,7 +31,10 @@
 # pragma once
 #endif
 
+#include <iprt/thread.h>
+
 #include <VBox/HostServices/VBoxClipboardExt.h>
+#include <VBox/HostServices/VBoxSharedClipboardSvc.h>
 
 /**
  * Forward prototype declarations.
@@ -101,6 +104,16 @@ public:
         return GuestShCl::s_pInstance;
     }
 
+    /**
+     * Returns the Singleton GuestShCl object, if it has been created.
+     *
+     * @returns Pointer to Singleton GuestShCl object, or NULL if not created yet.
+     */
+    static inline GuestShCl *tryGetInstance(void)
+    {
+        return GuestShCl::s_pInstance;
+    }
+
 protected:
 
     /** Constructor; will throw vrc on failure. */
@@ -117,6 +130,11 @@ public:
     /** @name Public helper functions.
      * @{ */
     int hostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM paParms) const;
+    int readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData);
+    int reportFormatsToGuest(SHCLFORMATS fFormats);
+    int reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource);
+    int reportHostDataAsync(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64_t uSeq);
+    int reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64_t uSeq);
     int reportError(const char *pcszId, int vrc, const char *pcszMsgFmt, ...);
     int RegisterServiceExtension(PFNHGCMSVCEXT pfnExtension, void *pvExtension);
     int UnregisterServiceExtension(PFNHGCMSVCEXT pfnExtension);
@@ -127,6 +145,7 @@ public:
     /** @name Static low-level HGCM callback handler.
      * @{ */
     static DECLCALLBACK(int) hgcmDispatcher(void *pvExtension, uint32_t u32Function, void *pvParms, uint32_t cbParms);
+    static DECLCALLBACK(int) reportHostDataThread(RTTHREAD hThread, void *pvUser);
     /** @}  */
 
 protected:
@@ -147,6 +166,13 @@ protected:
     /** Pointer to an optional extension callback.
      *  Might be NULL if not being used. */
     PFNSHCLEXTCALLBACK          m_pfnExtCallback;
+    /** Active guest clipboard client, if any.
+     *  Weak pointer owned by the HGCM service and protected by m_CritSect. */
+    PSHCLCLIENT                 m_pClient;
+    /** Host clipboard sequence counter, protected by m_CritSect. */
+    uint64_t                    m_uHostDataReportSeq;
+    /** Guest clipboard sequence counter, protected by m_CritSect. */
+    uint64_t                    m_uGuestDataReportSeq;
     /** @}  */
 
 private:

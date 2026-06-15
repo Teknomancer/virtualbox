@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-win.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendWin.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Win32 host.
  */
@@ -57,6 +57,9 @@
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 # include "VBoxSharedClipboardSvc-transfers.h"
+#endif
+#ifdef VBOX_COM_INPROC
+# include "GuestShClPrivate.h"
 #endif
 
 
@@ -789,6 +792,16 @@ DECLCALLBACK(int) vboxClipboardSvcWinThread(RTTHREAD hThreadSelf, void *pvUser)
     return vrc;
 }
 
+static int shClBackendReportFormatsToGuestAndMain(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
+{
+#ifdef VBOX_COM_INPROC
+    GuestShCl *pShCl = GuestShCl::tryGetInstance();
+    if (pShCl)
+        return pShCl->reportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
+#endif
+    return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+}
+
 /**
  * Synchronizes the host and the guest clipboard formats by sending all supported host clipboard
  * formats to the guest.
@@ -809,7 +822,7 @@ static int vboxClipboardSvcWinSyncInternal(PSHCLCONTEXT pCtx)
         SHCLFORMATS fFormats = 0;
         vrc = ShClWinGetFormats(&pCtx->Win, &fFormats);
         if (RT_SUCCESS(vrc))
-            vrc = ShClBackendReportFormatsToGuest(pCtx->pClient->pBackend, pCtx->pClient, fFormats);
+            vrc = shClBackendReportFormatsToGuestAndMain(pCtx->pClient, fFormats);
     }
     else /* If we don't have any client data (yet), bail out. */
         vrc = VINF_NO_CHANGE;

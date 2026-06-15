@@ -99,6 +99,14 @@ Rules for adding a changelog entry to make them look more uniform:
       </listitem>
 
       <listitem>
+        <para>VBoxManage: Added  new 'clipboard' sub command for controlling the
+          Shared Clipboard along with other new features such as listening for clipboard
+          events or copying / pasting clipboard data. Verbose clipboard event output
+          reports non-UTF-8/UTF-16 payloads as binary data with their size. The
+          'modifyvm' clipboard options are now marked as being deprecated.</para>
+      </listitem>
+
+      <listitem>
         <para>placeholder</para>
       </listitem>
 

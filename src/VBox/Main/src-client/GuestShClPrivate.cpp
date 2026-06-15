@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -33,10 +33,13 @@
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
 # include "ConsoleImpl.h"
+# include "ClipboardImpl.h"
 # include "ProgressImpl.h"
 # include "GuestShClPrivate.h"
 
+# include <iprt/mem.h>
 # include <iprt/semaphore.h>
+# include <iprt/thread.h>
 # include <iprt/cpp/utils.h>
 
 # include <VMMDev.h>
@@ -57,12 +60,55 @@
  * GuestShCl implementation.                                                                                                     *
  ********************************************************************************************************************************/
 
+/** Maximum host clipboard payload Main will read eagerly for data changed events. */
+static uint32_t const s_cbShClMainHostDataReadMax = _64M;
+
+/** Host clipboard data report worker task. */
+typedef struct SHCLMAINHOSTDATAREPORTTASK
+{
+    /** Guest shared clipboard instance. */
+    GuestShCl  *pThis;
+    /** Reported host formats. */
+    SHCLFORMATS fFormats;
+    /** Reported clipboard source. */
+    SHCLSOURCE  enmSource;
+    /** Host clipboard counter. */
+    uint64_t    uSeq;
+} SHCLMAINHOSTDATAREPORTTASK;
+/** Pointer to a host clipboard data report worker task. */
+typedef SHCLMAINHOSTDATAREPORTTASK *PSHCLMAINHOSTDATAREPORTTASK;
+
 /** Static (Singleton) instance of the Shared Clipboard management object. */
 GuestShCl* GuestShCl::s_pInstance = NULL;
+
+
+/**
+ * Selects a single format for reading host clipboard data into Main.
+ *
+ * @returns Shared Clipboard format bit, or VBOX_SHCL_FMT_NONE.
+ * @param   fFormats        Shared Clipboard format mask.
+ */
+static SHCLFORMAT shClMainPickHostDataFormat(SHCLFORMATS fFormats)
+{
+    if (fFormats & VBOX_SHCL_FMT_UNICODETEXT)
+        return VBOX_SHCL_FMT_UNICODETEXT;
+    if (fFormats & VBOX_SHCL_FMT_HTML)
+        return VBOX_SHCL_FMT_HTML;
+    if (fFormats & VBOX_SHCL_FMT_BITMAP)
+        return VBOX_SHCL_FMT_BITMAP;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    if (fFormats & VBOX_SHCL_FMT_URI_LIST)
+        return VBOX_SHCL_FMT_URI_LIST;
+#endif
+    return VBOX_SHCL_FMT_NONE;
+}
 
 GuestShCl::GuestShCl(Console *pConsole)
     : m_pConsole(pConsole)
     , m_pfnExtCallback(NULL)
+    , m_pClient(NULL)
+    , m_uHostDataReportSeq(0)
+    , m_uGuestDataReportSeq(0)
 {
     LogFlowFuncEnter();
 
@@ -91,6 +137,9 @@ void GuestShCl::uninit(void)
     RT_ZERO(m_SvcExtVRDP);
 
     m_pfnExtCallback = NULL;
+    m_pClient = NULL;
+    m_uHostDataReportSeq = 0;
+    m_uGuestDataReportSeq = 0;
 }
 
 /**
@@ -209,6 +258,246 @@ int GuestShCl::hostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM 
 }
 
 /**
+ * Reads clipboard data from the active guest clipboard client.
+ *
+ * @returns VBox status code.
+ * @param   uFormat     Format to request from the guest.
+ * @param   ppvData     Where to return the allocated data buffer.
+ * @param   pcbData     Where to return the data size.
+ */
+int GuestShCl::readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData)
+{
+    AssertPtrReturn(ppvData, VERR_INVALID_POINTER);
+    AssertPtrReturn(pcbData, VERR_INVALID_POINTER);
+    *ppvData = NULL;
+    *pcbData = 0;
+
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    PSHCLCLIENT pClient = m_pClient;
+    if (pClient)
+        vrc = ShClSvcReadDataFromGuest(pClient, uFormat, ppvData, pcbData);
+    else
+        vrc = VERR_SHCLPB_NO_DATA;
+
+    unlock();
+    return vrc;
+}
+
+/**
+ * Reports host clipboard formats to the active guest clipboard client.
+ *
+ * @returns VBox status code.
+ * @param   fFormats    Formats to report to the guest.
+ */
+int GuestShCl::reportFormatsToGuest(SHCLFORMATS fFormats)
+{
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    ++m_uHostDataReportSeq;
+
+    PSHCLCLIENT pClient = m_pClient;
+    if (pClient)
+        vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+    else
+        vrc = VINF_SUCCESS;
+
+    unlock();
+    return vrc;
+}
+
+/**
+ * Reports clipboard formats to the guest and updates Main clipboard listeners.
+ *
+ * @returns VBox status code.
+ * @param   pClient     Clipboard client to report to.
+ * @param   fFormats    Formats to report to the guest.
+ * @param   enmSource   Source of the format report.
+ */
+int GuestShCl::reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource)
+{
+    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
+
+    uint64_t uSeq = 0;
+    if (enmSource == SHCLSOURCE_LOCAL)
+    {
+        int vrc2 = lock();
+        if (RT_FAILURE(vrc2))
+            return vrc2;
+        uSeq = ++m_uHostDataReportSeq;
+        unlock();
+    }
+
+    ClipboardSource_T const enmClipboardSource = enmSource == SHCLSOURCE_REMOTE
+                                               ? ClipboardSource_Remote : ClipboardSource_Host;
+    AssertPtr(m_pConsole->i_getClipboard());
+    if (m_pConsole->i_getClipboard())
+        m_pConsole->i_getClipboard()->i_reportFormats(fFormats, enmClipboardSource,
+                                                       true /* fForceNotify */);
+
+    int vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+    if (   RT_SUCCESS(vrc)
+        && enmSource == SHCLSOURCE_LOCAL)
+    {
+        int vrc2 = reportHostDataAsync(fFormats, enmSource, uSeq);
+        if (RT_FAILURE(vrc2))
+            LogRelMax(16, ("Shared Clipboard: Scheduling host clipboard data report failed with %Rrc\n", vrc2));
+    }
+    return vrc;
+}
+
+
+/**
+ * Schedules reporting host clipboard data to Main listeners.
+ *
+ * @returns VBox status code.
+ * @param   fFormats        Reported host formats.
+ * @param   enmSource       Reported clipboard source.
+ * @param   uSeq            Expected host clipboard counter.
+ */
+int GuestShCl::reportHostDataAsync(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64_t uSeq)
+{
+    if (enmSource != SHCLSOURCE_LOCAL)
+        return VINF_SUCCESS;
+    if (shClMainPickHostDataFormat(fFormats) == VBOX_SHCL_FMT_NONE)
+        return VINF_SUCCESS;
+
+    PSHCLMAINHOSTDATAREPORTTASK pTask = (PSHCLMAINHOSTDATAREPORTTASK)RTMemAllocZ(sizeof(*pTask));
+    if (!pTask)
+        return VERR_NO_MEMORY;
+
+    pTask->pThis     = this;
+    pTask->fFormats  = fFormats;
+    pTask->enmSource = enmSource;
+    pTask->uSeq      = uSeq;
+
+    int vrc = RTThreadCreate(NULL, GuestShCl::reportHostDataThread, pTask, 0 /* cbStack */,
+                             RTTHREADTYPE_MAIN_WORKER, 0 /* fFlags */, "ShClData");
+    if (RT_FAILURE(vrc))
+        RTMemFree(pTask);
+    return vrc;
+}
+
+
+/**
+ * Reports host clipboard data to Main listeners.
+ *
+ * @returns VBox status code.
+ * @param   fFormats        Reported host formats.
+ * @param   enmSource       Reported clipboard source.
+ * @param   uSeq            Expected host clipboard counter.
+ */
+int GuestShCl::reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64_t uSeq)
+{
+    if (enmSource != SHCLSOURCE_LOCAL)
+        return VINF_SUCCESS;
+
+    SHCLFORMAT const uFormat = shClMainPickHostDataFormat(fFormats);
+    if (uFormat == VBOX_SHCL_FMT_NONE)
+        return VINF_SUCCESS;
+
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    if (uSeq != m_uHostDataReportSeq)
+    {
+        unlock();
+        return VINF_SUCCESS;
+    }
+
+    Clipboard *pClipboard = m_pConsole ? m_pConsole->i_getClipboard() : NULL;
+    PSHCLCLIENT pClient = m_pClient;
+    if (!pClipboard || !pClient)
+    {
+        unlock();
+        return VINF_SUCCESS;
+    }
+
+    uint8_t bProbe = 0;
+    uint32_t cbActual = 0;
+    SHCLCLIENTCMDCTX CmdCtx;
+    RT_ZERO(CmdCtx);
+    vrc = ShClBackendReadData(pClient->pBackend, pClient, &CmdCtx, uFormat, &bProbe, sizeof(bProbe), &cbActual);
+    if (RT_FAILURE(vrc))
+    {
+        LogRelMax(16, ("Shared Clipboard: Reading host clipboard data failed with %Rrc\n", vrc));
+        unlock();
+        return vrc;
+    }
+    if (!cbActual)
+    {
+        unlock();
+        return VINF_SUCCESS;
+    }
+    if (cbActual > s_cbShClMainHostDataReadMax)
+    {
+        LogRelMax(16, ("Shared Clipboard: Refusing to report oversized host clipboard data: %RU32 bytes (limit %RU32 bytes)\n",
+                       cbActual, s_cbShClMainHostDataReadMax));
+        unlock();
+        return VERR_TOO_MUCH_DATA;
+    }
+
+    void *pvData = RTMemAlloc(cbActual);
+    if (!pvData)
+    {
+        unlock();
+        return VERR_NO_MEMORY;
+    }
+
+    uint32_t cbRead = 0;
+    vrc = ShClBackendReadData(pClient->pBackend, pClient, &CmdCtx, uFormat, pvData, cbActual, &cbRead);
+    if (RT_SUCCESS(vrc))
+    {
+        if (   cbRead > 0
+            && cbRead <= cbActual
+            && uSeq == m_uHostDataReportSeq)
+        {
+            HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Host, uFormat, pvData, cbRead);
+            if (FAILED(hrc))
+                LogRelMax(16, ("Shared Clipboard: Reporting host clipboard data to Main failed with %Rhrc\n", hrc));
+        }
+        else if (cbRead > cbActual)
+        {
+            LogRelMax(16, ("Shared Clipboard: Host clipboard data grew while reading: %RU32 bytes reported, %RU32 bytes allocated\n",
+                           cbRead, cbActual));
+            vrc = VERR_BUFFER_OVERFLOW;
+        }
+    }
+    else
+        LogRelMax(16, ("Shared Clipboard: Reading host clipboard data failed with %Rrc\n", vrc));
+
+    RTMemFree(pvData);
+    unlock();
+    return vrc;
+}
+
+
+/**
+ * Host clipboard data reporting worker.
+ *
+ * @returns VBox status code.
+ * @param   hThread         Worker thread handle.
+ * @param   pvUser          Pointer to SHCLMAINHOSTDATAREPORTTASK.
+ */
+DECLCALLBACK(int) GuestShCl::reportHostDataThread(RTTHREAD hThread, void *pvUser)
+{
+    RT_NOREF(hThread);
+    PSHCLMAINHOSTDATAREPORTTASK pTask = (PSHCLMAINHOSTDATAREPORTTASK)pvUser;
+    AssertPtrReturn(pTask, VERR_INVALID_POINTER);
+
+    RTThreadSleep(10);
+    int vrc = pTask->pThis->reportHostData(pTask->fFormats, pTask->enmSource, pTask->uSeq);
+    RTMemFree(pTask);
+    return vrc;
+}
+
+
+/**
  * Reports an error by setting the error info and also informs subscribed listeners.
  *
  * @returns VBox status code.
@@ -278,13 +567,27 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
 
         case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST: // via VBOX_SHCL_GUEST_FN_REPORT_FORMATS in the guest
         {
+            PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
+            SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
+
+            int vrc2 = pThis->lock();
+            if (RT_SUCCESS(vrc2))
+            {
+                ++pThis->m_uGuestDataReportSeq;
+                pThis->unlock();
+            }
+            else
+                AssertMsgFailed(("Updating guest clipboard data sequence counter failed with %Rrc\n", vrc2));
+
+            AssertPtr(pThis->m_pConsole->i_getClipboard());
+            if (pThis->m_pConsole->i_getClipboard())
+                pThis->m_pConsole->i_getClipboard()->i_reportFormats(fFormats, ClipboardSource_Guest,
+                                                                     true /* fForceNotify */);
+
             if (pSvcExtVRDP->pfnExt)
                 vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
             if (vrc == VERR_NOT_SUPPORTED)
             {
-                PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
-                SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
-
                 vrc = ShClBackendReportFormats(pClient->pBackend, pClient, fFormats);
                 if (RT_FAILURE(vrc))
                     LogRel(("Shared Clipboard: Reporting guest clipboard formats to the host failed with %Rrc\n", vrc));
@@ -294,15 +597,20 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
 
         case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST: // via VRDE_CLIPBOARD_FUNCTION_FORMAT_ANNOUNCE in the VRDE server
         {
+            PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
+            SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
+            ClipboardSource_T const enmSource = pParms->u.ReportFormats.enmSource == SHCLSOURCE_REMOTE
+                                              ? ClipboardSource_Remote : ClipboardSource_Host;
+
+            AssertPtr(pThis->m_pConsole->i_getClipboard());
+            if (pThis->m_pConsole->i_getClipboard())
+                pThis->m_pConsole->i_getClipboard()->i_reportFormats(fFormats, enmSource,
+                                                                     true /* fForceNotify */);
+
             if (pSvcExtVRDP->pfnExt)
                 vrc = pSvcExtVRDP->pfnExt(pSvcExtVRDP->pvExt, u32Function, pvParms, cbParms);
             if (vrc == VERR_NOT_SUPPORTED)
-            {
-                PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
-                SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
-
                 vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
-            }
             break;
         }
 
@@ -314,14 +622,71 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
             {
                 PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
                 SHCLCLIENTCMDCTX cmdCtx;
+                RT_ZERO(cmdCtx);
                 void *pvData = pParms->u.ReadWriteData.pvData;
                 uint32_t cbData = pParms->u.ReadWriteData.cbData;
                 SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
-                vrc = ShClBackendReadData(pClient->pBackend, pClient, &cmdCtx, fFormats, pvData, cbData,
-                    &pParms->u.ReadWriteData.cbActual);
+                uint64_t uHostSeq = 0;
+                bool fHaveHostSeq = false;
+                int vrcLock = pThis->lock();
+                if (RT_SUCCESS(vrcLock))
+                {
+                    uHostSeq = pThis->m_uHostDataReportSeq;
+                    fHaveHostSeq = true;
+                    pThis->unlock();
+                }
+                else
+                    AssertMsgFailed(("Snapshotting host clipboard sequence counter failed with %Rrc\n", vrcLock));
+
+                Clipboard *pClipboard = pThis->m_pConsole->i_getClipboard();
+                bool fReadFromMain = false;
+                if (pClipboard)
+                {
+                    HRESULT hrc = pClipboard->i_readDataForGuest(fFormats, pvData, cbData, &pParms->u.ReadWriteData.cbActual);
+                    if (SUCCEEDED(hrc))
+                    {
+                        fReadFromMain = true;
+                        vrc = VINF_SUCCESS;
+                    }
+                    else
+                        vrc = ShClBackendReadData(pClient->pBackend, pClient, &cmdCtx, fFormats, pvData, cbData,
+                                                  &pParms->u.ReadWriteData.cbActual);
+                }
+                else
+                    vrc = ShClBackendReadData(pClient->pBackend, pClient, &cmdCtx, fFormats, pvData, cbData,
+                                              &pParms->u.ReadWriteData.cbActual);
                 if (RT_SUCCESS(vrc))
+                {
                     LogRel2(("Shared Clipboard: Read host clipboard data (max %RU32 bytes), got %RU32 bytes\n", cbData,
                         pParms->u.ReadWriteData.cbActual));
+
+                    if (   vrc == VINF_SUCCESS
+                        && !fReadFromMain
+                        && pClipboard
+                        && pvData
+                        && fHaveHostSeq
+                        && pParms->u.ReadWriteData.cbActual > 0
+                        && pParms->u.ReadWriteData.cbActual <= cbData)
+                    {
+                        bool fSeqUnchanged = false;
+                        vrcLock = pThis->lock();
+                        if (RT_SUCCESS(vrcLock))
+                        {
+                            fSeqUnchanged = pThis->m_uHostDataReportSeq == uHostSeq;
+                            pThis->unlock();
+                        }
+                        else
+                            AssertMsgFailed(("Checking host clipboard sequence counter failed with %Rrc\n", vrcLock));
+
+                        if (fSeqUnchanged)
+                        {
+                            HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Host, fFormats, pvData,
+                                                                   pParms->u.ReadWriteData.cbActual);
+                            if (FAILED(hrc))
+                                LogRelMax(16, ("Shared Clipboard: Reporting host clipboard data to Main failed with %Rhrc\n", hrc));
+                        }
+                    }
+                }
                 else
                     LogRel(("Shared Clipboard: Reading host clipboard data failed with %Rrc\n", vrc));
             }
@@ -367,14 +732,47 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
                 void *pvData = pParms->u.ReadWriteData.pvData;
                 uint32_t cbData = pParms->u.ReadWriteData.cbData;
                 SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+                uint64_t uSeq = 0;
+                bool fHaveSeq = false;
+                int vrcLock = pThis->lock();
+                if (RT_SUCCESS(vrcLock))
+                {
+                    uSeq = pThis->m_uGuestDataReportSeq;
+                    fHaveSeq = true;
+                    pThis->unlock();
+                }
+                else
+                    AssertMsgFailed(("Snapshotting guest clipboard sequence counter failed with %Rrc\n", vrcLock));
+
                 vrc = ShClBackendWriteData(pClient->pBackend, pClient, pCmdCtx, fFormats, pvData, cbData);
                 if (RT_FAILURE(vrc))
                     LogRel(("Shared Clipboard: Writing guest clipboard data to the host failed with %Rrc\n", vrc));
                 /* Complete any pending events. */
                 int vrc2 = ShClSvcGuestDataSignal(pClient, pCmdCtx, fFormats, pvData, cbData);
                 if (RT_FAILURE(vrc2))
-                    LogRel(("Shared Clipboard: Signalling host about guest clipboard data failed with %Rrc\n", vrc2));
+                    LogRelMax(16, ("Shared Clipboard: Signalling host about guest clipboard data failed with %Rrc\n", vrc2));
                 AssertRC(vrc2);
+
+                Clipboard *pClipboard = pThis->m_pConsole->i_getClipboard();
+                if (RT_SUCCESS(vrc) && pClipboard && fHaveSeq)
+                {
+                    bool fSeqUnchanged = false;
+                    vrcLock = pThis->lock();
+                    if (RT_SUCCESS(vrcLock))
+                    {
+                        fSeqUnchanged = pThis->m_uGuestDataReportSeq == uSeq;
+                        pThis->unlock();
+                    }
+                    else
+                        AssertMsgFailed(("Checking guest clipboard sequence counter failed with %Rrc\n", vrcLock));
+
+                    if (fSeqUnchanged)
+                    {
+                        HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Guest, fFormats, pvData, cbData);
+                        if (FAILED(hrc))
+                            LogRelMax(16, ("Shared Clipboard: Reporting guest clipboard data to Main failed with %Rhrc\n", hrc));
+                    }
+                }
             }
             break;
         }
@@ -419,6 +817,12 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
                 PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
                 bool fHeadless = pParms->u.ReadWriteData.fHeadless;
                 vrc = ShClBackendConnect(pBackend, pClient, fHeadless);
+                if (RT_SUCCESS(vrc))
+                {
+                    pThis->lock();
+                    pThis->m_pClient = pClient;
+                    pThis->unlock();
+                }
             }
             break;
         }
@@ -430,7 +834,11 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
             if (vrc == VERR_NOT_SUPPORTED)
             {
                 PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+                pThis->lock();
                 vrc = ShClBackendDisconnect(pClient->pBackend, pClient);
+                if (pThis->m_pClient == pClient)
+                    pThis->m_pClient = NULL;
+                pThis->unlock();
             }
             break;
         }

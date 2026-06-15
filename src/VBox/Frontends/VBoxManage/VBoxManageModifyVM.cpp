@@ -1,4 +1,4 @@
-/* $Id: VBoxManageModifyVM.cpp 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageModifyVM.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of modifyvm command.
  */
@@ -405,10 +405,10 @@ static const RTGETOPTDEF g_aModifyVMOptions[] =
     OPT2("--audio-in",                      "--audioin",                MODIFYVM_AUDIOIN,                   RTGETOPT_REQ_BOOL_ONOFF),
     OPT2("--audio-out",                     "--audioout",               MODIFYVM_AUDIOOUT,                  RTGETOPT_REQ_BOOL_ONOFF),
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-    OPT1("--clipboard-mode",                                            MODIFYVM_CLIPBOARD_MODE,            RTGETOPT_REQ_STRING),
+    OPT1("--clipboard-mode",                                            MODIFYVM_CLIPBOARD_MODE,            RTGETOPT_REQ_STRING),     /* deprecated; remove in the next major version. */
     OPT1("--clipboard",                                                 MODIFYVM_CLIPBOARD_MODE,            RTGETOPT_REQ_STRING),     /* deprecated */
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-    OPT1("--clipboard-file-transfers",                                  MODIFYVM_CLIPBOARD_FILE_TRANSFERS,  RTGETOPT_REQ_STRING),
+    OPT1("--clipboard-file-transfers",                                  MODIFYVM_CLIPBOARD_FILE_TRANSFERS,  RTGETOPT_REQ_STRING),     /* deprecated; remove in the next major version. */
 # endif
 #endif
     OPT2("--drag-and-drop",                 "--draganddrop",            MODIFYVM_DRAGANDDROP,               RTGETOPT_REQ_STRING),
@@ -2894,6 +2894,9 @@ RTEXITCODE handleModifyVM(HandlerArg *a)
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
             case MODIFYVM_CLIPBOARD_MODE:
             {
+                RTStrmPrintf(g_pStdErr, ModifyVM::tr("Warning: '%s' is deprecated and will be removed in a future version. Use 'clipboard <vm> set-mode' instead.\n"),
+                             GetOptState.pDef->pszLong);
+
                 ClipboardMode_T mode = ClipboardMode_Disabled; /* Shut up MSC */
                 if (!RTStrICmp(ValueUnion.psz, "disabled"))
                     mode = ClipboardMode_Disabled;
@@ -2910,7 +2913,7 @@ RTEXITCODE handleModifyVM(HandlerArg *a)
                 }
                 if (SUCCEEDED(hrc))
                 {
-                    ComPtr<IClipboard> clipboard;
+                    ComPtr<IClipboardSettings> clipboard;
                     CHECK_ERROR(sessionMachine, COMGETTER(Clipboard)(clipboard.asOutParam()));
                     if (SUCCEEDED(hrc))
                         CHECK_ERROR(clipboard, COMSETTER(Mode)(mode));
@@ -2921,6 +2924,9 @@ RTEXITCODE handleModifyVM(HandlerArg *a)
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
             case MODIFYVM_CLIPBOARD_FILE_TRANSFERS:
             {
+                RTStrmPrintf(g_pStdErr, ModifyVM::tr("Warning: '%s' is deprecated and will be removed in a future version. Use 'clipboard <vm> set-filetransfers' instead.\n"),
+                             GetOptState.pDef->pszLong);
+
                 BOOL fEnabled = false; /* Shut up MSC */
                 if (!RTStrICmp(ValueUnion.psz, "enabled"))
                     fEnabled = true;
@@ -2933,7 +2939,7 @@ RTEXITCODE handleModifyVM(HandlerArg *a)
                 }
                 if (SUCCEEDED(hrc))
                 {
-                    ComPtr<IClipboard> clipboard;
+                    ComPtr<IClipboardSettings> clipboard;
                     CHECK_ERROR(sessionMachine, COMGETTER(Clipboard)(clipboard.asOutParam()));
                     if (SUCCEEDED(hrc))
                         CHECK_ERROR(clipboard, COMSETTER(FileTransfersEnabled)(fEnabled));

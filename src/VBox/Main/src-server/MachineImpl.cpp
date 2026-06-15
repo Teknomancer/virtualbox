@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.cpp 114316 2026-06-09 16:22:02Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC.
  */
@@ -62,7 +62,7 @@
 #include "ExtPackManagerImpl.h"
 #include "MachineLaunchVMCommonWorker.h"
 #include "CryptoUtils.h"
-#include "ClipboardImpl.h"
+#include "ClipboardSettingsImpl.h"
 
 // generated header
 #include "VBoxEvents.h"
@@ -495,6 +495,9 @@ HRESULT Machine::init(VirtualBox *aParent,
 
         /* Apply recording defaults. */
         mRecordingSettings->i_applyDefaults();
+
+        /* Apply clipboard defaults. */
+        mClipboard->i_applyDefaults();
 
         /* Apply network adapters defaults */
         for (ULONG slot = 0; slot < mNetworkAdapters.size(); ++slot)
@@ -2291,6 +2294,57 @@ HRESULT Machine::i_checkClipboardSettingsChangeAllowed()
     return i_checkStateDependency(MutableOrRunningStateDep);
 }
 
+
+/**
+ * @note Locks this object for reading.
+ */
+HRESULT Machine::i_onClipboardModeChange(ClipboardMode_T aClipboardMode)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    /* ignore notifications sent when there is no running VM session */
+    if (!directControl)
+        return S_OK;
+
+    return directControl->OnClipboardModeChange(aClipboardMode);
+}
+
+
+/**
+ * @note Locks this object for reading.
+ */
+HRESULT Machine::i_onClipboardFileTransferModeChange(BOOL aEnable)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    /* ignore notifications sent when there is no running VM session */
+    if (!directControl)
+        return S_OK;
+
+    return directControl->OnClipboardFileTransferModeChange(aEnable);
+}
+
+
 void Machine::i_onSettingsChanged()
 {
     AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
@@ -2302,12 +2356,12 @@ void Machine::i_onSettingsChanged()
 }
 
 /**
- * Returns the clipboard control interface for this machine.
+ * Returns the clipboard settings interface for this machine.
  *
  * @returns COM status code.
- * @param   aClipboard      Where to return the clipboard control interface.
+ * @param   aClipboard      Where to return the clipboard settings interface.
  */
-HRESULT Machine::getClipboard(ComPtr<IClipboard> &aClipboard)
+HRESULT Machine::getClipboard(ComPtr<IClipboardSettings> &aClipboard)
 {
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(!mClipboard.isNull(), E_FAIL);
@@ -8881,13 +8935,8 @@ HRESULT Machine::i_loadHardware(const Guid *puuidRegistry,
         }
 
         // Clipboard
-        if (!mClipboard.isNull())
-        {
-            hrc = mClipboard->i_setMode(data.clipboardSettings.mode);
-            if (FAILED(hrc)) return hrc;
-            hrc = mClipboard->i_setFileTransfersEnabled(data.clipboardSettings.fFileTransfersEnabled ? TRUE : FALSE);
-            if (FAILED(hrc)) return hrc;
-        }
+        hrc = mClipboard->i_loadSettings(data.clipboardSettings);
+        if (FAILED(hrc)) return hrc;
 
         // drag'n'drop
         mHWData->mDnDMode = data.dndMode;
@@ -10261,12 +10310,8 @@ HRESULT Machine::i_saveHardware(settings::Hardware &data, settings::Debugging *p
         }
 
         // clipboard
-        hrc = mClipboard->COMGETTER(Mode)(&data.clipboardSettings.mode);
+        hrc = mClipboard->i_saveSettings(data.clipboardSettings);
         if (FAILED(hrc)) return hrc;
-        BOOL fClipboardFileTransfersEnabled;
-        hrc = mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
-        if (FAILED(hrc)) return hrc;
-        data.clipboardSettings.fFileTransfersEnabled = RT_BOOL(fClipboardFileTransfersEnabled);
 
         // drag'n'drop
         data.dndMode = mHWData->mDnDMode;
@@ -12154,24 +12199,6 @@ void Machine::i_commit()
         // mPeer->mMediumAttachments.attach(mMediumAttachments);
         Assert(mPeer->mMediumAttachments.data() == mMediumAttachments.data());
 
-        ClipboardMode_T enmClipboardMode;
-        HRESULT hrc2 = mClipboard->COMGETTER(Mode)(&enmClipboardMode);
-        AssertComRC(hrc2);
-        if (SUCCEEDED(hrc2))
-        {
-            hrc2 = mPeer->mClipboard->i_setMode(enmClipboardMode);
-            AssertComRC(hrc2);
-        }
-
-        BOOL fClipboardFileTransfersEnabled;
-        hrc2 = mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
-        AssertComRC(hrc2);
-        if (SUCCEEDED(hrc2))
-        {
-            hrc2 = mPeer->mClipboard->i_setFileTransfersEnabled(fClipboardFileTransfersEnabled);
-            AssertComRC(hrc2);
-        }
-        mPeer->mClipboard->i_commit();
     }
 }
 
@@ -12221,24 +12248,7 @@ void Machine::i_copyFrom(Machine *aThat)
     mUSBDeviceFilters->i_copyFrom(aThat->mUSBDeviceFilters);
     mBandwidthControl->i_copyFrom(aThat->mBandwidthControl);
     mGuestDebugControl->i_copyFrom(aThat->mGuestDebugControl);
-
-    ClipboardMode_T enmClipboardMode;
-    HRESULT hrcClipboard = aThat->mClipboard->COMGETTER(Mode)(&enmClipboardMode);
-    AssertComRC(hrcClipboard);
-    if (SUCCEEDED(hrcClipboard))
-    {
-        hrcClipboard = mClipboard->i_setMode(enmClipboardMode);
-        AssertComRC(hrcClipboard);
-    }
-
-    BOOL fClipboardFileTransfersEnabled;
-    hrcClipboard = aThat->mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
-    AssertComRC(hrcClipboard);
-    if (SUCCEEDED(hrcClipboard))
-    {
-        hrcClipboard = mClipboard->i_setFileTransfersEnabled(fClipboardFileTransfersEnabled);
-        AssertComRC(hrcClipboard);
-    }
+    mClipboard->i_copyFrom(aThat->mClipboard);
 
     /* create private copies of all controllers */
     mStorageControllers.backup();
@@ -12658,19 +12668,8 @@ HRESULT SessionMachine::init(Machine *aMachine)
     mGuestDebugControl->init(this, aMachine->mGuestDebugControl);
 
     unconst(mClipboard).createObject();
-    hrc = mClipboard->init(this);
+    hrc = mClipboard->init(this, aMachine->mClipboard);
     if (FAILED(hrc)) return hrc;
-    ClipboardMode_T enmClipboardMode;
-    hrc = aMachine->mClipboard->COMGETTER(Mode)(&enmClipboardMode);
-    if (FAILED(hrc)) return hrc;
-    hrc = mClipboard->i_setMode(enmClipboardMode);
-    if (FAILED(hrc)) return hrc;
-    BOOL fClipboardFileTransfersEnabled;
-    hrc = aMachine->mClipboard->i_getFileTransfersEnabled(&fClipboardFileTransfersEnabled);
-    if (FAILED(hrc)) return hrc;
-    hrc = mClipboard->i_setFileTransfersEnabled(fClipboardFileTransfersEnabled);
-    if (FAILED(hrc)) return hrc;
-    mClipboard->i_commit();
 
     /* default is to delete saved state on Saved -> PoweredOff transition */
     mRemoveSavedState = true;
@@ -14486,6 +14485,217 @@ HRESULT SessionMachine::i_onClipboardFileTransferModeChange(BOOL aEnable)
 }
 
 /**
+ * Reads clipboard data from the direct session control.
+ *
+ * @returns COM status code.
+ * @param   aAction         Clipboard action to read for.
+ * @param   aSource         Where to return the clipboard source.
+ * @param   aMimeType       Where to return the MIME type.
+ * @param   aBuffer         Where to return the payload bytes.
+ */
+HRESULT SessionMachine::i_clipboardReadData(ClipboardAction_T aAction,
+                                            ClipboardSource_T *aSource,
+                                            Utf8Str &aMimeType,
+                                            std::vector<BYTE> &aBuffer)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    if (!directControl)
+        return setError(VBOX_E_INVALID_VM_STATE, tr("The machine is not locked by a running VM session"));
+
+    Bstr bstrMimeType;
+    SafeArray<BYTE> aSafeBuffer;
+    HRESULT hrc = directControl->ClipboardReadData(aAction, aSource, bstrMimeType.asOutParam(), ComSafeArrayAsOutParam(aSafeBuffer));
+    if (FAILED(hrc))
+        return hrc;
+
+    aMimeType = Utf8Str(bstrMimeType);
+    if (aSafeBuffer.size())
+        aBuffer.assign(aSafeBuffer.raw(), aSafeBuffer.raw() + aSafeBuffer.size());
+    else
+        aBuffer.clear();
+    return S_OK;
+}
+
+/**
+ * Reads clipboard formats from the direct session control.
+ *
+ * @returns COM status code.
+ * @param   aFormats        Where to return the MIME formats.
+ */
+HRESULT SessionMachine::i_clipboardReadFormats(std::vector<Utf8Str> &aFormats)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    if (!directControl)
+        return setError(VBOX_E_INVALID_VM_STATE, tr("The machine is not locked by a running VM session"));
+
+    SafeArray<BSTR> aSafeFormats;
+    HRESULT hrc = directControl->ClipboardReadFormats(ComSafeArrayAsOutParam(aSafeFormats));
+    if (FAILED(hrc))
+        return hrc;
+
+    aFormats.clear();
+    for (size_t i = 0; i < aSafeFormats.size(); ++i)
+        aFormats.push_back(Utf8Str(aSafeFormats[i]));
+    return S_OK;
+}
+
+/**
+ * Writes clipboard data through the direct session control.
+ *
+ * @returns COM status code.
+ * @param   aAction         Clipboard action to write for.
+ * @param   aSource         Clipboard source.
+ * @param   aMimeType       MIME type of the payload.
+ * @param   aBuffer         Payload bytes.
+ * @param   aWrittenSource  Where to return the written clipboard source.
+ * @param   aWrittenMimeType  Where to return the written MIME type.
+ * @param   aWrittenBuffer  Where to return the written payload bytes.
+ */
+HRESULT SessionMachine::i_clipboardWriteData(ClipboardAction_T aAction,
+                                             ClipboardSource_T aSource,
+                                             const Utf8Str &aMimeType,
+                                             const std::vector<BYTE> &aBuffer,
+                                             ClipboardSource_T *aWrittenSource,
+                                             Utf8Str &aWrittenMimeType,
+                                             std::vector<BYTE> &aWrittenBuffer)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    if (!directControl)
+        return setError(VBOX_E_INVALID_VM_STATE, tr("The machine is not locked by a running VM session"));
+
+    SafeArray<BYTE> aSafeBuffer(aBuffer.size());
+    if (!aBuffer.empty())
+        aSafeBuffer.initFrom(&aBuffer[0], aBuffer.size());
+    Bstr bstrWrittenMimeType;
+    SafeArray<BYTE> aSafeWrittenBuffer;
+    HRESULT hrc = directControl->ClipboardWriteData(aAction, aSource, Bstr(aMimeType).raw(), ComSafeArrayAsInParam(aSafeBuffer),
+                                                    aWrittenSource, bstrWrittenMimeType.asOutParam(),
+                                                    ComSafeArrayAsOutParam(aSafeWrittenBuffer));
+    if (FAILED(hrc))
+        return hrc;
+
+    aWrittenMimeType = Utf8Str(bstrWrittenMimeType);
+    if (aSafeWrittenBuffer.size())
+        aWrittenBuffer.assign(aSafeWrittenBuffer.raw(), aSafeWrittenBuffer.raw() + aSafeWrittenBuffer.size());
+    else
+        aWrittenBuffer.clear();
+    return S_OK;
+}
+
+/**
+ * Writes clipboard formats through the direct session control.
+ *
+ * @returns COM status code.
+ * @param   aFormats        MIME formats to write.
+ */
+HRESULT SessionMachine::i_clipboardWriteFormats(const std::vector<Utf8Str> &aFormats)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    if (!directControl)
+        return setError(VBOX_E_INVALID_VM_STATE, tr("The machine is not locked by a running VM session"));
+
+    SafeArray<BSTR> aSafeFormats(aFormats.size());
+    for (size_t i = 0; i < aFormats.size(); ++i)
+        Bstr(aFormats[i]).cloneTo(&aSafeFormats[i]);
+    return directControl->ClipboardWriteFormats(ComSafeArrayAsInParam(aSafeFormats));
+}
+
+/**
+ * Resets clipboard state through the direct session control.
+ *
+ * @returns COM status code.
+ */
+HRESULT SessionMachine::i_clipboardReset()
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    if (!directControl)
+        return setError(VBOX_E_INVALID_VM_STATE, tr("The machine is not locked by a running VM session"));
+
+    return directControl->ClipboardReset();
+}
+
+/**
+ * Cancels a clipboard transfer through the direct session control.
+ *
+ * @returns COM status code.
+ * @param   aTransferId     Transfer identifier to cancel.
+ */
+HRESULT SessionMachine::i_clipboardTransferCancel(ULONG aTransferId)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoCaller autoCaller(this);
+    AssertComRCReturnRC(autoCaller.hrc());
+
+    ComPtr<IInternalSessionControl> directControl;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData->mSession.mLockType == LockType_VM)
+            directControl = mData->mSession.mDirectControl;
+    }
+
+    if (!directControl)
+        return setError(VBOX_E_INVALID_VM_STATE, tr("The machine is not locked by a running VM session"));
+
+    return directControl->ClipboardTransferCancel(aTransferId);
+}
+
+/**
  * @note Locks this object for reading.
  */
 HRESULT SessionMachine::i_onDnDModeChange(DnDMode_T aDnDMode)
@@ -15341,6 +15551,9 @@ HRESULT Machine::applyDefaults(const com::Utf8Str &aFlags)
 
     /* Initialize default record settings. */
     mRecordingSettings->i_applyDefaults();
+
+    /* Apply clipboard defaults. */
+    mClipboard->i_applyDefaults();
 
     hrc = osType->COMGETTER(RecommendedRAM)(&mHWData->mMemorySize);
     if (FAILED(hrc)) return hrc;

@@ -87,6 +87,36 @@ typedef uint32_t SHCLFORMATS;
 /** Pointer to a bit map of Shared Clipboard formats (VBOX_SHCL_FMT_XXX). */
 typedef SHCLFORMATS *PSHCLFORMATS;
 
+/** ClipboardSource_T values. */
+enum
+{
+    VBOX_SHCL_CLIPBOARD_SOURCE_HOST     = 0,
+    VBOX_SHCL_CLIPBOARD_SOURCE_GUEST    = 1,
+    VBOX_SHCL_CLIPBOARD_SOURCE_REMOTE   = 2,
+    VBOX_SHCL_CLIPBOARD_SOURCE_CUSTOM   = 3
+};
+
+/** ClipboardMode_T values. */
+enum
+{
+    VBOX_SHCL_CLIPBOARD_MODE_DISABLED       = 0,
+    VBOX_SHCL_CLIPBOARD_MODE_HOST_TO_GUEST  = 1,
+    VBOX_SHCL_CLIPBOARD_MODE_GUEST_TO_HOST  = 2,
+    VBOX_SHCL_CLIPBOARD_MODE_BIDIRECTIONAL  = 3
+};
+
+/** ClipboardTransferState_T values. */
+enum
+{
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_ADDED        = 0,
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_REMOVED      = 1,
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_IN_PROGRESS  = 2,
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_INTERACTION  = 3,
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_COMPLETED    = 4,
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_CANCELED     = 5,
+    VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_FAILED       = 6
+};
+
 /** Defines the default timeout (in ms) to use for clipboard single wait operations.
  *  Not being used for lenghtly operations as a whole!
  *  Note: Don't set this too high, otherwise the UI feels sluggish. */

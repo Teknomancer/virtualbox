@@ -1,4 +1,4 @@
-/* $Id: SessionImpl.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: SessionImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Client Session COM Class implementation in VBoxC.
  */
@@ -30,6 +30,7 @@
 
 #include "SessionImpl.h"
 #include "ConsoleImpl.h"
+#include "ClipboardImpl.h"
 #include "ClientTokenHolder.h"
 #include "Global.h"
 #include "StringifyEnums.h"
@@ -846,20 +847,71 @@ HRESULT Session::onClipboardModeChange(ClipboardMode_T aClipboardMode)
 {
     LogFlowThisFunc(("\n"));
 
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-    AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
-    AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
 #ifndef VBOX_COM_INPROC_API_CLIENT
-    AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+    ComObjPtr<Console> pConsole;
+#endif
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+        AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+        AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+        pConsole = mConsole;
+#endif
+    }
 
-    return mConsole->i_onClipboardModeChange(aClipboardMode);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    return pConsole->i_onClipboardModeChange(aClipboardMode);
 #else
     RT_NOREF(aClipboardMode);
     return S_OK;
 #endif
 }
 
+/**
+ * Handles a clipboard file transfer mode change notification.
+ *
+ * @returns COM status code.
+ * @param   aEnabled        New file transfer enabled state.
+ */
 HRESULT Session::onClipboardFileTransferModeChange(BOOL aEnabled)
+{
+    LogFlowThisFunc(("\n"));
+
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    ComObjPtr<Console> pConsole;
+#endif
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+        AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+        AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+        pConsole = mConsole;
+#endif
+    }
+
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    return pConsole->i_onClipboardFileTransferModeChange(RT_BOOL(aEnabled));
+#else
+    RT_NOREF(aEnabled);
+    return S_OK;
+#endif
+}
+
+/**
+ * Reads clipboard data through the locked console.
+ *
+ * @returns COM status code.
+ * @param   aAction         Clipboard action to read for.
+ * @param   aSource         Where to return the clipboard source.
+ * @param   aMimeType       Where to return the MIME type.
+ * @param   aBuffer         Where to return the payload bytes.
+ */
+HRESULT Session::clipboardReadData(ClipboardAction_T aAction,
+                                   ClipboardSource_T *aSource,
+                                   Utf8Str &aMimeType,
+                                   std::vector<BYTE> &aBuffer)
 {
     LogFlowThisFunc(("\n"));
 
@@ -869,10 +921,142 @@ HRESULT Session::onClipboardFileTransferModeChange(BOOL aEnabled)
 #ifndef VBOX_COM_INPROC_API_CLIENT
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
-    return mConsole->i_onClipboardFileTransferModeChange(RT_BOOL(aEnabled));
+    AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
+    return mConsole->i_getClipboard()->i_readData(aAction, aSource, aMimeType, aBuffer);
 #else
-    RT_NOREF(aEnabled);
-    return S_OK;
+    RT_NOREF(aAction, aSource, aMimeType, aBuffer);
+    return E_NOTIMPL;
+#endif
+}
+
+/**
+ * Reads clipboard formats through the locked console.
+ *
+ * @returns COM status code.
+ * @param   aFormats        Where to return the MIME formats.
+ */
+HRESULT Session::clipboardReadFormats(std::vector<Utf8Str> &aFormats)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+    AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+
+    AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
+    return mConsole->i_getClipboard()->i_readFormats(aFormats);
+#else
+    RT_NOREF(aFormats);
+    return E_NOTIMPL;
+#endif
+}
+
+/**
+ * Writes clipboard data through the locked console.
+ *
+ * @returns COM status code.
+ * @param   aAction         Clipboard action to write for.
+ * @param   aSource         Clipboard source.
+ * @param   aMimeType       MIME type of the payload.
+ * @param   aBuffer         Payload bytes.
+ * @param   aWrittenSource  Where to return the written clipboard source.
+ * @param   aWrittenMimeType  Where to return the written MIME type.
+ * @param   aWrittenBuffer  Where to return the written payload bytes.
+ */
+HRESULT Session::clipboardWriteData(ClipboardAction_T aAction,
+                                    ClipboardSource_T aSource,
+                                    const Utf8Str &aMimeType,
+                                    const std::vector<BYTE> &aBuffer,
+                                    ClipboardSource_T *aWrittenSource,
+                                    Utf8Str &aWrittenMimeType,
+                                    std::vector<BYTE> &aWrittenBuffer)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+    AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+
+    AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
+    return mConsole->i_getClipboard()->i_writeData(aAction, aSource, aMimeType, aBuffer,
+                                                      aWrittenSource, aWrittenMimeType, aWrittenBuffer);
+#else
+    RT_NOREF(aAction, aSource, aMimeType, aBuffer, aWrittenSource, aWrittenMimeType, aWrittenBuffer);
+    return E_NOTIMPL;
+#endif
+}
+
+/**
+ * Writes clipboard formats through the locked console.
+ *
+ * @returns COM status code.
+ * @param   aFormats        MIME formats to write.
+ */
+HRESULT Session::clipboardWriteFormats(const std::vector<Utf8Str> &aFormats)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+    AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+
+    AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
+    return mConsole->i_getClipboard()->i_writeFormats(aFormats);
+#else
+    RT_NOREF(aFormats);
+    return E_NOTIMPL;
+#endif
+}
+
+/**
+ * Resets clipboard state through the locked console.
+ *
+ * @returns COM status code.
+ */
+HRESULT Session::clipboardReset()
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+    AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+
+    AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
+    return mConsole->i_getClipboard()->i_reset();
+#else
+    return E_NOTIMPL;
+#endif
+}
+
+/**
+ * Cancels a clipboard transfer through the locked console.
+ *
+ * @returns COM status code.
+ * @param   aTransferId     Transfer identifier to cancel.
+ */
+HRESULT Session::clipboardTransferCancel(ULONG aTransferId)
+{
+    LogFlowThisFunc(("\n"));
+
+    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
+    AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
+#ifndef VBOX_COM_INPROC_API_CLIENT
+    AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
+
+    AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
+    return mConsole->i_getClipboard()->i_transferCancel(aTransferId);
+#else
+    RT_NOREF(aTransferId);
+    return E_NOTIMPL;
 #endif
 }
 

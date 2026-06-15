@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -1062,11 +1062,11 @@ static int shClSvcClientMsgCancel(PSHCLCLIENT pClient, uint32_t cParms)
  *
  * @thread  Backend thread.
  */
-int ShClSvcReportFormats(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
+static int shClSvcReportFormatsEx(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource)
 {
     AssertPtrReturn(pClient, VERR_INVALID_POINTER);
 
-    LogFlowFunc(("fFormats=%#x\n", fFormats));
+    LogFlowFunc(("fFormats=%#x, enmSource=%RU32\n", fFormats, enmSource));
 
     /*
      * Check if the service mode allows this operation and whether the guest is
@@ -1092,8 +1092,9 @@ int ShClSvcReportFormats(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
     SHCLEXTPARMS parms;
     RT_ZERO(parms);
 
-    parms.u.ReportFormats.uFormats = fFormats;
-    parms.u.ReportFormats.pClient  = pClient;
+    parms.u.ReportFormats.uFormats  = fFormats;
+    parms.u.ReportFormats.pClient   = pClient;
+    parms.u.ReportFormats.enmSource = enmSource;
 
     /* The backend in Main calls: ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats); */
     rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST, &parms, sizeof(parms));
@@ -1103,6 +1104,11 @@ int ShClSvcReportFormats(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
 
     LogFlowFuncLeaveRC(rc);
     return rc;
+}
+
+int ShClSvcReportFormats(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
+{
+    return shClSvcReportFormatsEx(pClient, fFormats, SHCLSOURCE_LOCAL);
 }
 
 /**
@@ -1317,7 +1323,7 @@ static int shClSvcClientMsgDataRead(PSHCLCLIENT pClient, uint32_t cParms, VBOXHG
      * Otherwise, do this now. */
     if (g_ExtState.fDelayedAnnouncement)
     {
-        int rc2 = ShClSvcReportFormats(pClient, g_ExtState.fDelayedFormats);
+        int rc2 = shClSvcReportFormatsEx(pClient, g_ExtState.fDelayedFormats, SHCLSOURCE_REMOTE);
         AssertRC(rc2);
 
         g_ExtState.fDelayedAnnouncement = false;
@@ -1890,6 +1896,30 @@ static void shclSvcClientStateReset(PSHCLCLIENTSTATE pState)
 #endif
 }
 
+
+
+/**
+ * Resets host-side live Shared Clipboard state.
+ */
+static void shClSvcHostReset(void)
+{
+    int rc = RTCritSectEnter(&g_CritSect);
+    AssertRC(rc);
+    if (RT_FAILURE(rc))
+        return;
+
+    for (ClipboardClientMap::iterator itClient = g_mapClients.begin(); itClient != g_mapClients.end(); ++itClient)
+        if (itClient->second)
+            shClSvcClientReset(itClient->second);
+
+    g_ExtState.fReadingData = false;
+    g_ExtState.fDelayedAnnouncement = false;
+    g_ExtState.fDelayedFormats = 0;
+
+    RTCritSectLeave(&g_CritSect);
+}
+
+
 /*
  * We differentiate between a function handler for the guest and one for the host.
  */
@@ -1954,6 +1984,19 @@ static DECLCALLBACK(int) svcHostCall(void *,
                     g_fHeadless = RT_BOOL(uHeadless);
                     LogRel(("Shared Clipboard: Service running in %s mode\n", g_fHeadless ? "headless" : "normal"));
                 }
+            }
+            break;
+        }
+
+
+        case VBOX_SHCL_HOST_FN_CANCEL:
+        {
+            if (cParms > 1)
+                rc = VERR_INVALID_PARAMETER;
+            else
+            {
+                shClSvcHostReset();
+                rc = VINF_SUCCESS;
             }
             break;
         }
@@ -2292,7 +2335,7 @@ static DECLCALLBACK(int) extCallback(uint32_t u32Function, uint32_t u32Format, v
             {
                 LogFlowFunc(("VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST: g_ExtState.fReadingData=%RTbool\n", g_ExtState.fReadingData));
                 if (!g_ExtState.fReadingData)
-                    rc = ShClSvcReportFormats(pClient, u32Format);
+                    rc = shClSvcReportFormatsEx(pClient, u32Format, SHCLSOURCE_REMOTE);
                 else
                 {
                     g_ExtState.fDelayedAnnouncement = true;

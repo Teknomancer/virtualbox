@@ -1,4 +1,4 @@
-/* $Id: clipboard-helper.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-helper.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Some helper function for converting between the various EOLs.
  */
@@ -40,6 +40,7 @@
 # pragma once
 #endif
 
+#include <iprt/stream.h>
 #include <iprt/string.h>
 
 #include <VBox/GuestHost/SharedClipboard.h>
@@ -206,6 +207,82 @@ int ShClDibToBmp(const void *pvSrc, size_t cbSrc, void **ppvDst, size_t *pcbDst)
  * @param   pcbDst        Pointer to the size of the destination data in bytes
  */
 int ShClBmpGetDib(const void *pvSrc, size_t cbSrc, const void **ppvDst, size_t *pcbDst);
+
+/**
+ * Converts a clipboard source value to a printable string.
+ *
+ * @returns Printable source name.
+ * @param   uSource             Clipboard source value.
+ */
+const char *ShClHlpSourceToString(uint32_t uSource);
+
+/**
+ * Converts a clipboard mode value to a printable string.
+ *
+ * @returns Printable mode name.
+ * @param   uMode               Clipboard mode value.
+ */
+const char *ShClHlpModeToString(uint32_t uMode);
+
+/**
+ * Converts a clipboard transfer state value to a printable string.
+ *
+ * @returns Printable transfer state name.
+ * @param   uState              Clipboard transfer state value.
+ */
+const char *ShClHlpTransferStateToString(uint32_t uState);
+
+/**
+ * Parses a clipboard sharing mode value.
+ *
+ * @returns true if the value was parsed successfully, false otherwise.
+ * @param   pszMode             String value to parse.
+ * @param   puMode              Where to return the parsed mode.
+ */
+bool ShClHlpModeFromString(const char *pszMode, uint32_t *puMode);
+
+/**
+ * Checks whether a MIME type represents text.
+ *
+ * @returns true if the MIME type is a text type, false otherwise.
+ * @param   pszMimeType         MIME type to check.
+ */
+bool ShClHlpIsTextMimeType(const char *pszMimeType);
+
+/**
+ * Checks whether a MIME type is UTF-8 encoded text.
+ *
+ * @returns true if the MIME type is UTF-8 text, false otherwise.
+ * @param   pszMimeType         MIME type to check.
+ */
+bool ShClHlpIsUtf8TextMimeType(const char *pszMimeType);
+
+/**
+ * Checks whether a MIME type is UTF-16 encoded text.
+ *
+ * @returns true if the MIME type is UTF-16 text, false otherwise.
+ * @param   pszMimeType         MIME type to check.
+ */
+bool ShClHlpIsUtf16TextMimeType(const char *pszMimeType);
+
+/**
+ * Checks whether clipboard data is multiline text.
+ *
+ * @returns true if the payload is text and contains more than one line.
+ * @param   pszMimeType         MIME type of the payload.
+ * @param   pbData              Payload bytes.
+ * @param   cbData              Number of payload bytes.
+ */
+bool ShClHlpIsMultilineText(const char *pszMimeType, const uint8_t *pbData, size_t cbData);
+
+/**
+ * Prints an escaped UTF-8 string to an output stream.
+ *
+ * @param   pStrm               Output stream.
+ * @param   pszText             UTF-8 text bytes.
+ * @param   cchText             Number of bytes to print.
+ */
+void ShClHlpPrintEscapedString(PRTSTREAM pStrm, const char *pszText, size_t cchText);
 
 #ifdef LOG_ENABLED
 /**

@@ -1,4 +1,4 @@
-/* $Id: MachineImpl.h 114262 2026-06-05 17:00:59Z andreas.loeffler@oracle.com $ */
+/* $Id: MachineImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Implementation of IMachine in VBoxSVC - Header.
  */
@@ -52,7 +52,7 @@
 #include "TrustedPlatformModuleImpl.h"
 #include "NvramStoreImpl.h"
 #include "GuestDebugControlImpl.h"
-#include "ClipboardImpl.h"
+#include "ClipboardSettingsImpl.h"
 #ifdef VBOX_WITH_RESOURCE_USAGE_API
 # include "Performance.h"
 # include "PerformanceImpl.h"
@@ -566,8 +566,54 @@ public:
     virtual HRESULT i_onSharedFolderChange(BOOL /* aGlobal */) { return S_OK; }
     virtual HRESULT i_onVMProcessPriorityChange(VMProcPriority_T /* aPriority */) { return S_OK; }
     virtual HRESULT i_checkClipboardSettingsChangeAllowed();
-    virtual HRESULT i_onClipboardModeChange(ClipboardMode_T /* aClipboardMode */) { return S_OK; }
-    virtual HRESULT i_onClipboardFileTransferModeChange(BOOL /* aEnable */) { return S_OK; }
+    /**
+     * Handles a clipboard mode change notification.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_onClipboardModeChange(ClipboardMode_T aClipboardMode);
+    /**
+     * Handles a clipboard file transfer mode change notification.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_onClipboardFileTransferModeChange(BOOL aEnable);
+    /**
+     * Reads clipboard data through a VM session.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_clipboardReadData(ClipboardAction_T /* aAction */, ClipboardSource_T * /* aSource */, com::Utf8Str & /* aMimeType */, std::vector<BYTE> & /* aBuffer */) { return VBOX_E_INVALID_VM_STATE; }
+    /**
+     * Reads clipboard formats through a VM session.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_clipboardReadFormats(std::vector<com::Utf8Str> & /* aFormats */) { return VBOX_E_INVALID_VM_STATE; }
+    /**
+     * Writes clipboard data through a VM session.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_clipboardWriteData(ClipboardAction_T /* aAction */, ClipboardSource_T /* aSource */, const com::Utf8Str & /* aMimeType */, const std::vector<BYTE> & /* aBuffer */, ClipboardSource_T * /* aWrittenSource */, com::Utf8Str & /* aWrittenMimeType */, std::vector<BYTE> & /* aWrittenBuffer */) { return VBOX_E_INVALID_VM_STATE; }
+    /**
+     * Writes clipboard formats through a VM session.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_clipboardWriteFormats(const std::vector<com::Utf8Str> & /* aFormats */) { return VBOX_E_INVALID_VM_STATE; }
+    /**
+     * Resets clipboard state through a VM session.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_clipboardReset() { return VBOX_E_INVALID_VM_STATE; }
+    /**
+     * Cancels a clipboard transfer through a VM session.
+     *
+     * @returns COM status code.
+     */
+    virtual HRESULT i_clipboardTransferCancel(ULONG /* aTransferId */) { return VBOX_E_INVALID_VM_STATE; }
     virtual void i_onSettingsChanged();
     virtual HRESULT i_onDnDModeChange(DnDMode_T /* aDnDMode */) { return S_OK; }
     virtual HRESULT i_onBandwidthGroupChange(IBandwidthGroup * /* aBandwidthGroup */) { return S_OK; }
@@ -842,7 +888,7 @@ protected:
     const ComObjPtr<GraphicsAdapter>   mGraphicsAdapter;
     const ComObjPtr<BandwidthControl>  mBandwidthControl;
     const ComObjPtr<GuestDebugControl> mGuestDebugControl;
-    const ComObjPtr<Clipboard>         mClipboard;
+    const ComObjPtr<ClipboardSettings> mClipboard;
 
     const ComObjPtr<TrustedPlatformModule> mTrustedPlatformModule;
     const ComObjPtr<NvramStore>            mNvramStore;
@@ -987,7 +1033,7 @@ private:
     HRESULT getSnapshotCount(ULONG *aSnapshotCount);
     HRESULT getCurrentStateModified(BOOL *aCurrentStateModified);
     HRESULT getSharedFolders(std::vector<ComPtr<ISharedFolder> > &aSharedFolders);
-    HRESULT getClipboard(ComPtr<IClipboard> &aClipboard);
+    HRESULT getClipboard(ComPtr<IClipboardSettings> &aClipboard);
     HRESULT getDnDMode(DnDMode_T *aDnDMode);
     HRESULT setDnDMode(DnDMode_T aDnDMode);
     HRESULT getTeleporterEnabled(BOOL *aTeleporterEnabled);
@@ -1401,6 +1447,16 @@ public:
     HRESULT i_onSharedFolderChange(BOOL aGlobal) RT_OVERRIDE;
     HRESULT i_onClipboardModeChange(ClipboardMode_T aClipboardMode) RT_OVERRIDE;
     HRESULT i_onClipboardFileTransferModeChange(BOOL aEnable) RT_OVERRIDE;
+    HRESULT i_clipboardReadData(ClipboardAction_T aAction, ClipboardSource_T *aSource,
+                                com::Utf8Str &aMimeType, std::vector<BYTE> &aBuffer) RT_OVERRIDE;
+    HRESULT i_clipboardReadFormats(std::vector<com::Utf8Str> &aFormats) RT_OVERRIDE;
+    HRESULT i_clipboardWriteData(ClipboardAction_T aAction, ClipboardSource_T aSource,
+                                 const com::Utf8Str &aMimeType, const std::vector<BYTE> &aBuffer,
+                                 ClipboardSource_T *aWrittenSource, com::Utf8Str &aWrittenMimeType,
+                                 std::vector<BYTE> &aWrittenBuffer) RT_OVERRIDE;
+    HRESULT i_clipboardWriteFormats(const std::vector<com::Utf8Str> &aFormats) RT_OVERRIDE;
+    HRESULT i_clipboardReset() RT_OVERRIDE;
+    HRESULT i_clipboardTransferCancel(ULONG aTransferId) RT_OVERRIDE;
     HRESULT i_onDnDModeChange(DnDMode_T aDnDMode) RT_OVERRIDE;
     HRESULT i_onBandwidthGroupChange(IBandwidthGroup *aBandwidthGroup) RT_OVERRIDE;
     HRESULT i_onStorageDeviceChange(IMediumAttachment *aMediumAttachment, BOOL aRemove, BOOL aSilent) RT_OVERRIDE;

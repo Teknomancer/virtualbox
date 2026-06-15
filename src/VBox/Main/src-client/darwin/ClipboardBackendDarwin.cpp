@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-darwin.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendDarwin.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host.
  */
@@ -41,6 +41,9 @@
 #include <iprt/thread.h>
 
 #include "darwin-pasteboard.h"
+#ifdef VBOX_COM_INPROC
+# include "../GuestShClPrivate.h"
+#endif
 
 
 /*********************************************************************************************************************************
@@ -76,6 +79,16 @@ typedef struct SHCLCONTEXT
 static SHCLCONTEXT g_ctx;
 
 
+static int shClBackendReportFormatsToGuestAndMain(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
+{
+#ifdef VBOX_COM_INPROC
+    GuestShCl *pShCl = GuestShCl::tryGetInstance();
+    if (pShCl)
+        return pShCl->reportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
+#endif
+    return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+}
+
 /**
  * Checks if something is present on the clipboard and calls shclSvcReportMsg.
  *
@@ -101,8 +114,7 @@ static int vboxClipboardChanged(SHCLCONTEXT *pCtx)
         if (   uMode == VBOX_SHCL_MODE_BIDIRECTIONAL
             || uMode == VBOX_SHCL_MODE_HOST_TO_GUEST)
         {
-            fFormats = shClSvcHandleFormats(true /* fHostToGuest */, pCtx->pClient, fFormats);
-            vrc = ShClBackendReportFormatsToGuest(pCtx->pClient->pBackend, pCtx->pClient, fFormats);
+            vrc = shClBackendReportFormatsToGuestAndMain(pCtx->pClient, fFormats);
         }
         else
             vrc = VINF_SUCCESS;
