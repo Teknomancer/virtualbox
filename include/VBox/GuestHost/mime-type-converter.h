@@ -1,4 +1,4 @@
-/* $Id: mime-type-converter.h 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
+/* $Id: mime-type-converter.h 114375 2026-06-15 20:52:45Z knut.osmundsen@oracle.com $ */
 /** @file
  * MIME type converter for Shared Clipboard and Drag-and-Drop code.
  */
@@ -142,7 +142,7 @@ VBGH_DECL(int) VbghMimeConvCacheCreate(PVBGHMIMECONVCACHE phCache);
  * Destroys mapping a table cache.
  *
  * @returns IPRT status code.
- * @param   pCache          Cache handle.
+ * @param   hCache          Cache handle.
  */
 VBGH_DECL(int) VbghMimeConvCacheDestroy(VBGHMIMECONVCACHE hCache);
 
