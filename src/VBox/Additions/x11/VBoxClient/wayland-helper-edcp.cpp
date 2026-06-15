@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114376 2026-06-15 20:53:54Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -1059,5 +1059,3 @@ const VBCLWAYLANDHELPER g_WaylandHelperEdcp =
         /* .pfnTerm = */            NULL,
     },
 };
-
-
