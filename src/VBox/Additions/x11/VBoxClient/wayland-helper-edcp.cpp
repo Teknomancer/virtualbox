@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -285,14 +285,11 @@ static SHCLFORMATS vbcl_wayland_hlp_edcp_match_formats(PRTLISTANCHOR pListHead, 
         vbox_wl_dcp_mime_t *pEntry;
         RTListForEach(pListHead, pEntry, vbox_wl_dcp_mime_t, Node)
         {
-            AssertPtrReturn(pEntry, VBOX_SHCL_FMT_NONE);
-            AssertPtrReturn(pEntry->pszMimeType, VBOX_SHCL_FMT_NONE);
+            VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->szMimeType);
 
-            VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->pszMimeType);
+            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->szMimeType, NULL /*pfFlagsAndPriority*/);
 
-            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->pszMimeType, NULL /*pfFlagsAndPriority*/);
-
-            /*int rc =*/ vbcl_wayland_hlp_edcp_receive_offer(&g_EdcpCtx, pOffer, pEntry->pszMimeType);
+            /*int rc =*/ vbcl_wayland_hlp_edcp_receive_offer(&g_EdcpCtx, pOffer, pEntry->szMimeType);
         }
     }
 

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -73,7 +73,8 @@ typedef struct
     /** IPRT list node. */
     RTLISTNODE  Node;
     /** Data mime-type in string representation. */
-    char       *pszMimeType;
+    RT_FLEXIBLE_ARRAY_EXTENSION
+    char        szMimeType[RT_FLEXIBLE_ARRAY];
 } vbox_wl_dcp_mime_t;
 
 /**

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -286,14 +286,11 @@ static SHCLFORMATS vbcl_wayland_hlp_dcp_match_formats(PRTLISTANCHOR pListHead, s
         vbox_wl_dcp_mime_t *pEntry;
         RTListForEach(pListHead, pEntry, vbox_wl_dcp_mime_t, Node)
         {
-            AssertPtrReturn(pEntry, VBOX_SHCL_FMT_NONE);
-            AssertPtrReturn(pEntry->pszMimeType, VBOX_SHCL_FMT_NONE);
+            VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->szMimeType);
 
-            VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->pszMimeType);
+            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->szMimeType, NULL /*pfFlagsAndPriority*/);
 
-            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->pszMimeType, NULL /*pfFlagsAndPriority*/);
-
-            /*rc =*/ vbcl_wayland_hlp_dcp_receive_offer(&g_DcpCtx, pOffer, pEntry->pszMimeType);
+            /*rc =*/ vbcl_wayland_hlp_dcp_receive_offer(&g_DcpCtx, pOffer, pEntry->szMimeType);
         }
     }
 

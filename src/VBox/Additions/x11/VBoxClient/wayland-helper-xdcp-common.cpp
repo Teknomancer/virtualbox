@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114373 2026-06-15 20:28:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -378,7 +378,6 @@ static void vbcl_wayland_xdcp_session_release(vbox_wl_xdcp_base_ctx_t *pCtx)
     RTListForEachSafe(&pSession->clip.mimeTypesList, pEntry, pNextEntry, vbox_wl_dcp_mime_t, Node)
     {
         RTListNodeRemove(&pEntry->Node);
-        RTStrFree(pEntry->pszMimeType);
         RTMemFree(pEntry);
     }
 
@@ -414,34 +413,36 @@ RTDECL(void) vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx)
 
 RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx)
 {
+    /*
+     * Validate input.
+     */
     AssertPtrReturn(pEnmCtx, VERR_INVALID_PARAMETER);
 
-    const char *pcszMimeType = pEnmCtx->pcszMimeType;
-    vbox_wl_dcp_session_t *pSession = pEnmCtx->pSession;
-
-    AssertPtrReturn(pcszMimeType, VERR_INVALID_PARAMETER);
+    vbox_wl_dcp_session_t * const pSession = pEnmCtx->pSession;
     AssertPtrReturn(pSession, VERR_INVALID_PARAMETER);
 
-    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(pcszMimeType, NULL /*pfFlagsAndPriority*/);
+    const char * const pcszMimeType = pEnmCtx->pcszMimeType;
+    AssertPtrReturn(pcszMimeType, VERR_INVALID_PARAMETER);
+    size_t const cchMimeType = strlen(pcszMimeType);
 
+    /*
+     * Allocate, initialize and add a new node to the MIME type list.
+     */
     int rc;
+    SHCLFORMAT uFmt = VbghMimeConvGetVBoxFormatByMime(pcszMimeType, NULL /*pfFlagsAndPriority*/);
     if (uFmt != VBOX_SHCL_FMT_NONE)
     {
-        vbox_wl_dcp_mime_t *pNode = (vbox_wl_dcp_mime_t *)RTMemAllocZ(sizeof(vbox_wl_dcp_mime_t));
+        vbox_wl_dcp_mime_t * const pNode = (vbox_wl_dcp_mime_t *)RTMemAllocZVar(RT_UOFFSETOF_DYN(vbox_wl_dcp_mime_t,
+                                                                                                 szMimeType[cchMimeType + 1]));
         if (pNode)
         {
-            VBClLogVerbose(5, "Wayland announces mime-type: %s\n", pcszMimeType);
-            pNode->pszMimeType = RTStrDup(pcszMimeType);
-            if (pNode->pszMimeType)
-            {
-                RTListAppend(&pSession->clip.mimeTypesList, &pNode->Node);
-                rc = VINF_SUCCESS;
-            }
-            else
-            {
-                RTMemFree(pNode);
-                rc = VERR_NO_MEMORY;
-            }
+            memcpy(pNode->szMimeType, pcszMimeType, cchMimeType);
+            pNode->szMimeType[cchMimeType] = '\0';
+
+            RTListAppend(&pSession->clip.mimeTypesList, &pNode->Node);
+            VBClLogVerbose(5, "Wayland announces mime-type: %s\n", pNode->szMimeType);
+
+            rc = VINF_SUCCESS;
         }
         else
             rc = VERR_NO_MEMORY;
