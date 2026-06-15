@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114358 2026-06-15 09:08:41Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -49,7 +49,6 @@ extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad (VBOXHGCMSVCFNTABLE *pt
  */
 static int tstShClBackendConnect(PSHCLBACKEND, PSHCLCLIENT, bool) { return VINF_SUCCESS; }
 static int tstShClBackendDisconnect(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
-static void tstShClBackendDestroy(PSHCLBACKEND) { return; }
 static int tstShClBackendSync(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
 static int tstShClBackendReportFormats(PSHCLBACKEND, PSHCLCLIENT, SHCLFORMATS) { AssertFailed(); return VINF_SUCCESS; }
 static int tstShClBackendReportFormatsToGuest(PSHCLBACKEND, PSHCLCLIENT, uint32_t) { AssertFailed(); return VINF_SUCCESS; }
@@ -158,7 +157,7 @@ DECLCALLBACK(int) tstHgcmMockSvcDispatcher(void *pvExtension, uint32_t u32Functi
         case VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY:
         {
             PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
-            tstShClBackendDestroy(pBackend);
+            ShClBackendDestroy(pBackend);
             rc = VINF_SUCCESS;
             break;
         }
