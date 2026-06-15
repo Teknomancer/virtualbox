@@ -1,6 +1,6 @@
-/* $Id: mime-type-converter.h 114357 2026-06-13 01:07:47Z knut.osmundsen@oracle.com $ */
+/* $Id: mime-type-converter.h 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
 /** @file
- * Mime-type converter for Shared Clipboard and Drag-and-Drop code.
+ * MIME type converter for Shared Clipboard and Drag-and-Drop code.
  */
 
 /*
@@ -64,7 +64,7 @@
  * This is called for each MIME type matching the VBox format passed to
  * VbghMimeConvEnumerateByVBoxFormat().
  *
- * @param   pcszMimeType        String representation of a mime-type.
+ * @param   pcszMimeType        String representation of a MIME type.
  * @param   fFlagsAndPriority   To be exported.
  * @param   pvUser              User data.
  */
@@ -102,7 +102,7 @@ VBGH_DECL(SHCLFORMAT) VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, 
  * @param   pvBufIn         Input buffer which contains data in VBox format.
  * @param   cbBufIn         Size of input buffer in bytes.
  * @param   ppvBufOut       Newly allocated output buffer which will contain data
- *                          in specified mime-type format (must be freed by caller).
+ *                          in specified MIME type format (must be freed by caller).
  * @param   pcbBufOut       Size of output buffer.
  */
 VBGH_DECL(int) VbghMimeConvFromVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut);
@@ -112,7 +112,7 @@ VBGH_DECL(int) VbghMimeConvFromVBox(const char *pcszMimeType, void *pvBufIn, int
  *
  * @returns IPRT status code.
  * @param   pcszMimeType    Source MIME type.
- * @param   pvBufIn         Input buffer which contains data in specified mime-type format.
+ * @param   pvBufIn         Input buffer which contains data in specified MIME type format.
  * @param   cbBufIn         Size of input buffer in bytes.
  * @param   ppvBufOut       Newly allocated output buffer which will contain image data
  *                          in VBox internal representation format (must be freed by caller).
@@ -121,78 +121,77 @@ VBGH_DECL(int) VbghMimeConvFromVBox(const char *pcszMimeType, void *pvBufIn, int
 VBGH_DECL(int) VbghMimeConvToVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut);
 
 
-/** Mime-type cache handle.
- * @todo r=bird: Coding conventions... This can be entriely opaque! */
-typedef struct vbox_mime_conv_cache_s
-{
-    /** Cache lock. */
-    RTCRITSECT  CritSect;
-    /** Number of elements in cache table. */
-    size_t      iCacheElements;
-    /** Opaque cache storage. */
-    void        *pvCache;
-} vbox_mime_conv_cache_t;
+/** MIME type cache handle.   */
+typedef struct VBGHMIMECONVCACHEINT *VBGHMIMECONVCACHE;
+/** Pointe rto a MIME type cache handle. */
+typedef VBGHMIMECONVCACHE *PVBGHMIMECONVCACHE;
+/** NIL MIME type cache handle. */
+#define NIL_VBGHMIMECONVCACHE   ((VBGHMIMECONVCACHE)NULL)
 
 /**
- * Initializes mapping table cache.
+ * Creates a mapping table cache.
  *
  * Must be called before any other VBoxMimeConvXXXCacheYYY call.
  *
  * @returns IPRT status code.
- * @param   pCache          Cache handle.
+ * @param   phCache         Where to return the cache handle on success.
  */
-VBGH_DECL(int) VBoxMimeConvInitCache(vbox_mime_conv_cache_t *pCache);
+VBGH_DECL(int) VbghMimeConvCacheCreate(PVBGHMIMECONVCACHE phCache);
 
 /**
- * Destroys mapping table cache.
+ * Destroys mapping a table cache.
  *
  * @returns IPRT status code.
  * @param   pCache          Cache handle.
  */
-VBGH_DECL(int) VBoxMimeConvDestroyCache(vbox_mime_conv_cache_t *pCache);
+VBGH_DECL(int) VbghMimeConvCacheDestroy(VBGHMIMECONVCACHE hCache);
 
 /**
- * Clears mapping table cache.
+ * Clears a mapping table cache.
  *
  * @returns IPRT status code.
- * @param   pCache          Cache handle.
+ * @param   hCache          Cache handle. NIL is ignored.
  */
-VBGH_DECL(int) VBoxMimeConvClearCache(vbox_mime_conv_cache_t *pCache);
+VBGH_DECL(int) VbghMimeConvCacheClear(VBGHMIMECONVCACHE hCache);
 
 /**
- * Adds data into cache using mime-type as a key.
+ * Adds data into cache using MIME type as a key.
  *
- * @returns VINF_SUCCESS on success, VERR_NOT_FOUND if given memi-type is unknown or IPRT error code.
- * @param   pCache          Cache handle.
- * @param   pcszMimeType    Mime-type in string representation.
- * @param   pvBuf           Input buffer which contains data in specified mime-type format.
+ * @returns IPRT status.
+ * @retval  VERR_NOT_FOUND if given MIME type is not known.
+ * @param   hCache          Cache handle.
+ * @param   pcszMimeType    MIME type in string representation.
+ * @param   pvBuf           Input buffer which contains data in specified MIME type format.
  * @param   cbBuf           Size of input buffer in bytes.
  */
-VBGH_DECL(int) VBoxMimeConvSetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void *pvBuf, int cbBuf);
+VBGH_DECL(int) VbghMimeConvCacheSetByMime(VBGHMIMECONVCACHE hCache, const char *pcszMimeType, void *pvBuf, int cbBuf);
 
 /**
- * Extracts data from cache using mime-type as a key.
+ * Extracts data from cache using MIME type as a key.
  *
- * @returns VINF_SUCCESS on success, VERR_NOT_FOUND if no cache entry corresponds to
- *          given memi-type or IPRT error code.
- * @param   pCache          Cache handle.
- * @param   pcszMimeType    Mime-type in string representation.
- * @param   ppvBufOut       Data which corresponds to given mime-type.
+ * @returns IPRT status.
+ * @retval  VERR_NOT_FOUND if given MIME type is not known or has no data
+ *          associated with it in the cache.
+ * @param   hCache          Cache handle.
+ * @param   pcszMimeType    MIME type in string representation.
+ * @param   ppvBufOut       Data which corresponds to given MIME type.
  * @param   pcbBufOut       Size of output buffer.
  */
-VBGH_DECL(int) VBoxMimeConvGetCacheByMime(vbox_mime_conv_cache_t *pCache, const char *pcszMimeType, void **ppvBufOut, size_t *pcbBufOut);
+VBGH_DECL(int) VbghMimeConvCacheGetByMime(VBGHMIMECONVCACHE hCache, const char *pcszMimeType, void **ppvBufOut, size_t *pcbBufOut);
 
 /**
  * Extracts data from cache using format ID as a key.
  *
- * @returns VINF_SUCCESS on success, VERR_NOT_FOUND if no cache entry corresponds to
- *          given memi-type or IPRT error code.
- * @param   pCache          Cache handle.
+ * @returns IPRT status.
+ * @retval  VERR_NOT_FOUND if given VBox format is not known or has no data
+ *          associated with it in the cache.
+ * @param   hCache          Cache handle.
  * @param   uFmtVBox        Format ID in VBox representation.
- * @param   ppvBufOut       Data which corresponds to given mime-type.
+ * @param   ppvBufOut       Data which corresponds to given MIME type.
  * @param   pcbBufOut       Size of output buffer.
  */
-VBGH_DECL(int) VBoxMimeConvGetCacheById(vbox_mime_conv_cache_t *pCache, const SHCLFORMAT uFmtVBox, void **ppvBufOut, size_t *pcbBufOut);
+VBGH_DECL(int) VbghMimeConvCacheGetByVBoxFormat(VBGHMIMECONVCACHE hCache, const SHCLFORMAT uFmtVBox,
+                                                void **ppvBufOut, size_t *pcbBufOut);
 
 #endif /* !VBOX_INCLUDED_GuestHost_mime_type_converter_h */
 

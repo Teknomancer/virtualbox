@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 113967 2026-04-22 09:47:12Z vadim.galitsyn@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -126,8 +126,8 @@ typedef struct
     /** Communication session between host event loop and Wayland. */
     vbox_wl_dcp_session_t                       Session;
 
-    /** Mime-types data cache. */
-    vbox_mime_conv_cache_t                      Cache;
+    /** MIME types data cache. */
+    VBGHMIMECONVCACHE                           hCache;
 
     /** When set, incoming clipboard announcements will
      *  be ignored. This flag is used in order to prevent a feedback
@@ -159,7 +159,7 @@ typedef struct
 struct vbcl_wl_dcp_write_ctx
 {
     /** Content mime-type in string representation. */
-    const char *sMimeType;
+    const char *pcszMimeType;
     /** Active file descriptor to write data into. */
     int32_t fd;
 };
@@ -168,7 +168,7 @@ struct vbcl_wl_dcp_write_ctx
 struct vbcl_wl_dcp_enumerate_ctx
 {
     /** Content mime-type in string representation. */
-    const char *sMimeType;
+    const char *pcszMimeType;
     /** Active file descriptor to write data into. */
     vbox_wl_dcp_session_t *pSession;
 };
@@ -220,9 +220,9 @@ RTDECL(void) vbcl_wayland_xdcp_reset_ctx(vbox_wl_xdcp_base_ctx_t *pCtx, bool fSh
  * @returns IPRT status code.
  * @param   fd                  File descriptor provided by Wayland to read data from.
  * @param   pCtx                Context data.
- * @param   sMimeType           Clipboard data format in string representation.
+ * @param   pcszMimeType        Clipboard data format in string representation.
  */
-RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *sMimeType);
+RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *pcszMimeType);
 
 /**
  * Write clipboard data to Wayland.
@@ -230,9 +230,9 @@ RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
  * @returns IPRT status code.
  * @param   fd                  File descriptor provided by Wayland to write data to.
  * @param   pCtx                Context data.
- * @param   sMimeType           Clipboard data format in string representation.
+ * @param   pcszMimeType        Clipboard data format in string representation.
  */
-RTDECL(int) vbcl_wayland_xdcp_set_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *sMimeType);
+RTDECL(int) vbcl_wayland_xdcp_set_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *pcszMimeType);
 
 /**
  * Read clipboard data from host and cache it.

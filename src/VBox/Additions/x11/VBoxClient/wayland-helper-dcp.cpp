@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114357 2026-06-13 01:07:47Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -196,10 +196,10 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_gh_add_fmt_cb(
  *
  * @param pvUser            Context data.
  * @param pOffer            Wayland Data Control Offer object.
- * @param sMimeType         Mime-type of newly available clipboard data.
+ * @param pcszMimeType      Mime-type of newly available clipboard data.
  */
 static void vbcl_wayland_hlp_dcp_data_control_offer_offer(
-    void *pvUser, struct zwlr_data_control_offer_v1 *pOffer, const char *sMimeType)
+    void *pvUser, struct zwlr_data_control_offer_v1 *pOffer, const char *pcszMimeType)
 {
     int rc;
 
@@ -209,10 +209,10 @@ static void vbcl_wayland_hlp_dcp_data_control_offer_offer(
 
     VBCL_LOG_CALLBACK;
 
-    AssertPtrReturnVoid(sMimeType);
+    AssertPtrReturnVoid(pcszMimeType);
 
     RT_ZERO(pEnmCtx);
-    pEnmCtx.sMimeType = sMimeType;
+    pEnmCtx.pcszMimeType = pcszMimeType;
     pEnmCtx.pSession = &pCtx->BaseCtx.Session;
 
     rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
@@ -398,7 +398,7 @@ static void vbcl_wayland_hlp_dcp_data_device_data_offer(
                                         &pCtx->BaseCtx.Session);
         if (RT_SUCCESS(rc))
         {
-            rc = VBoxMimeConvClearCache(&pCtx->BaseCtx.Cache);
+            rc = VbghMimeConvCacheClear(pCtx->BaseCtx.hCache);
             if (RT_FAILURE(rc))
                 VBClLogVerbose(5, "unable to clear clipboard cache, rc=%Rrc", rc);
 
@@ -500,12 +500,12 @@ static const struct zwlr_data_control_device_v1_listener g_data_device_listener 
  *
  * @param pvUser            VBox private data.
  * @param pDataSource       Wayland Data Control Source object.
- * @param sMimeType         A mime-type of requested data.
+ * @param pcszMimeType      A mime-type of requested data.
  * @param fd                A file descriptor to write clipboard content into.
  */
 static void vbcl_wayland_hlp_dcp_data_source_send(
     void *pvUser, struct zwlr_data_control_source_v1 *pDataSource,
-    const char *sMimeType, int32_t fd)
+    const char *pcszMimeType, int32_t fd)
 {
     int rc;
     vbox_wl_dcp_ctx_t *pCtx = (vbox_wl_dcp_ctx_t *)pvUser;
@@ -516,10 +516,10 @@ static void vbcl_wayland_hlp_dcp_data_source_send(
     VBCL_LOG_CALLBACK;
 
     AssertPtrReturnVoid(pCtx);
-    AssertPtrReturnVoid(sMimeType);
+    AssertPtrReturnVoid(pcszMimeType);
 
     RT_ZERO(priv);
-    priv.sMimeType = sMimeType;
+    priv.pcszMimeType = pcszMimeType;
     priv.fd = fd;
 
     rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
@@ -769,6 +769,8 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_probe(void)
  */
 RTDECL(int) vbcl_wayland_hlp_dcp_clip_init(void)
 {
+    g_DcpCtx.BaseCtx.hCache = NIL_VBGHMIMECONVCACHE;
+
     vbcl_wayland_hlp_dcp_reset_ctx(&g_DcpCtx, false /* fShutdown */);
     vbcl_wayland_session_init(&g_DcpCtx.BaseCtx.Session.Base);
 
@@ -846,7 +848,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report_join3_cb(
 
     if (RT_SUCCESS(rc))
     {
-        rc = vbcl_wayland_xdcp_set_guest_clipboard(pPriv->fd, &g_DcpCtx.BaseCtx, pPriv->sMimeType);
+        rc = vbcl_wayland_xdcp_set_guest_clipboard(pPriv->fd, &g_DcpCtx.BaseCtx, pPriv->pcszMimeType);
         g_DcpCtx.BaseCtx.fIngnoreWlClipIn = false;
     }
 
