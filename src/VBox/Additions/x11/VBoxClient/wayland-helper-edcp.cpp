@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114371 2026-06-15 20:02:05Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114372 2026-06-15 20:11:09Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -1044,29 +1044,25 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_gh_read(SHCLFORMAT uFmt)
     return rc;
 }
 
-static const VBCLWAYLANDHELPER_CLIPBOARD g_WaylandHelperEdcpClip =
-{
-    vbcl_wayland_hlp_edcp_clip_init,             /* .pfnInit */
-    vbcl_wayland_hlp_edcp_clip_term,             /* .pfnTerm */
-    vbcl_wayland_hlp_edcp_clip_set_ctx,          /* .pfnSetClipboardCtx */
-    vbcl_wayland_hlp_edcp_clip_popup,            /* .pfnPopup */
-    vbcl_wayland_hlp_edcp_clip_hg_report,        /* .pfnHGClipReport */
-    vbcl_wayland_hlp_edcp_clip_gh_read,          /* .pfnGHClipRead */
-};
-
-static const VBCLWAYLANDHELPER_DND g_WaylandHelperEdcpDnD =
-{
-    NULL,                                        /* .pfnInit */
-    NULL,                                        /* .pfnTerm */
-};
-
-/* Helper callbacks. */
+/** Ext data control protocol helper callbacks. */
 const VBCLWAYLANDHELPER g_WaylandHelperEdcp =
 {
-    "wayland-ext-dcp",                           /* .pszName */
-    vbcl_wayland_hlp_edcp_probe,                 /* .pfnProbe */
-/** @todo r=bird: Err. these aren't pointers, so this here is copying the above variables, which is
- * a rather roundabout and inefficient way to do this... */
-    g_WaylandHelperEdcpClip,                     /* .clip */
-    g_WaylandHelperEdcpDnD,                      /* .dnd */
+    /* .pszName  = */ "wayland-ext-dcp",
+    /* .pfnProbe = */ vbcl_wayland_hlp_edcp_probe,
+    /* .clip     = */
+    {
+        /* .pfnInit            = */ vbcl_wayland_hlp_edcp_clip_init,
+        /* .pfnTerm            = */ vbcl_wayland_hlp_edcp_clip_term,
+        /* .pfnSetClipboardCtx = */ vbcl_wayland_hlp_edcp_clip_set_ctx,
+        /* .pfnPopup           = */ vbcl_wayland_hlp_edcp_clip_popup,
+        /* .pfnHGClipReport    = */ vbcl_wayland_hlp_edcp_clip_hg_report,
+        /* .pfnGHClipRead      = */ vbcl_wayland_hlp_edcp_clip_gh_read,
+    },
+    /* .dnd      = */
+    {
+        /* .pfnInit = */            NULL,
+        /* .pfnTerm = */            NULL,
+    },
 };
+
+

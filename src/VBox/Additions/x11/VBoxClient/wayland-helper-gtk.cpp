@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114356 2026-06-13 00:14:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114372 2026-06-15 20:11:09Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -736,27 +736,23 @@ RTDECL(int) vbcl_wayland_hlp_gtk_dnd_term(void)
 }
 
 
-static const VBCLWAYLANDHELPER_CLIPBOARD g_WaylandHelperGtkClip =
-{
-    vbcl_wayland_hlp_gtk_clip_init,             /* .pfnInit */
-    vbcl_wayland_hlp_gtk_clip_term,             /* .pfnTerm */
-    vbcl_wayland_hlp_gtk_clip_set_ctx,          /* .pfnSetClipboardCtx */
-    vbcl_wayland_hlp_gtk_clip_popup,            /* .pfnPopup */
-    vbcl_wayland_hlp_gtk_clip_hg_report,        /* .pfnHGClipReport */
-    vbcl_wayland_hlp_gtk_clip_gh_read,          /* .pfnGHClipRead */
-};
-
-static const VBCLWAYLANDHELPER_DND g_WaylandHelperGtkDnD =
-{
-    vbcl_wayland_hlp_gtk_dnd_init,              /* .pfnInit */
-    vbcl_wayland_hlp_gtk_dnd_term,              /* .pfnTerm */
-};
-
-/* Helper callbacks. */
+/** GTK helper callbacks. */
 const VBCLWAYLANDHELPER g_WaylandHelperGtk =
 {
-    "wayland-gtk",                              /* .pszName */
-    vbcl_wayland_hlp_gtk_probe,                 /* .pfnProbe */
-    g_WaylandHelperGtkClip,                     /* .clip */
-    g_WaylandHelperGtkDnD,                      /* .dnd */
+    /* .pszName  = */ "wayland-gtk",
+    /* .pfnProbe = */ vbcl_wayland_hlp_gtk_probe,
+    /* .clip     = */
+    {
+        /* .pfnInit            = */ vbcl_wayland_hlp_gtk_clip_init,
+        /* .pfnTerm            = */ vbcl_wayland_hlp_gtk_clip_term,
+        /* .pfnSetClipboardCtx = */ vbcl_wayland_hlp_gtk_clip_set_ctx,
+        /* .pfnPopup           = */ vbcl_wayland_hlp_gtk_clip_popup,
+        /* .pfnHGClipReport    = */ vbcl_wayland_hlp_gtk_clip_hg_report,
+        /* .pfnGHClipRead      = */ vbcl_wayland_hlp_gtk_clip_gh_read,
+    },
+    /* .dnd      = */
+    {
+        /* .pfnInit = */            vbcl_wayland_hlp_gtk_dnd_init,
+        /* .pfnTerm = */            vbcl_wayland_hlp_gtk_dnd_term,
+    }
 };

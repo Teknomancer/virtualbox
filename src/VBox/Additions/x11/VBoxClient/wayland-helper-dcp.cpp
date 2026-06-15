@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114371 2026-06-15 20:02:05Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114372 2026-06-15 20:11:09Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -1047,27 +1047,24 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_gh_read(SHCLFORMAT uFmt)
     return rc;
 }
 
-static const VBCLWAYLANDHELPER_CLIPBOARD g_WaylandHelperDcpClip =
-{
-    vbcl_wayland_hlp_dcp_clip_init,             /* .pfnInit */
-    vbcl_wayland_hlp_dcp_clip_term,             /* .pfnTerm */
-    vbcl_wayland_hlp_dcp_clip_set_ctx,          /* .pfnSetClipboardCtx */
-    vbcl_wayland_hlp_dcp_clip_popup,            /* .pfnPopup */
-    vbcl_wayland_hlp_dcp_clip_hg_report,        /* .pfnHGClipReport */
-    vbcl_wayland_hlp_dcp_clip_gh_read,          /* .pfnGHClipRead */
-};
-
-static const VBCLWAYLANDHELPER_DND g_WaylandHelperDcpDnD =
-{
-    NULL,                                       /* .pfnInit */
-    NULL,                                       /* .pfnTerm */
-};
-
-/* Helper callbacks. */
+/** Legacy data control protocol helper callbacks. */
 const VBCLWAYLANDHELPER g_WaylandHelperDcp =
 {
-    "wayland-dcp-legacy",                       /* .pszName */
-    vbcl_wayland_hlp_dcp_probe,                 /* .pfnProbe */
-    g_WaylandHelperDcpClip,                     /* .clip */
-    g_WaylandHelperDcpDnD,                      /* .dnd */
+    /* .pszName  = */ "wayland-dcp-legacy",
+    /* .pfnProbe = */ vbcl_wayland_hlp_dcp_probe,
+    /* .clip     = */
+    {
+        /* .pfnInit            = */ vbcl_wayland_hlp_dcp_clip_init,
+        /* .pfnTerm            = */ vbcl_wayland_hlp_dcp_clip_term,
+        /* .pfnSetClipboardCtx = */ vbcl_wayland_hlp_dcp_clip_set_ctx,
+        /* .pfnPopup           = */ vbcl_wayland_hlp_dcp_clip_popup,
+        /* .pfnHGClipReport    = */ vbcl_wayland_hlp_dcp_clip_hg_report,
+        /* .pfnGHClipRead      = */ vbcl_wayland_hlp_dcp_clip_gh_read,
+    },
+    /* .dnd      = */
+    {
+        /* .pfnInit = */            NULL,
+        /* .pfnTerm = */            NULL,
+    },
+
 };
