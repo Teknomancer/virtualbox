@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114367 2026-06-15 19:55:37Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114371 2026-06-15 20:02:05Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -204,20 +204,20 @@ static void vbcl_wayland_hlp_edcp_data_control_offer_offer(
     int rc;
 
     vbox_wl_edcp_ctx_t *pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
-    struct vbcl_wl_dcp_enumerate_ctx pEnmCtx;
+    struct vbcl_wl_dcp_enumerate_ctx EnmCtx;
     RT_NOREF(pOffer);
 
     VBCL_LOG_CALLBACK;
 
     AssertPtrReturnVoid(pcszMimeType);
 
-    RT_ZERO(pEnmCtx);
-    pEnmCtx.pcszMimeType = pcszMimeType;
-    pEnmCtx.pSession = &pCtx->BaseCtx.Session;
+    RT_ZERO(EnmCtx);
+    EnmCtx.pcszMimeType = pcszMimeType;
+    EnmCtx.pSession = &pCtx->BaseCtx.Session;
 
     rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
                                    &vbcl_wayland_hlp_edcp_gh_add_fmt_cb,
-                                   (void *)&pEnmCtx);
+                                   &EnmCtx);
     if (RT_FAILURE(rc))
         VBClLogError("cannot save formats announced by the guest, rc=%Rrc\n", rc);
 }
