@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114378 2026-06-16 05:44:03Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the Shared Clipboard Host Service testcases.
 #
@@ -60,7 +60,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   tstClipboardMockHGCM_SOURCES += \
   	$(PATH_ROOT)/src/VBox/GuestHost/DisplayServerType.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
-  	$(PATH_ROOT)/src/VBox/Main/src-client/linux/ClipboardBackendLinux.cpp
+  	$(PATH_ROOT)/src/VBox/Main/src-client/linux/ClipboardBackendX11.cpp
   tstClipboardMockHGCM_LIBPATH = \
   	$(VBOX_LIBPATH_X11)
   tstClipboardMockHGCM_LIBS   += \
@@ -136,7 +136,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
  if1of ($(KBUILD_TARGET), linux solaris)
   tstClipboardServiceHost_SOURCES += \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
-  	$(PATH_ROOT)/src/VBox/Main/src-client/linux/ClipboardBackendLinux.cpp
+  	$(PATH_ROOT)/src/VBox/Main/src-client/linux/ClipboardBackendX11.cpp
   tstClipboardServiceHost_LIBPATH = \
   	$(VBOX_LIBPATH_X11)
   tstClipboardServiceHost_LIBS   += \

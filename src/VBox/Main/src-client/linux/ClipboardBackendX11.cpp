@@ -1,6 +1,6 @@
-/* $Id: ClipboardBackendLinux.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendX11.cpp 114378 2026-06-16 05:44:03Z andreas.loeffler@oracle.com $ */
 /** @file
- * Shared Clipboard Service - Linux host.
+ * Shared Clipboard Service - X11 backend.
  */
 
 /*
