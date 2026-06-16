@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-ipc.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-ipc.cpp 114397 2026-06-16 19:47:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - IPC between VBoxClient and vboxwl tool.
  */
@@ -181,7 +181,7 @@ int vbcl::ipc::packet_read(uint32_t uSessionId, RTLOCALIPCSESSION hSession, uint
             if (fCheck)
             {
                 /* Receive the rest of a message. */
-                uint8_t * const pbData = (uint8_t *)RTMemAllocZ(Packet.cbData);
+                uint8_t *pbData = (uint8_t *)RTMemAllocZ(Packet.cbData);
                 if (pbData)
                 {
                     /* Add generic header to the beginning of the output buffer
@@ -200,8 +200,7 @@ int vbcl::ipc::packet_read(uint32_t uSessionId, RTLOCALIPCSESSION hSession, uint
                         else
                             rc = VERR_NOT_EQUAL;
                     }
-                    if (pbData)
-                        RTMemFree(pbData);
+                    RTMemFree(pbData);
                 }
                 else
                 {
