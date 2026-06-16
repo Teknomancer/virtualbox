@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114312 2026-06-09 15:46:10Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114389 2026-06-16 13:56:45Z andreas.loeffler@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -881,9 +881,12 @@ DECLCALLBACK(void) vmsvgaR3PortSetViewport(PPDMIDISPLAYPORT pInterface, uint32_t
 
 # ifdef VBOX_WITH_VMSVGA3D
     /*
-     * Now inform the 3D backend.
+     * Now inform the 3D backend. During saved-state restore f3DEnabled may be
+     * restored before the backend interfaces have been reinitialized.
      */
-    if (pThis->svga.f3DEnabled)
+    if (   pThis->svga.f3DEnabled
+        && pThisCC->svga.pSvgaR3State
+        && pThisCC->svga.pSvgaR3State->pFuncs3D)
         vmsvga3dUpdateHostScreenViewport(pThisCC, idScreen, &OldViewport);
 # else
     RT_NOREF(OldViewport);
