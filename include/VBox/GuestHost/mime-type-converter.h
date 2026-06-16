@@ -1,4 +1,4 @@
-/* $Id: mime-type-converter.h 114375 2026-06-15 20:52:45Z knut.osmundsen@oracle.com $ */
+/* $Id: mime-type-converter.h 114387 2026-06-16 11:36:17Z knut.osmundsen@oracle.com $ */
 /** @file
  * MIME type converter for Shared Clipboard and Drag-and-Drop code.
  */
@@ -78,11 +78,11 @@ typedef FNVBGHMIMECONVENUM *PFNVBGHMIMECONVENUM;
  * This function goes through the list of supported MIME types and
  * triggers given callback function for each of them.
  *
- * @param   uFmtVBox        Formats bitmask in VBox representation.
+ * @param   fVBoxFmts       One or more VBOX_SHCL_FMT_XXX values ORed together.
  * @param   pfnCallback     Callback function.
  * @param   pvUser          User data.
  */
-VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormat(const SHCLFORMAT uFmtVBox, PFNVBGHMIMECONVENUM pfnCallback, void *pvUser);
+VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormats(SHCLFORMATS fVBoxFmts, PFNVBGHMIMECONVENUM pfnCallback, void *pvUser);
 
 /**
  * Find VBox format for the given MIME type.

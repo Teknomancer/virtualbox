@@ -386,10 +386,10 @@ static struct VBCONVERTERFMTTABLE
     { "image/x-MS-bmp",               VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
 };
 
-VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormat(SHCLFORMAT uFmtVBox, PFNVBGHMIMECONVENUM pfnCallback, void *pvUser)
+VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormats(SHCLFORMATS fVBoxFmts, PFNVBGHMIMECONVENUM pfnCallback, void *pvUser)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
-        if (uFmtVBox & g_aConverterFormats[i].uFmtVBox)
+        if (g_aConverterFormats[i].uFmtVBox & fVBoxFmts)
             pfnCallback(g_aConverterFormats[i].pcszMimeType, g_aConverterFormats[i].fFlagsAndPriority, pvUser);
 }
 
