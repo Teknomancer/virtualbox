@@ -1,4 +1,4 @@
-/* $Id: tstDevRss.cpp 114055 2026-04-30 15:02:49Z klaus.espenlaub@oracle.com $ */
+/* $Id: tstDevRss.cpp 114385 2026-06-16 10:40:54Z andreas.loeffler@oracle.com $ */
 /** @file
  * RSS hash unit tests.
  */
@@ -204,8 +204,8 @@ int main(int argc, char **argv)
         tstPkt6.tcp.th_sport = RT_H2N_U16(testCaseIPv6[i].uSrcPort);
 
         RTPrintf("tstDevRss: testing hash for %RTnaipv6:%u <= %RTnaipv6:%u...\n",
-                 tstPkt6.ip.ip6_dst, RT_N2H_U16(tstPkt6.tcp.th_dport),
-                 tstPkt6.ip.ip6_src, RT_N2H_U16(tstPkt6.tcp.th_sport));
+                 &tstPkt6.ip.ip6_dst, RT_N2H_U16(tstPkt6.tcp.th_dport),
+                 &tstPkt6.ip.ip6_src, RT_N2H_U16(tstPkt6.tcp.th_sport));
 
         E1kPacketInfo info;
         if (!e1kParseEthernetPacket((uint8_t*)&tstPkt6, sizeof(tstPkt6), &info))
