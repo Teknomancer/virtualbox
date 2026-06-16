@@ -1,4 +1,4 @@
-/* $Id: darwin-pasteboard.cpp 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
+/* $Id: darwin-pasteboard.cpp 114383 2026-06-16 10:23:27Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host implementation.
  */
@@ -62,29 +62,36 @@ RT_GCC_NO_WARN_DEPRECATED_BEGIN /* Much here is deprecated since 12.0 */
 /**
  * Initialize the global pasteboard and return a reference to it.
  *
- * @param pPasteboardRef Reference to the global pasteboard.
- *
- * @returns IPRT status code.
+ * @returns VBox status code.
+ * @param   pPasteboardRef 	    Reference to the global pasteboard.
  */
 DECLHIDDEN(int) initPasteboard(PasteboardRef *pPasteboardRef)
 {
-    int vrc = VINF_SUCCESS;
+    AssertPtrReturn(pPasteboardRef, VERR_INVALID_POINTER);
 
-    if (PasteboardCreate(kPasteboardClipboard, pPasteboardRef))
-        vrc = VERR_NOT_SUPPORTED;
+    *pPasteboardRef = NULL;
 
-    return vrc;
+    OSStatus orc = PasteboardCreate(kPasteboardClipboard, pPasteboardRef);
+    if (   orc == 0
+        && *pPasteboardRef != NULL)
+        return VINF_SUCCESS;
+
+    destroyPasteboard(pPasteboardRef);
+    return VERR_NOT_SUPPORTED;
 }
 
 /**
  * Release the reference to the global pasteboard.
  *
- * @param pPasteboardRef Reference to the global pasteboard.
+ * @param pPasteboardRef        Reference to the global pasteboard.
  */
 DECLHIDDEN(void) destroyPasteboard(PasteboardRef *pPasteboardRef)
 {
-    CFRelease(*pPasteboardRef);
-    *pPasteboardRef = NULL;
+    if (*pPasteboardRef != NULL)
+    {
+        CFRelease(*pPasteboardRef);
+        *pPasteboardRef = NULL;
+    }
 }
 
 /**

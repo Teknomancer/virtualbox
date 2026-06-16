@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendDarwin.cpp 114370 2026-06-15 20:00:32Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendDarwin.cpp 114383 2026-06-16 10:23:27Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host.
  */
@@ -35,6 +35,7 @@
 
 #include <iprt/assert.h>
 #include <iprt/asm.h>
+#include <iprt/critsect.h>
 #include <iprt/process.h>
 #include <iprt/rand.h>
 #include <iprt/string.h>
@@ -165,7 +166,11 @@ int ShClBackendInit(PSHCLBACKEND pBackend, VBOXHGCMSVCFNTABLE *pTable)
     AssertRCReturn(vrc, vrc);
 
     vrc = initPasteboard(&g_ctx.hPasteboard);
-    AssertRCReturn(vrc, vrc);
+    if (RT_FAILURE(vrc))
+    {
+        RTCritSectDelete(&g_ctx.CritSect);
+        return vrc;
+    }
 
     pBackend->pHelpers = pTable->pHelpers;
 
@@ -189,18 +194,23 @@ void ShClBackendDestroy(PSHCLBACKEND pBackend)
      * Signal the termination of the polling thread and wait for it to respond.
      */
     ASMAtomicWriteBool(&g_ctx.fTerminate, true);
-    int vrc = RTThreadUserSignal(g_ctx.hThread);
-    AssertRC(vrc);
-    vrc = RTThreadWait(g_ctx.hThread, RT_INDEFINITE_WAIT, NULL);
-    AssertRC(vrc);
+    if (g_ctx.hThread != NIL_RTTHREAD)
+    {
+        int vrc = RTThreadUserSignal(g_ctx.hThread);
+        AssertRC(vrc);
+        vrc = RTThreadWait(g_ctx.hThread, RT_INDEFINITE_WAIT, NULL);
+        AssertRC(vrc);
+        g_ctx.hThread = NIL_RTTHREAD;
+    }
 
     /*
      * Destroy the hPasteboard and uninitialize the global context record.
      */
     destroyPasteboard(&g_ctx.hPasteboard);
-    g_ctx.hThread = NIL_RTTHREAD;
     g_ctx.pClient = NULL;
-    RTCritSectDelete(&g_ctx.CritSect);
+
+    if (RTCritSectIsInitialized(&g_ctx.CritSect))
+        RTCritSectDelete(&g_ctx.CritSect);
 }
 
 int ShClBackendConnect(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, bool fHeadless)
