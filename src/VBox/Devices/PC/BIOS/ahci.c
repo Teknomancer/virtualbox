@@ -1,4 +1,4 @@
-/* $Id: ahci.c 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: ahci.c 114382 2026-06-16 09:26:55Z michal.necasek@oracle.com $ */
 /** @file
  * AHCI host adapter driver to boot from SATA disks.
  */
@@ -27,12 +27,33 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <stddef.h>
 #include "biosint.h"
 #include "ebda.h"
 #include "inlines.h"
 #include "pciutil.h"
 #include "vds.h"
 
+/*
+ * Note: In theory, VDS should be used for the AHCI command area. In practice,
+ * the command area never moves and VDS isn't needed, or at least there is no
+ * known environment where VDS would be required for the command area.
+ *
+ * Because the command area requires 1K alignment, it is not part of the EBDA
+ * (which may only be paragraph aligned) and is instead allocated by reducing
+ * the conventional memory size. Hence software does not attempt to move it
+ * around.
+ *
+ * NB: Windows 3.0 appears to have a bug which is triggered by using EMM386
+ * in default configuration. For unknown reasons, when 386 Enhanced mode Windows
+ * 3.0 switches to its own page tables, the last page of conventional memory
+ * (9C000h linear) is not mapped at all. That causes Windows to crash when
+ * INT 13h tries to access the AHCI structure in memory (usually at 639K).
+ * Using the NOMOVEXBDA parameter for EMM386 works around the problem.
+ */
+
+//#define USE_VDS_FOR_CMD
+//#define DEBUG_AHCI 1
 #if DEBUG_AHCI
 # define DBG_AHCI(...)        BX_INFO(__VA_ARGS__)
 #else
@@ -118,6 +139,10 @@ typedef struct
     uint8_t         cur_prd;
     /** Saved high bits of EAX. */
     uint16_t        saved_eax_hi;
+#ifdef USE_VDS_FOR_CMD
+    /** VDS EDDS descriptor for the AHCI command structure. */
+    vds_edds        edds_cmd;
+#endif
     /** VDS EDDS DMA buffer descriptor structure. */
     vds_edds        edds;
     vds_sg          edds_more_sg[NUM_EDDS_SG - 1];
@@ -289,6 +314,22 @@ static uint16_t ahci_ctrl_extract_bits(uint32_t val, uint32_t mask, uint8_t shif
     return (val & mask) >> shift;
 }
 
+#ifdef USE_VDS_FOR_CMD
+
+void critsect_enter( void );
+#pragma aux critsect_enter = \
+    "mov    ax, 1681h"      \
+    "int    2Fh"            \
+    modify [ax];
+
+void critsect_leave( void );
+#pragma aux critsect_leave = \
+    "mov    ax, 1682h"      \
+    "int    2Fh"            \
+    modify [ax];
+
+#else
+
 /**
  * Converts a segment:offset pair into a 32bit physical address.
  */
@@ -296,6 +337,8 @@ static uint32_t ahci_addr_to_phys(void __far *ptr)
 {
     return ((uint32_t)FP_SEG(ptr) << 4) + FP_OFF(ptr);
 }
+
+#endif
 
 /**
  * Issues a command to the SATA controller and waits for completion.
@@ -313,7 +356,11 @@ static void ahci_port_cmd_sync(ahci_t __far *ahci, uint8_t val)
         /* Prepare the command header. */
         ahci->aCmdHdr[0] = ((uint32_t)ahci->cur_prd << 16) | RT_BIT_32(7) | val;
         ahci->aCmdHdr[1] = 0;
+#ifdef USE_VDS_FOR_CMD
+        ahci->aCmdHdr[2] = ahci->edds_cmd.u.sg[0].phys_addr + offsetof(ahci_t, abCmd[0]);
+#else
         ahci->aCmdHdr[2] = ahci_addr_to_phys(&ahci->abCmd[0]);
+#endif
 
         /* Enable Command and FIS receive engine. */
         ahci_ctrl_set_bits(io_base, AHCI_PORT_REG(port, AHCI_REG_PORT_CMD),
@@ -435,8 +482,10 @@ static void ahci_port_deinit_current(ahci_t __far *ahci)
     if (port != 0xff)
     {
         /* Put the port into an idle state. */
+        DBG_AHCI("AHCI: pre-clear\n");
         ahci_ctrl_clear_bits(io_base, AHCI_PORT_REG(port, AHCI_REG_PORT_CMD),
                              AHCI_REG_PORT_CMD_FRE | AHCI_REG_PORT_CMD_ST);
+        DBG_AHCI("AHCI: post-clear\n");
 
         while (ahci_ctrl_is_bit_set(io_base, AHCI_PORT_REG(port, AHCI_REG_PORT_CMD),
                                     AHCI_REG_PORT_CMD_FRE | AHCI_REG_PORT_CMD_ST | AHCI_REG_PORT_CMD_FR | AHCI_REG_PORT_CMD_CR) == 1)
@@ -472,6 +521,7 @@ static void ahci_port_deinit_current(ahci_t __far *ahci)
  */
 static void ahci_port_init(ahci_t __far *ahci, uint8_t u8Port)
 {
+    DBG_AHCI("AHCI: ahci_port_init()\n");
     /* Deinit any other port first. */
     ahci_port_deinit_current(ahci);
 
@@ -494,13 +544,26 @@ static void ahci_port_init(ahci_t __far *ahci, uint8_t u8Port)
     _fmemset(&ahci->abCmd[0], 0, sizeof(ahci->abCmd));
     _fmemset(&ahci->abFisRecv[0], 0, sizeof(ahci->abFisRecv));
 
+#ifdef USE_VDS_FOR_CMD
     DBG_AHCI("AHCI: FIS receive area %lx from %x:%x\n",
-             ahci_addr_to_phys(&ahci->abFisRecv), FP_SEG(&ahci->abFisRecv), FP_OFF(&ahci->abFisRecv));
+             ahci->edds_cmd.u.sg[0].phys_addr + offsetof(ahci_t, abFisRecv),
+             FP_SEG(&ahci->abFisRecv), FP_OFF(&ahci->abFisRecv));
+    VBOXAHCI_PORT_WRITE_REG(ahci->iobase, u8Port, AHCI_REG_PORT_FB, ahci->edds_cmd.u.sg[0].phys_addr + offsetof(ahci_t, abFisRecv));
+#else
+    DBG_AHCI("AHCI: FIS receive area %lx from %x:%x\n",
+             ahci_addr_to_phys(&ahci->abFisRecv),
+             FP_SEG(&ahci->abFisRecv), FP_OFF(&ahci->abFisRecv));
     VBOXAHCI_PORT_WRITE_REG(ahci->iobase, u8Port, AHCI_REG_PORT_FB, ahci_addr_to_phys(&ahci->abFisRecv));
+#endif
     VBOXAHCI_PORT_WRITE_REG(ahci->iobase, u8Port, AHCI_REG_PORT_FBU, 0);
 
+#ifdef USE_VDS_FOR_CMD
+    DBG_AHCI("AHCI: CMD list area %lx\n", ahci->edds_cmd.u.sg[0].phys_addr + offsetof(ahci_t, aCmdHdr));
+    VBOXAHCI_PORT_WRITE_REG(ahci->iobase, u8Port, AHCI_REG_PORT_CLB, ahci->edds_cmd.u.sg[0].phys_addr + offsetof(ahci_t, aCmdHdr));
+#else
     DBG_AHCI("AHCI: CMD list area %lx\n", ahci_addr_to_phys(&ahci->aCmdHdr));
     VBOXAHCI_PORT_WRITE_REG(ahci->iobase, u8Port, AHCI_REG_PORT_CLB, ahci_addr_to_phys(&ahci->aCmdHdr));
+#endif
     VBOXAHCI_PORT_WRITE_REG(ahci->iobase, u8Port, AHCI_REG_PORT_CLBU, 0);
 
     /* Disable all interrupts. */
@@ -511,6 +574,33 @@ static void ahci_port_init(ahci_t __far *ahci, uint8_t u8Port)
 
     ahci->cur_port = u8Port;
     ahci->cur_prd  = 0;
+}
+
+/**
+ * Lock down the AHCI command structure before processing any I/O.
+ */
+static void ahci_cmd_lock(ahci_t __far *ahci)
+{
+#ifdef USE_VDS_FOR_CMD
+    /* Use VDS to lock the command structure. It may happen that it gets remapped
+     * to memory where real:physical mapping is not 1:1.
+     */
+    DBG_AHCI("AHCI: Locking command area via VDS (%u bytes at %x:%x)\n", sizeof(ahci_t), FP_SEG(&ahci->aCmdHdr), FP_OFF(&ahci->aCmdHdr));
+    ahci->edds_cmd.num_avail = 1;
+    vds_build_sg_list(&ahci->edds_cmd, &ahci->aCmdHdr, sizeof(ahci_t));
+    DBG_AHCI("AHCI: Command area at phys %lx\n", ahci->edds_cmd.u.sg[0].phys_addr);
+#endif
+}
+
+/**
+ * Free up any locks or resources tied to the AHCI commands structure.
+ */
+static void ahci_cmd_unlock(ahci_t __far *ahci)
+{
+#ifdef USE_VDS_FOR_CMD
+    /* Use VDS to unlock the command structure again. */
+    vds_free_sg_list(&ahci->edds_cmd);
+#endif
 }
 
 /**
@@ -533,9 +623,11 @@ int ahci_read_sectors(bio_dsk_t __far *bios_dsk)
              bios_dsk->drqp.nsect, bios_dsk->drqp.lba,
              device_id, bios_dsk->ahcidev[device_id].port);
 
+    ahci_cmd_lock(bios_dsk->ahci_seg :> 0);
     high_bits_save(bios_dsk->ahci_seg :> 0);
     ahci_port_init(bios_dsk->ahci_seg :> 0, bios_dsk->ahcidev[device_id].port);
     rc = ahci_cmd_data(bios_dsk, AHCI_CMD_READ_DMA_EXT);
+    ahci_cmd_unlock(bios_dsk->ahci_seg :> 0);
     DBG_AHCI("%s: transferred %lu bytes\n", __func__, ((ahci_t __far *)(bios_dsk->ahci_seg :> 0))->aCmdHdr[1]);
     bios_dsk->drqp.trsfsectors = bios_dsk->drqp.nsect;
     high_bits_restore(bios_dsk->ahci_seg :> 0);
@@ -562,9 +654,11 @@ int ahci_write_sectors(bio_dsk_t __far *bios_dsk)
              bios_dsk->drqp.nsect, bios_dsk->drqp.lba, device_id,
              bios_dsk->ahcidev[device_id].port);
 
+    ahci_cmd_lock(bios_dsk->ahci_seg :> 0);
     high_bits_save(bios_dsk->ahci_seg :> 0);
     ahci_port_init(bios_dsk->ahci_seg :> 0, bios_dsk->ahcidev[device_id].port);
     rc = ahci_cmd_data(bios_dsk, AHCI_CMD_WRITE_DMA_EXT);
+    ahci_cmd_unlock(bios_dsk->ahci_seg :> 0);
     DBG_AHCI("%s: transferred %lu bytes\n", __func__, ((ahci_t __far *)(bios_dsk->ahci_seg :> 0))->aCmdHdr[1]);
     bios_dsk->drqp.trsfsectors = bios_dsk->drqp.nsect;
     high_bits_restore(bios_dsk->ahci_seg :> 0);
@@ -602,6 +696,7 @@ uint16_t ahci_cmd_packet(uint16_t device_id, uint8_t cmdlen, char __far *cmdbuf,
 //    bios_dsk->drqp.sect_sz = 2048;
 
     ahci = bios_dsk->ahci_seg :> 0;
+    ahci_cmd_lock(ahci);
     high_bits_save(ahci);
 
     ahci_port_init(bios_dsk->ahci_seg :> 0, bios_dsk->ahcidev[device_id].port);
@@ -615,6 +710,7 @@ uint16_t ahci_cmd_packet(uint16_t device_id, uint8_t cmdlen, char __far *cmdbuf,
     bios_dsk->drqp.trsfbytes   = 0;
 
     ahci_cmd_data(bios_dsk, ATA_CMD_PACKET);
+    ahci_cmd_unlock(bios_dsk->ahci_seg :> 0);
     DBG_AHCI("%s: transferred %lu bytes\n", __func__, ahci->aCmdHdr[1]);
     bios_dsk->drqp.trsfbytes = ahci->aCmdHdr[1];
     high_bits_restore(ahci);
@@ -630,6 +726,7 @@ void ahci_port_detect_device(ahci_t __far *ahci, uint8_t u8Port)
     uint32_t                end_tick;
     int                     device_found = 0;
 
+    ahci_cmd_lock(ahci);
     ahci_port_init(ahci, u8Port);
 
     bios_dsk = read_word(0x0040, 0x000E) :> &EbdaData->bdisk;
@@ -665,6 +762,7 @@ void ahci_port_detect_device(ahci_t __far *ahci, uint8_t u8Port)
     /* Timed out, no device detected. */
     if (!device_found) {
         DBG_AHCI("AHCI: Timed out, no device detected on port %d\n", u8Port);
+        ahci_cmd_unlock(bios_dsk->ahci_seg :> 0);
         return;
     }
 
@@ -816,6 +914,8 @@ void ahci_port_detect_device(ahci_t __far *ahci, uint8_t u8Port)
         else
             DBG_AHCI("AHCI: Reached maximum device count, skipping\n");
     }
+
+    ahci_cmd_unlock(bios_dsk->ahci_seg :> 0);
 }
 
 /**
