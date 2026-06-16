@@ -1,4 +1,4 @@
-/* $Id: darwin-pasteboard.cpp 114383 2026-06-16 10:23:27Z andreas.loeffler@oracle.com $ */
+/* $Id: darwin-pasteboard.cpp 114386 2026-06-16 10:43:08Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host implementation.
  */
@@ -63,7 +63,7 @@ RT_GCC_NO_WARN_DEPRECATED_BEGIN /* Much here is deprecated since 12.0 */
  * Initialize the global pasteboard and return a reference to it.
  *
  * @returns VBox status code.
- * @param   pPasteboardRef 	    Reference to the global pasteboard.
+ * @param   pPasteboardRef          Reference to the global pasteboard.
  */
 DECLHIDDEN(int) initPasteboard(PasteboardRef *pPasteboardRef)
 {
