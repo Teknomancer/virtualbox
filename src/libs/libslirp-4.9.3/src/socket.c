@@ -989,6 +989,21 @@ static bool sotranslate_out4(Slirp *s, struct socket *so, struct sockaddr_in *si
     }
 
 #ifdef VBOX
+    /*
+     * Provide compatibility with older VBox versions and/or guest setups:
+     *
+     * Before switching from lwIP (< 7.2) to libslirp the provided gateway address (i.e. 10.0.2.1)
+     * also accepted DNS requests at port 53. However, by default libslirp provides an
+     * own DNS proxy (i.e. 10.0.2.3) and thus does not process DNS requests by the gateway by default.
+     * So restore that behavior to make older guests and guests with static IP
+     * setups work again.  See github:gh-447
+     */
+    if (   !s->disable_dns
+        && so->so_faddr.s_addr == s->vhost_addr.s_addr
+        && so->so_fport        == htons(53)
+        && get_dns_addr(&sin->sin_addr, &sin->sin_port) >= 0)
+        return true;
+
     /* check for loopback map and correct if needed */
     if (s->mLoopbackMap
         && (so->so_faddr.s_addr & s->vnetwork_mask.s_addr) == s->vnetwork_addr.s_addr
@@ -1043,6 +1058,24 @@ static bool sotranslate_out6(Slirp *s, struct socket *so, struct sockaddr_in6 *s
         }
         return false;
     }
+
+#ifdef VBOX
+    /*
+     * Provide compatibility with older VBox versions and/or guest setups.
+     * See comment in sotranslate_out4().
+     */
+    if (   !s->disable_dns
+        && in6_equal(&so->so_faddr6, &s->vhost_addr6)
+        && so->so_fport == htons(53))
+    {
+        uint32_t scope_id;
+        if (get_dns6_addr(&sin->sin6_addr, &sin->sin6_port, &scope_id) >= 0)
+        {
+            sin->sin6_scope_id = scope_id;
+            return true;
+        }
+    }
+#endif
 
     if (in6_equal_net(&so->so_faddr6, &s->vprefix_addr6, s->vprefix_len) ||
         in6_equal(&so->so_faddr6, &(struct in6_addr)ALLNODES_MULTICAST)) {
@@ -1100,6 +1133,21 @@ void sotranslate_in(struct socket *so, struct sockaddr_storage *addr)
             }
         }
 
+#ifdef VBOX
+       /*
+        * Provide compatibility with older VBox versions and/or guest setups.
+        * See comment in sotranslate_out4().
+        */
+        if (   !slirp->disable_dns
+            && so->so_faddr.s_addr == slirp->vhost_addr.s_addr
+            && so->so_fport == htons(53))
+        {
+            sin->sin_addr = slirp->vhost_addr;
+            sin->sin_port = htons(53);
+            break;
+        }
+#endif
+
         struct in_addr sin_addr;
         if (get_dns_addr(&sin_addr, &dns_port) >= 0 &&
                 sin->sin_port == dns_port &&
@@ -1116,6 +1164,21 @@ void sotranslate_in(struct socket *so, struct sockaddr_storage *addr)
                 sin6->sin6_addr = so->so_faddr6;
             }
         }
+
+#ifdef VBOX
+        /*
+         * Provide compatibility with older VBox versions and/or guest setups.
+         * See comment in sotranslate_out4().
+         */
+        if (   !slirp->disable_dns
+            && in6_equal(&so->so_faddr6, &slirp->vhost_addr6)
+            && so->so_fport == htons(53))
+        {
+            sin6->sin6_addr = slirp->vhost_addr6;
+            sin6->sin6_port = htons(53);
+            break;
+        }
+#endif
 
         struct in6_addr sin6_addr;
         uint32_t scope_id;
