@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the Cross Platform Guest Addition Services.
 #
@@ -127,7 +127,8 @@ ifdef VBOX_WITH_VBOXSERVICE_CLIPBOARD
  VBoxService_DEFS.os2    += VBOX_WITH_VBOXSERVICE_CLIPBOARD VBOX_WITH_SHARED_CLIPBOARD
  VBoxService_SOURCES.os2 += \
  	VBoxServiceClipboard-os2.cpp \
- 	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp
+ 	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
+ 	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp
 endif
 
 ifdef VBOX_WITH_VBOXSERVICE_TOOLBOX

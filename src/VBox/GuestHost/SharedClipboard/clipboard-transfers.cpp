@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114349 2026-06-12 15:11:30Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -1974,7 +1974,7 @@ int ShClTransferRootsSetFromStringListUnicode(PSHCLTRANSFER pTransfer, PRTUTF16 
 
     /* This may slightly overestimate the space needed. */
     size_t chDst = 0;
-    int rc = ShClUtf16LenUtf8(pwszRoots, cwcRoots, &chDst);
+    int rc = ShClHlpUtf16LenUtf8(pwszRoots, cwcRoots, &chDst);
     if (RT_SUCCESS(rc))
     {
         chDst++; /* Add space for terminator. */
@@ -1983,7 +1983,7 @@ int ShClTransferRootsSetFromStringListUnicode(PSHCLTRANSFER pTransfer, PRTUTF16 
         if (pszDst)
         {
             size_t cbActual = 0;
-            rc = ShClConvUtf16CRLFToUtf8LF(pwszRoots, cwcRoots, pszDst, chDst, &cbActual);
+            rc = ShClHlpConvUtf16CRLFToUtf8LF(pwszRoots, cwcRoots, pszDst, chDst, &cbActual);
             if (RT_SUCCESS(rc))
                 rc = ShClTransferRootsSetFromStringList(pTransfer, pszDst, cbActual + 1 /* Include terminator */);
 

@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114317 2026-06-09 16:27:58Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the VirtualBox Guest Addition X11 Client.
 #
@@ -192,6 +192,7 @@ ifdef VBOX_WITH_SHARED_CLIPBOARD
  VBoxClient_DEFS     += VBOX_WITH_SHARED_CLIPBOARD
  VBoxClient_SOURCES  += \
  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
+ 	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp \
  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
  	clipboard.cpp \
  	clipboard-common.cpp \
@@ -285,6 +286,7 @@ ifdef VBOX_WITH_WAYLAND_ADDITIONS
  	wayland-helper-ipc.cpp \
  	wayland-helper.cpp \
  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
+ 	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp \
  	$(PATH_ROOT)/src/VBox/GuestHost/common/mime-type-converter.cpp
  vboxwl_SOURCES += $(VBOX_GH_SOURCES)
 

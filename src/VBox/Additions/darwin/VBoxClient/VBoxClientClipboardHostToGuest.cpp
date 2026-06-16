@@ -1,4 +1,4 @@
-/** $Id: VBoxClientClipboardHostToGuest.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/** $Id: VBoxClientClipboardHostToGuest.cpp 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxClient - Shared Clipboard Host -> Guest copying, Darwin.
  */
@@ -176,7 +176,7 @@ static int vbclClipboardGuestPasteText(PasteboardRef pPasteboard, void *pData, u
 
     /* Convert END-OF-LINE */
     size_t cwcDst;
-    int rc = ShClUtf16CRLFLenUtf8((RTUTF16 *)pData, cbDataSize / sizeof(RTUTF16), &cwcDst);
+    int rc = ShClHlpUtf16CRLFLenUtf8((RTUTF16 *)pData, cbDataSize / sizeof(RTUTF16), &cwcDst);
     AssertRCReturn(rc, rc);
 
     cwcDst++; /* Add space for terminator. */
@@ -184,7 +184,7 @@ static int vbclClipboardGuestPasteText(PasteboardRef pPasteboard, void *pData, u
     PRTUTF16 pwszDst = (RTUTF16 *)RTMemAlloc(cwcDst * sizeof(RTUTF16));
     AssertPtrReturn(pwszDst, VERR_NO_MEMORY);
 
-    rc = ShClConvUtf16CRLFToLF((RTUTF16 *)pData, cbDataSize / sizeof(RTUTF16), pwszDst, cwcDst);
+    rc = ShClHlpConvUtf16CRLFToLF((RTUTF16 *)pData, cbDataSize / sizeof(RTUTF16), pwszDst, cwcDst);
     if (RT_SUCCESS(rc))
     {
         /* Paste UTF16 */
@@ -227,7 +227,7 @@ static int vbclClipboardGuestPastePicture(PasteboardRef pPasteboard, void *pData
     /* Skip zero-sized buffer */
     AssertReturn(cbDataSize > 0, VINF_SUCCESS);
 
-    rc = ShClDibToBmp(pData, cbDataSize, &pBmp, &cbBmpSize);
+    rc = ShClHlpDibToBmp(pData, cbDataSize, &pBmp, &cbBmpSize);
     AssertReturn(RT_SUCCESS(rc), rc);
 
     rc = vbclClipboardGuestPasteData(pPasteboard, (UInt8 *)pBmp, cbBmpSize, kUTTypeBMP, true);

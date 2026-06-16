@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114378 2026-06-16 05:44:03Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1301,7 +1301,8 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   VBoxC_SOURCES += \
   	src-client/GuestShClPrivate.cpp \
   	src-client/VBoxSharedClipboardSvc-utils.cpp \
-  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp
   if1of ($(KBUILD_TARGET), linux solaris freebsd)
    VBoxC_SOURCES += \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \

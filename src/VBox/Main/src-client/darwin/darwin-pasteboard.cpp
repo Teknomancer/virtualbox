@@ -1,4 +1,4 @@
-/* $Id: darwin-pasteboard.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: darwin-pasteboard.cpp 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host implementation.
  */
@@ -312,7 +312,7 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
                  */
                 Assert(cwcSrc == RTUtf16Len(pwszSrc));
                 size_t cwcDst = 0;
-                vrc = ShClUtf16CalcNormalizedEolToCRLFLength(pwszSrc, cwcSrc, &cwcDst);
+                vrc = ShClHlpUtf16CalcNormalizedEolToCRLFLength(pwszSrc, cwcSrc, &cwcDst);
                 if (RT_SUCCESS(vrc))
                 {
                     cwcDst++; /* Add space for terminator. */
@@ -320,7 +320,7 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
                     *pcbActual = cwcDst * sizeof(RTUTF16);
                     if (*pcbActual <= cb)
                     {
-                        vrc = ShClConvUtf16LFToCRLF(pwszSrc, cwcSrc, (PRTUTF16)pv, cb / sizeof(RTUTF16));
+                        vrc = ShClHlpConvUtf16LFToCRLF(pwszSrc, cwcSrc, (PRTUTF16)pv, cb / sizeof(RTUTF16));
                         if (RT_SUCCESS(vrc))
                         {
 #ifdef SHOW_CLIPBOARD_CONTENT
@@ -329,7 +329,7 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
                         }
                         else
                         {
-                            Log(("readFromPasteboard: ShClUtf16LinToWin failed - %Rrc!\n", vrc));
+                            Log(("readFromPasteboard: ShClHlpConvUtf16LFToCRLF failed - %Rrc!\n", vrc));
                             AssertRC(vrc);
                         }
                     }
@@ -341,7 +341,7 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
                 }
                 else
                 {
-                    Log(("readFromPasteboard: ShClUtf16GetWinSize failed - %Rrc!\n", vrc));
+                    Log(("readFromPasteboard: ShClHlpUtf16CalcNormalizedEolToCRLFLength failed - %Rrc!\n", vrc));
                     AssertRC(vrc);
                 }
                 RTUtf16Free(pwszSrcFree);
@@ -366,7 +366,7 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
                      */
                     const void *pvDib;
                     size_t      cbDib;
-                    vrc = ShClBmpGetDib(pvSrc, cbDataCopy, &pvDib, &cbDib);
+                    vrc = ShClHlpBmpGetDib(pvSrc, cbDataCopy, &pvDib, &cbDib);
                     if (RT_SUCCESS(vrc))
                     {
                         *pcbActual = cbDib;
@@ -384,7 +384,7 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
                     else
                     {
                         AssertRC(vrc);
-                        Log(("readFromPasteboard: ShClBmpGetDib failed - %Rrc - unknown bitmap format??\n", vrc));
+                        Log(("readFromPasteboard: ShClHlpBmpGetDib failed - %Rrc - unknown bitmap format??\n", vrc));
                         vrc = VERR_NOT_SUPPORTED;
                     }
                 }
@@ -569,8 +569,8 @@ DECLHIDDEN(int) writeToPasteboard(PasteboardRef hPasteboard, uint64_t idOwnershi
 
         /* How long will the converted text be? */
         size_t cwcDst = 0;
-        vrc = ShClUtf16CRLFLenUtf8(pwszSrc, cwcSrc, &cwcDst);
-        AssertMsgRCReturn(vrc, ("ShClUtf16GetLinSize failed: %Rrc\n", vrc), vrc);
+        vrc = ShClHlpUtf16CRLFLenUtf8(pwszSrc, cwcSrc, &cwcDst);
+        AssertMsgRCReturn(vrc, ("ShClHlpUtf16CRLFLenUtf8 failed: %Rrc\n", vrc), vrc);
 
         /* Ignore empty strings? */ /** @todo r=andy Really? Why? */
         if (cwcDst == 0)
@@ -585,7 +585,7 @@ DECLHIDDEN(int) writeToPasteboard(PasteboardRef hPasteboard, uint64_t idOwnershi
         PRTUTF16 pwszDst = (PRTUTF16)RTMemAlloc(cwcDst * sizeof(RTUTF16));
         AssertMsgReturn(pwszDst, ("cwcDst=%#zx\n", cwcDst), VERR_NO_UTF16_MEMORY);
 
-        vrc = ShClConvUtf16CRLFToLF(pwszSrc, cwcSrc, pwszDst, cwcDst);
+        vrc = ShClHlpConvUtf16CRLFToLF(pwszSrc, cwcSrc, pwszDst, cwcDst);
         if (RT_SUCCESS(vrc))
         {
             /*
@@ -654,7 +654,7 @@ DECLHIDDEN(int) writeToPasteboard(PasteboardRef hPasteboard, uint64_t idOwnershi
         /* Create a full BMP from it */
         void  *pvBmp;
         size_t cbBmp;
-        vrc = ShClDibToBmp(pv, cb, &pvBmp, &cbBmp);
+        vrc = ShClHlpDibToBmp(pv, cb, &pvBmp, &cbBmp);
         if (RT_SUCCESS(vrc))
         {
             hData = CFDataCreate(kCFAllocatorDefault, (UInt8 const *)pvBmp, cbBmp);

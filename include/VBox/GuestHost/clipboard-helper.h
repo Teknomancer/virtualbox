@@ -1,6 +1,6 @@
-/* $Id: clipboard-helper.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-helper.h 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
 /** @file
- * Shared Clipboard - Some helper function for converting between the various EOLs.
+ * Shared Clipboard - Helper functions.
  */
 
 /*
@@ -74,7 +74,7 @@ enum
  * @param   pchLen              Where to return the length (in UTF-8 characters).
  *                              Does not include terminator.
  */
-int ShClUtf16CalcNormalizedEolToCRLFLength(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
+int ShClHlpUtf16CalcNormalizedEolToCRLFLength(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
 
 /**
  * Returns the length (in UTF-8 characters) of an UTF-16 string with CRLF EOL.
@@ -85,7 +85,7 @@ int ShClUtf16CalcNormalizedEolToCRLFLength(PCRTUTF16 pcwszSrc, size_t cwcSrc, si
  * @param   pchLen              Where to return the length (in UTF-8 characters).
  *                              Does not include terminator.
  */
-int ShClUtf16CRLFLenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
+int ShClHlpUtf16CRLFLenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
 
 /**
  * Returns the length (in characters) of an UTF-16 string, including terminator.
@@ -96,7 +96,7 @@ int ShClUtf16CRLFLenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
  * @param  pchLen               Where to return the length (in UTF-8 characters).
  *                              Does not include terminator.
  */
-int ShClUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
+int ShClHlpUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
 
 /**
  * Converts an UTF-16 string with LF EOL to an UTF-16 string with CRLF EOL.
@@ -107,7 +107,7 @@ int ShClUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
  * @param   pwszDst             Buffer to store the converted string to.
  * @param   cwcDst              The size of \a pwszDst in RTUTF16 units.
  */
-int ShClConvUtf16LFToCRLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, size_t cwcDst);
+int ShClHlpConvUtf16LFToCRLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, size_t cwcDst);
 
 /**
  * Converts an UTF-16 string with LF EOL to an UTF-16 string with CRLF EOL.
@@ -121,7 +121,7 @@ int ShClConvUtf16LFToCRLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, s
  * @param   pcwDst              Where to return the size of the converted string in RTUTF16 units.
  *                              Does not include the terminator.
  */
-int ShClConvUtf16LFToCRLFA(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
+int ShClHlpConvUtf16LFToCRLFA(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
 
 /**
  * Converts an UTF-16 string with CRLF EOL to an UTF-16 string with LF EOL.
@@ -132,7 +132,7 @@ int ShClConvUtf16LFToCRLFA(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 *ppwszDst
  * @param   pwszDst             Where to store the converted string to.
  * @param   cwcDst              The size of \a pwszDst in RTUTF16 units.
  */
-int ShClConvUtf16CRLFToLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, size_t cwcDst);
+int ShClHlpConvUtf16CRLFToLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, size_t cwcDst);
 
 /**
  * Converts an UTF-16 string with CRLF EOL to UTF-8 LF.
@@ -145,7 +145,7 @@ int ShClConvUtf16CRLFToLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, s
  * @param  pcbLen               Where to store the size (in bytes) of the converted string.
  *                              Does not include terminator.
  */
-int ShClConvUtf16CRLFToUtf8LF(PCRTUTF16 pcwszSrc, size_t cbSrc, char *pszBuf, size_t cbBuf, size_t *pcbLen);
+int ShClHlpConvUtf16CRLFToUtf8LF(PCRTUTF16 pcwszSrc, size_t cbSrc, char *pszBuf, size_t cbBuf, size_t *pcbLen);
 
 /**
 * Converts an HTML string from UTF-16 into UTF-8.
@@ -156,7 +156,7 @@ int ShClConvUtf16CRLFToUtf8LF(PCRTUTF16 pcwszSrc, size_t cbSrc, char *pszBuf, si
 * @param  ppszDst               Where to store the converted result on success.
 * @param  pcbDst                Where to store the number of bytes written.
 */
-int ShClConvUtf16ToUtf8HTML(PCRTUTF16 pcwszSrc, size_t cwcSrc, char **ppszDst, size_t *pcbDst);
+int ShClHlpConvUtf16ToUtf8HTML(PCRTUTF16 pcwszSrc, size_t cwcSrc, char **ppszDst, size_t *pcbDst);
 
 /**
  * Converts an UTF-8 string with LF EOL into UTF-16 CRLF.
@@ -168,7 +168,7 @@ int ShClConvUtf16ToUtf8HTML(PCRTUTF16 pcwszSrc, size_t cwcSrc, char **ppszDst, s
  * @param  pcwDst               Where to return the size (in RTUTF16 units) of the allocated buffer on success.
  *                              Does not include terminator.
  */
-int ShClConvUtf8LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
+int ShClHlpConvUtf8LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
 
 /**
  * Converts a Latin-1 string with LF EOL into UTF-16 CRLF.
@@ -180,7 +180,7 @@ int ShClConvUtf8LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwsz
  * @param  pcwDst               Where to return the size (in RTUTF16 units) of the allocated buffer on success.
  *                              Does not include terminator.
  */
-int ShClConvLatin1LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
+int ShClHlpConvLatin1LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
 
 /**
  * Convert CF_DIB data to full BMP data by prepending the BM header.
@@ -194,7 +194,7 @@ int ShClConvLatin1LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppw
  * @param   pcbDst        Pointer to the size of the buffer for the destination
  *                        data in bytes.
  */
-int ShClDibToBmp(const void *pvSrc, size_t cbSrc, void **ppvDst, size_t *pcbDst);
+int ShClHlpDibToBmp(const void *pvSrc, size_t cbSrc, void **ppvDst, size_t *pcbDst);
 
 /**
  * Get the address and size of CF_DIB data in a full BMP data in the input buffer.
@@ -206,7 +206,7 @@ int ShClDibToBmp(const void *pvSrc, size_t cbSrc, void **ppvDst, size_t *pcbDst)
  * @param   ppvDst        Where to store the pointer to the destination data
  * @param   pcbDst        Pointer to the size of the destination data in bytes
  */
-int ShClBmpGetDib(const void *pvSrc, size_t cbSrc, const void **ppvDst, size_t *pcbDst);
+int ShClHlpBmpGetDib(const void *pvSrc, size_t cbSrc, const void **ppvDst, size_t *pcbDst);
 
 /**
  * Converts a clipboard source value to a printable string.
