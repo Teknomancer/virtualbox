@@ -1,4 +1,4 @@
-/* $Id: vboxwl.cpp 114357 2026-06-13 01:07:47Z knut.osmundsen@oracle.com $ */
+/* $Id: vboxwl.cpp 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland helper for grabbing input focus, drag-n-drop and clipboard sharing.
  */
@@ -347,7 +347,7 @@ static DECLCALLBACK(void) vboxwl_gtk_build_target_list(const char *pcszMimeType,
     GtkTargetList *pTargetList = (GtkTargetList *)pvUser;
     RT_NOREF(fFlagsAndPriority);
 
-    VBClLogVerbose(2, "session %u: mime-type '%s' -> guest\n", g_idSession, pcszMimeType);
+    VBClLogVerbose(2, "session %u: MIME type '%s' -> guest\n", g_idSession, pcszMimeType);
     gtk_target_list_add(pTargetList, gdk_atom_intern(pcszMimeType, FALSE), 0, 0);
 }
 
@@ -383,7 +383,7 @@ static gboolean vbwlGtkClipboardSetCallback(GtkWidget* pSelf, GdkEventWindowStat
         int cTargets = 0;
 
         /* Convert host clipboard formats bitmask into Gtk MIME types list. */
-        VbghMimeConvEnumerateByVBoxFormat(fFmts, vboxwl_gtk_build_target_list, aTargetList);
+        VbghMimeConvEnumerateByVBoxFormats(fFmts, vboxwl_gtk_build_target_list, aTargetList);
 
         aTargets = gtk_target_table_new_from_list(aTargetList, &cTargets);
         if (RT_VALID_PTR(aTargets))

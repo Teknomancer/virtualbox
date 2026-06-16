@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114376 2026-06-15 20:53:54Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -64,7 +64,6 @@ typedef struct
 static vbox_wl_edcp_ctx_t g_EdcpCtx;
 
 static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser);
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser);
 
 
 /**********************************************************************************************************************************
@@ -151,10 +150,9 @@ static const struct wl_registry_listener g_vbcl_wayland_hlp_registry_cb =
 };
 
 
-/**********************************************************************************************************************************
- * Wayland Data Control Offer callbacks.
- *********************************************************************************************************************************/
-
+/*********************************************************************************************************************************
+*   Wayland Data Control Offer Listener Callbacks (ext_data_control_offer_v1_listener)                                           *
+*********************************************************************************************************************************/
 
 /**
  * Session callback: Collect clipboard format advertised by guest.
@@ -170,27 +168,18 @@ static const struct wl_registry_listener g_vbcl_wayland_hlp_registry_cb =
  *                              a consistency check.
  * @param   pvUser              User data (Wayland mime-type data).
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_gh_add_fmt_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_gh_add_fmt_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser)
 {
-    struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx =
-        (struct vbcl_wl_dcp_enumerate_ctx *)pvUser;
-
-    int rc =   (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
-    VBCL_LOG_CALLBACK;
-
+    struct vbcl_wl_dcp_enumerate_ctx * const pEnmCtx = (struct vbcl_wl_dcp_enumerate_ctx *)pvUser;
     AssertPtrReturn(pEnmCtx, VERR_INVALID_PARAMETER);
-
-    if (RT_SUCCESS(rc))
-        rc = vbcl_wayland_xdcp_add_fmt(pEnmCtx);
-
-    return rc;
+    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_gh_add_fmt_cb: %d, %s\n", enmSessionType, pEnmCtx->pcszMimeType);
+    if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST)
+        return vbcl_wayland_xdcp_add_fmt(pEnmCtx);
+    return VERR_WRONG_ORDER;
 }
 
 /**
- * Data Control Offer advertise callback.
+ * Wayland callback: Data Control Offer advertise.
  *
  * Triggered when other Wayland client advertises new clipboard content.
  *
@@ -198,26 +187,22 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_gh_add_fmt_cb(
  * @param pOffer            Wayland Data Control Offer object.
  * @param pcszMimeType      Mime-type of newly available clipboard data.
  */
-static void vbcl_wayland_hlp_edcp_data_control_offer_offer(
-    void *pvUser, struct ext_data_control_offer_v1 *pOffer, const char *pcszMimeType)
+static void vbcl_wayland_hlp_edcp_data_control_offer_offer(void *pvUser, struct ext_data_control_offer_v1 *pOffer,
+                                                           const char *pcszMimeType)
 {
-    int rc;
-
-    vbox_wl_edcp_ctx_t *pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
-    struct vbcl_wl_dcp_enumerate_ctx EnmCtx;
+    vbox_wl_edcp_ctx_t * const pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
+    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_data_control_offer_offer: %s\n", pcszMimeType);
     RT_NOREF(pOffer);
-
-    VBCL_LOG_CALLBACK;
 
     AssertPtrReturnVoid(pcszMimeType);
 
-    RT_ZERO(EnmCtx);
+    struct vbcl_wl_dcp_enumerate_ctx EnmCtx;
     EnmCtx.pcszMimeType = pcszMimeType;
     EnmCtx.pSession = &pCtx->BaseCtx.Session;
 
-    rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
-                                   &vbcl_wayland_hlp_edcp_gh_add_fmt_cb,
-                                   &EnmCtx);
+    int rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
+                                       &vbcl_wayland_hlp_edcp_gh_add_fmt_cb,
+                                       &EnmCtx);
     if (RT_FAILURE(rc))
         VBClLogError("cannot save formats announced by the guest, rc=%Rrc\n", rc);
 }
@@ -267,9 +252,9 @@ static int vbcl_wayland_hlp_edcp_receive_offer(
 }
 
 /**
- * Convert list of MIME types in string representation into bitmask of VBox formats.
+ * Convert list of MIME types to mask of VBox formats.
  *
- * @returns Formats bitmask.
+ * @returns VBox formats bitmask.
  * @param   pListHead   List of MIME types in string representation.
  * @param   pOffer      Wayland offer.
  */
@@ -347,7 +332,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_gh_clip_report_cb(
         else
             rc = VERR_NO_DATA;
 
-        ext_data_control_offer_v1_destroy((struct ext_data_control_offer_v1 *)pOffer);
+        ext_data_control_offer_v1_destroy(pOffer);
 
         VBClLogVerbose(5, "announcing fFmts=0x%x to host, rc=%Rrc\n", fFmts, rc);
     }
@@ -486,40 +471,73 @@ static const struct ext_data_control_device_v1_listener g_data_device_listener =
  * Wayland Data Control Source callbacks.
  *********************************************************************************************************************************/
 
+/**
+ * Session callback: Copy clipboard to the guest.
+ *
+ * Worker for vbcl_wayland_hlp_edcp_data_source_send().
+ *
+ * This callback must be executed in context of Wayland event thread
+ * in order to be able to inject clipboard content into Wayland. It is
+ * triggered when Wayland client already decided data in which format
+ * it wants to request.
+ *
+ * This callback (1) sets requested clipboard format to the session,
+ * (2) waits for clipboard data to be copied from the host, (3) converts
+ * host clipboard data into guest representation, and (4) sends clipboard
+ * to the guest by writing given file descriptor.
+ *
+ * @returns IPRT status code.
+ * @param   enmSessionType      Session type, must be verified as
+ *                              a consistency check.
+ * @param   pvUser              User data (Wayland I/O context).
+ */
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser)
+{
+    struct vbcl_wl_dcp_write_ctx * const pArgs = (struct vbcl_wl_dcp_write_ctx *)pvUser;
+    AssertPtrReturn(pArgs, VERR_INVALID_PARAMETER);
+
+    if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
+    {
+        int rc = vbcl_wayland_xdcp_set_guest_clipboard(pArgs->fd, &g_EdcpCtx.BaseCtx, pArgs->pcszMimeType);
+        g_EdcpCtx.BaseCtx.fIngnoreWlClipIn = false;
+        return rc;
+    }
+    return VERR_WRONG_ORDER;
+}
+
 
 /**
- * Wayland data send callback.
+ * Wayland callback: Send clipboard data.
  *
- * Triggered when other Wayland client wants to read clipboard
- * data from us.
+ * Triggered when other Wayland client wants to read clipboard data from us.
  *
  * @param pvUser            VBox private data.
  * @param pDataSource       Wayland Data Control Source object.
  * @param pcszMimeType      A mime-type of requested data.
  * @param fd                A file descriptor to write clipboard content into.
  */
-static void vbcl_wayland_hlp_edcp_data_source_send(
-    void *pvUser, struct ext_data_control_source_v1 *pDataSource,
-    const char *pcszMimeType, int32_t fd)
+static void vbcl_wayland_hlp_edcp_data_source_send(void *pvUser, struct ext_data_control_source_v1 *pDataSource,
+                                                   const char *pcszMimeType, int32_t fd)
 {
-    int rc;
-    vbox_wl_edcp_ctx_t *pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
-    RT_NOREF(pDataSource);
-
-    struct vbcl_wl_dcp_write_ctx priv;
-
-    VBCL_LOG_CALLBACK;
-
+    /*
+     * Validate input.
+     */
+    vbox_wl_edcp_ctx_t * const pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
     AssertPtrReturnVoid(pCtx);
     AssertPtrReturnVoid(pcszMimeType);
+    Assert(fd >= 0);
+    RT_NOREF(pDataSource);
+    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_data_source_send: %s -> fd=%d\n", pcszMimeType, fd);
 
-    RT_ZERO(priv);
-    priv.pcszMimeType = pcszMimeType;
-    priv.fd = fd;
-
-    rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
-                                   &vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb,
-                                   &priv);
+    /*
+     * "Join" the session and do actul work in callback.
+     */
+    struct vbcl_wl_dcp_write_ctx Args;
+    Args.pcszMimeType = pcszMimeType;
+    Args.fd = fd;
+    int rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
+                                       &vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb,
+                                       &Args);
 
     VBClLogVerbose(5, "vbcl_wayland_hlp_edcp_data_source_send, rc=%Rrc\n", rc);
     close(fd);
@@ -694,7 +712,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_event_loop(RTTHREAD hThreadSelf, 
             /* Tell parent thread we are ready. */
             RTThreadUserSignal(hThreadSelf);
 
-            while (1)
+            for (;;)
             {
                 rc = vbcl_wayland_xdcp_next_event(&pCtx->BaseCtx);
                 if (   rc != VERR_TIMEOUT
@@ -810,46 +828,6 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_popup(void)
 }
 
 /**
- * Session callback: Copy clipboard to the guest.
- *
- * This callback must be executed in context of Wayland event thread
- * in order to be able to inject clipboard content into Wayland. It is
- * triggered when Wayland client already decided data in which format
- * it wants to request.
- *
- * This callback (1) sets requested clipboard format to the session,
- * (2) waits for clipboard data to be copied from the host, (3) converts
- * host clipboard data into guest representation, and (4) sends clipboard
- * to the guest by writing given file descriptor.
- *
- * @returns IPRT status code.
- * @param   enmSessionType      Session type, must be verified as
- *                              a consistency check.
- * @param   pvUser              User data (Wayland I/O context).
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
-{
-    struct vbcl_wl_dcp_write_ctx *pPriv = (struct vbcl_wl_dcp_write_ctx *)pvUser;
-    AssertPtrReturn(pPriv, VERR_INVALID_PARAMETER);
-
-    int rc = (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
-    VBCL_LOG_CALLBACK;
-
-    AssertPtrReturn(pPriv, VERR_INVALID_PARAMETER);
-
-    if (RT_SUCCESS(rc))
-    {
-        rc = vbcl_wayland_xdcp_set_guest_clipboard(pPriv->fd, &g_EdcpCtx.BaseCtx, pPriv->pcszMimeType);
-        g_EdcpCtx.BaseCtx.fIngnoreWlClipIn = false;
-    }
-
-    return rc;
-}
-
-/**
  * @callback_method_impl{FNVBGHMIMECONVENUM,
  *      Enumeration callback used for sending clipboard offers to Wayland client. }
  *
@@ -860,8 +838,8 @@ static DECLCALLBACK(void)
 vbcl_wayland_hlp_edcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPriority, void *pvUser)
 {
     ext_data_control_source_v1 *pDataSource = (ext_data_control_source_v1 *)pvUser;
+    VBClLogVerbose(4, "vbcl_wayland_hlp_edcp_send_offers: %s prio %#x\n", pcszMimeType, fFlagsAndPriority);
     ext_data_control_source_v1_offer(pDataSource, pcszMimeType);
-    RT_NOREF(fFlagsAndPriority);
 }
 
 /**
@@ -882,34 +860,31 @@ vbcl_wayland_hlp_edcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPr
  *                              a consistency check.
  * @param   pvUser              User data (unused).
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser)
 {
-    int rc = (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
+    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb: %d\n", enmSessionType);
     RT_NOREF(pvUser);
 
-    VBCL_LOG_CALLBACK;
-
-    if (RT_SUCCESS(rc))
+    int rc;
+    if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
     {
         g_EdcpCtx.BaseCtx.fIngnoreWlClipIn = true;
 
-        SHCLFORMATS fFmts = g_EdcpCtx.BaseCtx.Session.clip.fFmts.wait();
+        SHCLFORMATS const fFmts = g_EdcpCtx.BaseCtx.Session.clip.fFmts.wait();
+        VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb: fFmts=%#x\n", fFmts);
         if (fFmts != g_EdcpCtx.BaseCtx.Session.clip.fFmts.defaults())
         {
-            ext_data_control_source_v1 *pDataSource =
+            struct ext_data_control_source_v1 *pDataSource =
                 ext_data_control_manager_v1_create_data_source(g_EdcpCtx.pDataControlManager);
-
             if (RT_VALID_PTR(pDataSource))
             {
-                ext_data_control_source_v1_add_listener(
-                    (struct ext_data_control_source_v1 *)pDataSource, &g_data_source_listener, &g_EdcpCtx);
+                ext_data_control_source_v1_add_listener(pDataSource, &g_data_source_listener, &g_EdcpCtx);
 
-                VbghMimeConvEnumerateByVBoxFormat(fFmts, vbcl_wayland_hlp_edcp_send_offers, pDataSource);
+                VbghMimeConvEnumerateByVBoxFormats(fFmts, vbcl_wayland_hlp_edcp_send_offers, pDataSource);
 
                 ext_data_control_device_v1_set_selection(g_EdcpCtx.pDataDevice, pDataSource);
+
+                rc = VINF_SUCCESS;
             }
             else
                 rc = VERR_NO_MEMORY;
@@ -917,7 +892,8 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(
         else
             rc = VERR_NO_DATA;
     }
-
+    else
+        rc = VERR_WRONG_ORDER;
     return rc;
 }
 
@@ -939,23 +915,15 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(
  *                              a consistency check.
  * @param   pvUser              User data (host clipboard formats).
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser)
 {
-    SHCLFORMATS *pfFmts = (SHCLFORMATS *)pvUser;
-    AssertPtrReturn(pfFmts, VERR_INVALID_PARAMETER);
+    AssertPtrReturn(pvUser, VERR_INVALID_PARAMETER);
+    SHCLFORMATS const fFmts = *(SHCLFORMATS *)pvUser;
+    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_clip_hg_report_join_cb: %d, %#x\n", enmSessionType, fFmts);
 
-    int rc = (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
-    VBCL_LOG_CALLBACK;
-
-    AssertPtrReturn(pfFmts, VERR_INVALID_PARAMETER);
-
-    if (RT_SUCCESS(rc))
-        rc = vbcl_wayland_xdcp_get_host_clipboard(&g_EdcpCtx.BaseCtx, *pfFmts);
-
-    return rc;
+    if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
+        return vbcl_wayland_xdcp_get_host_clipboard(&g_EdcpCtx.BaseCtx, fFmts);
+    return VERR_WRONG_ORDER;
 }
 
 /**
@@ -963,10 +931,9 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join_cb(
  */
 static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report(SHCLFORMATS fFormats)
 {
-    int rc = VERR_NO_DATA;
+    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_clip_hg_report: %#x\n", fFormats);
 
-    VBCL_LOG_CALLBACK;
-
+    int rc;
     if (fFormats != VBOX_SHCL_FMT_NONE)
     {
         rc = vbcl_wayland_session_end(&g_EdcpCtx.BaseCtx.Session.Base, NULL, NULL);
@@ -985,7 +952,8 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report(SHCLFORMATS fForma
         else
             VBClLogError("unable to start session, previous session is still running rc=%Rrc\n", rc);
     }
-
+    else
+        rc = VERR_NO_DATA;
     return rc;
 }
 

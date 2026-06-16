@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -911,7 +911,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report_join2_cb(
                 zwlr_data_control_source_v1_add_listener(
                     (struct zwlr_data_control_source_v1 *)pDataSource, &g_data_source_listener, &g_DcpCtx);
 
-                VbghMimeConvEnumerateByVBoxFormat(fFmts, vbcl_wayland_hlp_dcp_send_offers, pDataSource);
+                VbghMimeConvEnumerateByVBoxFormats(fFmts, vbcl_wayland_hlp_dcp_send_offers, pDataSource);
 
                 zwlr_data_control_device_v1_set_selection(g_DcpCtx.pDataDevice, pDataSource);
             }
