@@ -1,4 +1,4 @@
-/* $Id: wayland-helper.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Wayland Desktop Environment helpers.
  */
@@ -315,17 +315,42 @@ RTDECL(bool) vbcl_wayland_session_is_started(vbcl_wl_session_t *pSession)
     return ASMAtomicReadU8((volatile uint8_t *)&pSession->enmState) == VBCL_WL_SESSION_STATE_STARTED;
 }
 
-RTDECL(int) vbcl_wayland_thread_start(PRTTHREAD pThread, PFNRTTHREAD pfnThread, const char *pszName, void *pvUser)
+RTDECL(int) vbcl_wayland_thread_start(PRTTHREAD phThread, PFNRTTHREAD pfnThread, const char *pszName, void *pvUser)
 {
-    int rc = RTThreadCreate(pThread, pfnThread, pvUser, 0, RTTHREADTYPE_IO, RTTHREADFLAGS_WAITABLE, pszName);
+    RTTHREAD hThread = NIL_RTTHREAD;
+    int rc = RTThreadCreate(&hThread, pfnThread, pvUser, 0, RTTHREADTYPE_IO,
+                            RTTHREADFLAGS_WAITABLE | RTTHREADFLAGS_USER_SIGNAL_ON_TERM, pszName);
     if (RT_SUCCESS(rc))
-        rc = RTThreadUserWait(*pThread, RT_MS_30SEC /* msTimeout */);
+    {
+        *phThread = hThread;
+        rc = RTThreadUserWait(hThread, RT_MS_30SEC /* msTimeout */);
+        if (RT_SUCCESS(rc))
+        {
+            int rcThread = VINF_SUCCESS;
+            rc = RTThreadWait(hThread, 0, &rcThread);
+            if (rc == VERR_TIMEOUT)
+            {
+                VBClLogVerbose(1, "started %s thread\n", pszName);
+                return VINF_SUCCESS;
+            }
 
-    if (RT_SUCCESS(rc))
-        VBClLogVerbose(1, "started %s thread\n", pszName);
+            if (RT_SUCCESS(rc))
+            {
+                /* Note! If we end up with VINF_SUCCESS here, it could in theorybe some
+                         kind of race with a regular exit.  Though, it shouldn't since
+                         we shouldn't be using that shortlived threads... */
+                VBClLogError("thread '%s' failed to initialize: %Rrc\n", pszName, rcThread);
+                rc = !RT_SUCCESS_NP(rcThread) ? rcThread : VERR_INTERNAL_ERROR_2;
+            }
+            else
+                VBClLogError("Failed checking thread '%s' after initialization: %Rrc\n", pszName, rc);
+        }
+        else
+            VBClLogError("Failed waiting (30s) for thread '%s' to initialize: %Rrc\n", pszName, rc);
+    }
     else
-        LogRel(("unable to start %s thread, rc=%Rrc\n", pszName, rc));
-
+        VBClLogError("Failed to start thread '%s': %Rrc\n", pszName, rc);
+    *phThread = NIL_RTTHREAD;
     return rc;
 }
 

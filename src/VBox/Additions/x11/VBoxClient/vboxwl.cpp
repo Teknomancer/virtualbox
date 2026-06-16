@@ -1,4 +1,4 @@
-/* $Id: vboxwl.cpp 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
+/* $Id: vboxwl.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland helper for grabbing input focus, drag-n-drop and clipboard sharing.
  */
@@ -489,31 +489,31 @@ static void vbwlGtkAppStart(GtkApplication* pApp, gpointer pvUser)
 }
 
 /**
- * Gtk App event loop handler.
- *
- * @returns IPRT status code.
- * @param   hThreadSelf     Running thread handle.
- * @param   pvUser          User data.
+ * @callback_method_impl{FNRTTHREAD,
+ *      Gtk App event loop handler.}
  */
-static DECLCALLBACK(int) vbwlGtkWorkerThreadProc(RTTHREAD hThreadSelf, void *pvUser)
+static DECLCALLBACK(int) vbwlGtkWorkerThreadProc(RTTHREAD ThreadSelf, void *pvUser)
 {
-    int rc = VERR_NO_MEMORY;
-
-    /* Tell parent we are ready. */
-    RTThreadUserSignal(hThreadSelf);
-
+    int rc;
     GtkApplication * const pApp = gtk_application_new("org.virtualbox.vboxwl", G_APPLICATION_FLAGS_NONE);
     if (RT_VALID_PTR(pApp))
     {
+        /* Signal parent thread that we've initialized successfully. */
+        RTThreadUserSignal(ThreadSelf);
+
         /* Create app visual instance when ready. */
         g_signal_connect(pApp, "activate", G_CALLBACK(vbwlGtkAppStart), pvUser);
 
         /* Run gtk main loop. */
         rc = g_application_run(G_APPLICATION(pApp), 0, NULL);
+        /** @todo rc is not an IPRT status, but an exit status, which should be kind of
+         *        compatible... It is not forwarded to anyone, but has %Rrc applied
+         *        to it. */
 
         g_object_unref(pApp);
     }
-
+    else
+        rc = VERR_NO_MEMORY;
     return rc;
 }
 

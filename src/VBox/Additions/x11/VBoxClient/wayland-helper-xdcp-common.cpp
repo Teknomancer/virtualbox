@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -598,9 +598,14 @@ RTDECL(int) vbcl_wayland_xdcp_get_host_clipboard(vbox_wl_xdcp_base_ctx_t *pCtx, 
         if (RT_SUCCESS(rc))
         {
             /* Set clipboard data to the session. */
+            VBClLogVerbose(5, "vbcl_wayland_xdcp_get_host_clipboard: Setting pvDataBuf=%p cbDataBuf=%#x (uFmt=%#x)...\n",
+                           pvData, cbData, uFmt);
             pCtx->Session.clip.pvDataBuf.set((uint64_t)pvData);
             pCtx->Session.clip.cbDataBuf.set((uint64_t)cbData);
         }
+        else
+            VBClLogError("VBClClipboardReadHostClipboard failed in vbcl_wayland_xdcp_get_host_clipboard getting %#x: %Rrc\n",
+                         uFmt, rc);
     }
     else
         rc = VERR_TIMEOUT;

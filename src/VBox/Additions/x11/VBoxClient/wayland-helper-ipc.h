@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-ipc.h 114356 2026-06-13 00:14:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-ipc.h 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for IPC between VBoxClient and vboxwl tool.
  */
@@ -453,12 +453,12 @@ namespace vbcl
  * in order to connect one to another. Output string will be in
  * format: GtkHlpIpcServer-&lt;prefix&gt;--&lt;active tty&gt;-&lt;user name&gt;.
  *
- * @returns     IPRT status code.
- * @param       szNamePrefix    Name prefix.
- * @param       szBuf           Where to store generated name string.
- * @param       cbBuf           Size of buffer.
+ * @returns IPRT status code.
+ * @param   pszNamePrefix   Name prefix.
+ * @param   pszBuf          Where to store generated name string.
+ * @param   cbBuf           Size of the buffer.
  */
-RTDECL(int) vbcl_wayland_hlp_gtk_ipc_srv_name(const char *szNamePrefix, char *szBuf, size_t cbBuf);
+RTDECL(int) vbcl_wayland_hlp_gtk_ipc_srv_name(const char *pszNamePrefix, char *pszBuf, size_t cbBuf);
 
 #endif /* !GA_INCLUDED_SRC_x11_VBoxClient_wayland_helper_ipc_h */
 

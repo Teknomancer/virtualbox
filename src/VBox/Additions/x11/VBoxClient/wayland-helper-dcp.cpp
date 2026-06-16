@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -671,68 +671,50 @@ static bool vbcl_wayland_hlp_dcp_connect(vbox_wl_dcp_ctx_t *pCtx)
 }
 
 /**
- * Main loop for Wayland compositor events.
+ * @callback_method_impl{FNRTTHREAD,
+ *      Main loop for Wayland compositor events.}
  *
  * All requests to Wayland compositor must be performed in context
  * of this thread.
- *
- * @returns IPRT status code.
- * @param   hThreadSelf         IPRT thread object.
- * @param   pvUser              Context data.
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_event_loop(RTTHREAD hThreadSelf, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_event_loop(RTTHREAD ThreadSelf, void *pvUser)
 {
-    vbox_wl_dcp_ctx_t *pCtx = (vbox_wl_dcp_ctx_t *)pvUser;
-    int rc = VERR_TRY_AGAIN;
-
+    vbox_wl_dcp_ctx_t * const pCtx = (vbox_wl_dcp_ctx_t *)pvUser;
     AssertPtrReturn(pCtx, VERR_INVALID_PARAMETER);
 
+    int rc = VERR_TRY_AGAIN;
     if (vbcl_wayland_hlp_dcp_connect(pCtx))
     {
         /* Start listening Data Control Device interface. */
         if (zwlr_data_control_device_v1_add_listener(pCtx->pDataDevice, &g_data_device_listener, (void *)pCtx) == 0)
         {
-            /* Tell parent thread we are ready. */
-            RTThreadUserSignal(hThreadSelf);
+            /* Tell parent thread we are up and running. */
+            RTThreadUserSignal(ThreadSelf);
 
-            while (1)
+            /*
+             * The event processing loop.
+             */
+            while (!ASMAtomicReadBool(&pCtx->BaseCtx.fShutdown))
             {
-                rc = vbcl_wayland_xdcp_next_event(&pCtx->BaseCtx);
-                if (   rc != VERR_TIMEOUT
+                int rc2 = vbcl_wayland_xdcp_next_event(&pCtx->BaseCtx);
+                if (   rc2 != VERR_TIMEOUT
                     && RT_FAILURE(rc))
-                {
-                    VBClLogError("cannot read event from Wayland, rc=%Rrc\n", rc);
-                }
+                    VBClLogError("cannot read event from Wayland: rc2=%Rrc\n", rc2);
 
                 if (pCtx->BaseCtx.fSendToGuest.reset())
-                {
-                    rc = vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base,
-                                                   &vbcl_wayland_hlp_dcp_clip_hg_report_join2_cb,
-                                                   NULL);
-                }
-
-                /* Handle graceful thread termination. */
-                if (pCtx->BaseCtx.fShutdown)
-                {
-                    rc = VINF_SUCCESS;
-                    break;
-                }
+                    vbcl_wayland_session_join(&pCtx->BaseCtx.Session.Base, &vbcl_wayland_hlp_dcp_clip_hg_report_join2_cb, NULL);
             }
+
+            rc = VINF_SUCCESS;
         }
         else
         {
-            rc = VERR_NOT_SUPPORTED;
             VBClLogError("cannot subscribe to Data Control Device events\n");
+            rc = VERR_NOT_SUPPORTED;
         }
 
         vbcl_wayland_hlp_dcp_disconnect(pCtx);
     }
-
-    /* Notify parent thread if we failed to start, so it won't be
-     * waiting 30 sec to figure this out. */
-    if (RT_FAILURE(rc))
-        RTThreadUserSignal(hThreadSelf);
-
     return rc;
 }
 

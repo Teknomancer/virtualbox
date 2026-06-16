@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114366 2026-06-15 19:51:16Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -64,28 +64,23 @@ static RTTHREAD g_DndThread;
 static RTTHREAD g_HostInputFocusThread;
 
 /**
- * Worker for Shared Clipboard events from host.
- *
- * @returns IPRT status code.
- * @param   hThreadSelf     IPRT thread handle.
- * @param   pvUser          User data (unused).
+ * @callback_method_impl{FNRTTHREAD,
+ *      Worker for Shared Clipboard events from host.}
  */
-static DECLCALLBACK(int) vbclWaylandClipboardWorker(RTTHREAD hThreadSelf, void *pvUser)
+static DECLCALLBACK(int) vbclWaylandClipboardWorker(RTTHREAD ThreadSelf, void *pvUser)
 {
-    SHCLCONTEXT ctx;
-    int rc;
-
     RT_NOREF(pvUser);
 
+    SHCLCONTEXT ctx;
     RT_ZERO(ctx);
 
     /* Connect to the host service. */
-    rc = VbglR3ClipboardConnectEx(&ctx.CmdCtx, VBOX_SHCL_GF_0_CONTEXT_ID);
-    /* Notify parent thread. */
-    RTThreadUserSignal(hThreadSelf);
-
+    int rc = VbglR3ClipboardConnectEx(&ctx.CmdCtx, VBOX_SHCL_GF_0_CONTEXT_ID);
     if (RT_SUCCESS(rc))
     {
+        /* Notify parent thread that we're up running. */
+        RTThreadUserSignal(ThreadSelf);
+
         /* Provide helper with host clipboard service connection handle. */
         g_pWaylandHelperClipboard->clip.pfnSetClipboardCtx(&ctx.CmdCtx);
 
@@ -105,28 +100,26 @@ static DECLCALLBACK(int) vbclWaylandClipboardWorker(RTTHREAD hThreadSelf, void *
         VbglR3ClipboardDisconnectEx(&ctx.CmdCtx);
     }
 
-    VBClLogVerbose(2, "clipboard thread, rc=%Rrc\n", rc);
-
+    VBClLogVerbose(2, "clipboard thread exitting: %Rrc\n", rc);
     return rc;
 }
 
+#if 0 /** @todo implement DnD */
 /**
- * Worker for Drag-and-Drop events from host.
- *
- * @returns IPRT status code.
- * @param   hThreadSelf     IPRT thread handle.
- * @param   pvUser          User data (unused).
+ * @callback_method_impl{FNRTTHREAD,
+ *      Worker for Drag-and-Drop events from host. }
  */
-static DECLCALLBACK(int) vbclWaylandDndWorker(RTTHREAD hThreadSelf, void *pvUser)
+static DECLCALLBACK(int) vbclWaylandDndWorker(RTTHREAD ThreadSelf, void *pvUser)
 {
     RT_NOREF(pvUser);
-
-    RTThreadUserSignal(hThreadSelf);
+    RTThreadUserSignal(ThreadSelf);
     return VINF_SUCCESS;
 }
+#endif
 
 /**
- * Worker for VM window focus change polling thread.
+ * @callback_method_impl{FNRTTHREAD,
+ *      Worker for VM window focus change polling thread.}
  *
  * Some Wayland helpers need to be notified about VM
  * window focus change events. This is needed in order to
@@ -134,25 +127,20 @@ static DECLCALLBACK(int) vbclWaylandDndWorker(RTTHREAD hThreadSelf, void *pvUser
  * changed since last user interaction. Such guest are not
  * able to notify host about clipboard content change and
  * needed to be asked implicitly.
- *
- * @returns IPRT status code.
- * @param   hThreadSelf     IPRT thread handle.
- * @param   pvUser          User data (unused).
  */
-static DECLCALLBACK(int) vbclWaylandHostInputFocusWorker(RTTHREAD hThreadSelf, void *pvUser)
+static DECLCALLBACK(int) vbclWaylandHostInputFocusWorker(RTTHREAD ThreadSelf, void *pvUser)
 {
     RT_NOREF(pvUser);
 
     VBGLGSTPROPCLIENT GuestPropClient;
     int rc = VbglGuestPropConnect(&GuestPropClient);
-
-    RTThreadUserSignal(hThreadSelf);
-
     if (RT_SUCCESS(rc))
     {
+        RTThreadUserSignal(ThreadSelf);
+
         while (!ASMAtomicReadBool(&g_fShutdown))
         {
-            static char achBuf[GUEST_PROP_MAX_NAME_LEN];
+            char achBuf[GUEST_PROP_MAX_NAME_LEN + GUEST_PROP_MAX_VALUE_LEN + GUEST_PROP_MAX_FLAGS_LEN];
             char *pszName = NULL;
             char *pszValue = NULL;
             char *pszFlags = NULL;
@@ -297,19 +285,19 @@ static DECLCALLBACK(int) vbclWaylandInit(void)
  */
 static DECLCALLBACK(int) vbclWaylandWorker(bool volatile *pfShutdown)
 {
-    int rc = VINF_SUCCESS;
-
     RT_NOREF(pfShutdown);
 
     VBClLogVerbose(1, "starting wayland worker thread\n");
 
     /* Start event loop for clipboard events processing from host. */
+    int rc = VINF_SUCCESS;
     if (RT_VALID_PTR(g_pWaylandHelperClipboard))
     {
         rc = vbcl_wayland_thread_start(&g_ClipboardThread, vbclWaylandClipboardWorker, "wl-clip", NULL);
         VBClLogVerbose(1, "clipboard thread started, rc=%Rrc\n", rc);
     }
 
+#if 0 /** @todo implement DnD */
     /* Start event loop for DnD events processing from host. */
     if (   RT_SUCCESS(rc)
         && RT_VALID_PTR(g_pWaylandHelperDnd))
@@ -317,6 +305,7 @@ static DECLCALLBACK(int) vbclWaylandWorker(bool volatile *pfShutdown)
         rc = vbcl_wayland_thread_start(&g_DndThread, vbclWaylandDndWorker, "wl-dnd", NULL);
         VBClLogVerbose(1, "DnD thread started, rc=%Rrc\n", rc);
     }
+#endif
 
     /* Start polling host input focus events. */
     if (RT_SUCCESS(rc))

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114372 2026-06-15 20:11:09Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -309,90 +309,85 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker_join_cb(
 }
 
 /**
- * IPC server thread worker.
- *
- * @returns IPRT status code.
- * @param   hThreadSelf     IPRT thread handle.
- * @param   pvUser          Helper context data.
+ * @callback_method_impl{FNRTTHREAD, IPC server thread worker.}
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker(RTTHREAD hThreadSelf, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker(RTTHREAD ThreadSelf, void *pvUser)
 {
-    int rc;
-
-    vbox_wl_gtk_ctx_t *pCtx = (vbox_wl_gtk_ctx_t *)pvUser;
-    char szIpcServerName[128];
-
+    vbox_wl_gtk_ctx_t * const pCtx = (vbox_wl_gtk_ctx_t *)pvUser;
     AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
     AssertPtrReturn(pCtx->pcszIpcSockPrefix, VERR_INVALID_POINTER);
 
-    RTThreadUserSignal(hThreadSelf);
-
-    VBClLogVerbose(1, "starting IPC\n");
-
-    rc = vbcl_wayland_hlp_gtk_ipc_srv_name(pCtx->pcszIpcSockPrefix, szIpcServerName, sizeof(szIpcServerName));
-
-    if (RT_SUCCESS(rc))
-        rc = RTLocalIpcServerCreate(&pCtx->hIpcServer, szIpcServerName, 0);
-
-    if (RT_SUCCESS(rc))
-        rc = RTLocalIpcServerSetAccessMode(pCtx->hIpcServer, RTFS_UNIX_IRUSR | RTFS_UNIX_IWUSR);
-
+    /*
+     * Create & configure IPC server.
+     */
+    VBClLogVerbose(1, "starting IPC...\n");
+    char szIpcServerName[128];
+    int rc = vbcl_wayland_hlp_gtk_ipc_srv_name(pCtx->pcszIpcSockPrefix, szIpcServerName, sizeof(szIpcServerName));
     if (RT_SUCCESS(rc))
     {
-        VBClLogVerbose(1, "started IPC server '%s'\n", szIpcServerName);
-
-        vbcl_wayland_session_init(&pCtx->Session.Base);
-
-        while (!ASMAtomicReadBool(&pCtx->fShutdown))
+        rc = RTLocalIpcServerCreate(&pCtx->hIpcServer, szIpcServerName, 0);
+        if (RT_SUCCESS(rc))
         {
-            rc = RTLocalIpcServerListen(pCtx->hIpcServer, &pCtx->Session.hIpcSession);
+            rc = RTLocalIpcServerSetAccessMode(pCtx->hIpcServer, RTFS_UNIX_IRUSR | RTFS_UNIX_IWUSR);
             if (RT_SUCCESS(rc))
             {
-                RTUID uUid;
+                VBClLogVerbose(1, "started IPC server '%s'\n", szIpcServerName);
+                RTThreadUserSignal(ThreadSelf);
 
-                /* Authenticate remote user. Only allow connection from
-                 * process who belongs to the same UID. */
-                rc = RTLocalIpcSessionQueryUserId(pCtx->Session.hIpcSession, &uUid);
-                if (RT_SUCCESS(rc))
+                vbcl_wayland_session_init(&pCtx->Session.Base);
+
+                /*
+                 * Process IPC requests till we're told to shut down.
+                 */
+                while (!ASMAtomicReadBool(&pCtx->fShutdown))
                 {
-                    RTUID uLocalUID = geteuid();
-                    if (   uLocalUID != 0
-                        && uLocalUID == uUid)
+                    rc = RTLocalIpcServerListen(pCtx->hIpcServer, &pCtx->Session.hIpcSession);
+                    if (RT_SUCCESS(rc))
                     {
-                        VBClLogVerbose(1, "new IPC connection\n");
+                        /* Authenticate remote user. Only allow connection from
+                           process who belongs to the same UID. */
+                        RTUID uUid;
+                        rc = RTLocalIpcSessionQueryUserId(pCtx->Session.hIpcSession, &uUid);
+                        if (RT_SUCCESS(rc))
+                        {
+                            RTUID uLocalUID = geteuid();
+                            if (   uLocalUID != 0
+                                && uLocalUID == uUid)
+                            {
+                                VBClLogVerbose(1, "new IPC connection\n");
 
-                        rc = vbcl_wayland_session_join(&pCtx->Session.Base,
-                                                       &vbcl_wayland_hlp_gtk_worker_join_cb,
-                                                       pCtx);
+                                rc = vbcl_wayland_session_join(&pCtx->Session.Base,
+                                                               vbcl_wayland_hlp_gtk_worker_join_cb, pCtx);
 
-                        VBClLogVerbose(1, "IPC flow completed, rc=%Rrc\n", rc);
+                                VBClLogVerbose(1, "IPC flow completed, rc=%Rrc\n", rc);
 
-                        rc = vbcl_wayland_session_end(&pCtx->Session.Base,
-                                                      &vbcl_wayland_hlp_gtk_session_end_cb,
-                                                      &pCtx->Session);
-                        VBClLogVerbose(1, "IPC session ended, rc=%Rrc\n", rc);
+                                rc = vbcl_wayland_session_end(&pCtx->Session.Base,
+                                                              vbcl_wayland_hlp_gtk_session_end_cb,  &pCtx->Session);
+                                VBClLogVerbose(1, "IPC session ended, rc=%Rrc\n", rc);
+                            }
+                            else
+                                VBClLogError("incoming IPC connection rejected - UID mismatch: %d/%d\n", uLocalUID, uUid);
+                        }
+                        else
+                            VBClLogError("failed to get remote IPC UID, rc=%Rrc\n", rc);
 
+                        RTLocalIpcSessionClose(pCtx->Session.hIpcSession);
                     }
-                    else
-                        VBClLogError("incoming IPC connection rejected: UID mismatch: %d/%d\n",
-                                     uLocalUID, uUid);
-                }
-                else
-                    VBClLogError("failed to get remote IPC UID, rc=%Rrc\n", rc);
+                    else if (rc != VERR_CANCELLED)
+                        VBClLogVerbose(1, "IPC connection has failed, rc=%Rrc\n", rc);
+                } /* loop */
 
-                RTLocalIpcSessionClose(pCtx->Session.hIpcSession);
+                rc = VINF_SUCCESS;
             }
-            else if (rc != VERR_CANCELLED)
-                VBClLogVerbose(1, "IPC connection has failed, rc=%Rrc\n", rc);
+            int rc2 = RTLocalIpcServerDestroy(pCtx->hIpcServer);
+            AssertRCStmt(rc2, rc = RT_SUCCESS(rc) ? rc2 : rc);
         }
-
-        rc = RTLocalIpcServerDestroy(pCtx->hIpcServer);
+        else
+            VBClLogError("Failed to create IPC server instance: %Rrc\n", rc);
     }
     else
-        VBClLogError("failed to start IPC, rc=%Rrc\n", rc);
-
+        VBClLogError("Failed to assemble IPC server name: %Rrc\n", rc);
     VBClLogVerbose(1, "IPC stopped\n");
-
     return rc;
 }
 
@@ -564,9 +559,14 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report_join_cb(
             rc = VBClClipboardReadHostClipboard(pPriv->pCtx->pClipboardCtx, uFmt, &pvData, &cbData);
             if (RT_SUCCESS(rc))
             {
+                VBClLogVerbose(5, "vbcl_wayland_hlp_gtk_clip_hg_report_join_cb: Setting pvDataBuf=%p cbDataBuf=%#x (uFmt=%#x)...\n",
+                               pvData, cbData, uFmt);
                 pPriv->pCtx->Session.oDataIpc->m_pvDataBuf.set((uint64_t)pvData);
                 pPriv->pCtx->Session.oDataIpc->m_cbDataBuf.set((uint64_t)cbData);
             }
+            else
+                VBClLogError("VBClClipboardReadHostClipboard failed in vbcl_wayland_hlp_gtk_clip_hg_report_join_cb getting %#x: %Rrc\n",
+                             uFmt, rc);
         }
         else
             rc = VERR_TIMEOUT;
