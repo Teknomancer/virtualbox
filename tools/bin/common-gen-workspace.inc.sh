@@ -1,5 +1,5 @@
 #!/usr/bin/env kmk_ash
-# $Id: common-gen-workspace.inc.sh 114353 2026-06-12 17:25:44Z knut.osmundsen@oracle.com $
+# $Id: common-gen-workspace.inc.sh 114391 2026-06-16 15:24:27Z andreas.loeffler@oracle.com $
 ## @file
 # Script for generating a SlickEdit workspace.
 #
@@ -410,6 +410,8 @@ my_generate_all_projects()
         my_generate_project "libvorbis"     "${lib}"                            --begin-incs "include" "${lib}/include/vorbis"                  --end-includes "${lib}"
         lib=$(my_get_newest_ver src/libs/libogg)
         my_generate_project "libogg"        "${lib}"                            --begin-incs "include" "${lib}/include/ogg"                     --end-includes "${lib}"
+        lib=$(my_get_newest_ver src/libs/libslirp)
+        my_generate_project "libslirp"      "${lib}"                            --begin-incs "include" "${lib}/include"                         --end-includes "${lib}"
     fi
 
     # webtools
