@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114378 2026-06-16 05:44:03Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114379 2026-06-16 06:05:21Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the Shared Clipboard Host Service testcases.
 #
@@ -134,17 +134,30 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
  endif
 
  if1of ($(KBUILD_TARGET), linux solaris)
+  tstClipboardServiceHost_DEFS += VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
   tstClipboardServiceHost_SOURCES += \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-x11.cpp \
   	$(PATH_ROOT)/src/VBox/Main/src-client/linux/ClipboardBackendX11.cpp
-  tstClipboardServiceHost_LIBPATH = \
-  	$(VBOX_LIBPATH_X11)
-  tstClipboardServiceHost_LIBS   += \
-  	Xt \
-  	X11
+  define def_VBoxTstClipboardServiceHost_libToLazyLoad
+   tstClipboardServiceHost_SOURCES += \
+   	$$(tstClipboardServiceHost_0_OUTDIR)/$(2)LazyLoad.asm
+   tstClipboardServiceHost_CLEAN += \
+   	$$(tstClipboardServiceHost_0_OUTDIR)/$(2)LazyLoad.asm
+   $$$$(tstClipboardServiceHost_0_OUTDIR)/$(2)LazyLoad.asm: $$(PATH_ROOT)/src/VBox/GuestHost/$(2).def $(VBOX_DEF_2_LAZY_LOAD) | $$$$(dir $$@)
+	$$(call MSG_TOOL,VBoxDef2LazyLoad,tstClipboardServiceHost,$$(filter %.def, $$^),$$@)
+	$$(QUIET)$$(RM) -f -- "$$@"
+	$$(VBOX_DEF_2_LAZY_LOAD) --explicit-load-function --system --library $(2)$$(SUFF_DLL)$$(if $(3),.$(3),) --output "$$@" $$(filter %.def, $$^)
+  endef
+  if1of ($(KBUILD_TARGET), linux)
+   VBOX_TST_CLIPBOARD_SERVICE_HOST_LIBX11_VER = 6
+   VBOX_TST_CLIPBOARD_SERVICE_HOST_LIBXT_VER  = 6
+   tstClipboardServiceHost_LDFLAGS.linux += $(VBOX_GCC_no-pie)
+  endif
+  $(evalcall2 def_VBoxTstClipboardServiceHost_libToLazyLoad,$(PATH_ROOT)/src/VBox/GuestHost/libX11.def,libX11,$(VBOX_TST_CLIPBOARD_SERVICE_HOST_LIBX11_VER))
+  $(evalcall2 def_VBoxTstClipboardServiceHost_libToLazyLoad,$(PATH_ROOT)/src/VBox/GuestHost/libXt.def,libXt,$(VBOX_TST_CLIPBOARD_SERVICE_HOST_LIBXT_VER))
  endif
 
- tstClipboardServiceHost_CLEAN    = $(tstClipboardServiceHost_0_OUTDIR)/tstClipboardServiceHost.run
+ tstClipboardServiceHost_CLEAN   += $(tstClipboardServiceHost_0_OUTDIR)/tstClipboardServiceHost.run
 
  if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
   tstClipboardServiceHost_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
