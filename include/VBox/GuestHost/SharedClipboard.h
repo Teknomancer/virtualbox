@@ -323,7 +323,7 @@ typedef SHCLCACHE *PSHCLCACHE;
 void ShClCacheEntryGet(PSHCLCACHEENTRY pCacheEntry, void **pvData, size_t *pcbData);
 
 void ShClCacheInit(PSHCLCACHE pCache);
-void ShClCacheDestroy(PSHCLCACHE pCache);
+void ShClCacheTerm(PSHCLCACHE pCache);
 void ShClCacheInvalidate(PSHCLCACHE pCache);
 void ShClCacheInvalidateEntry(PSHCLCACHE pCache, SHCLFORMAT uFmt);
 PSHCLCACHEENTRY ShClCacheGet(PSHCLCACHE pCache, SHCLFORMAT uFmt);

@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-common.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -911,11 +911,11 @@ DECLINLINE(void) shClCacheDestroyEntries(PSHCLCACHE pCache)
 }
 
 /**
- * Destroys a cache.
+ * Terminates (uninitializes) a cache.
  *
  * @param   pCache              Cache to destroy.
  */
-void ShClCacheDestroy(PSHCLCACHE pCache)
+void ShClCacheTerm(PSHCLCACHE pCache)
 {
     AssertPtrReturnVoid(pCache);
 

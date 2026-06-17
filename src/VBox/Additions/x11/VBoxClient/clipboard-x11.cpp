@@ -1,4 +1,4 @@
-/** $Id: clipboard-x11.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard-x11.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard implementation.
  */
@@ -341,7 +341,7 @@ int VBClX11ClipboardInit(void)
     if (RT_FAILURE(rc))
     {
         VbglR3ClipboardDisconnectEx(&g_Ctx.CmdCtx);
-        ShClX11Destroy(&g_Ctx.X11);
+        ShClX11Term(&g_Ctx.X11);
     }
 
     LogFlowFuncLeaveRC(rc);

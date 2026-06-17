@@ -265,7 +265,7 @@ typedef SHCLX11RESPONSE *PSHCLX11RESPONSE;
  * @{
  */
 int ShClX11Init(PSHCLX11CTX pCtx, PSHCLCALLBACKS pCallbacks, PSHCLCONTEXT pParent, bool fHeadless);
-int ShClX11Destroy(PSHCLX11CTX pCtx);
+int ShClX11Term(PSHCLX11CTX pCtx);
 int ShClX11ThreadStart(PSHCLX11CTX pCtx, bool grab);
 int ShClX11ThreadStartEx(PSHCLX11CTX pCtx, const char *pszName, bool fGrab);
 int ShClX11ThreadStop(PSHCLX11CTX pCtx);

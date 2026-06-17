@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendX11.cpp 114378 2026-06-16 05:44:03Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendX11.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard Service - X11 backend.
  */
@@ -193,7 +193,7 @@ int ShClBackendConnect(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, bool fHeadles
 
                 vrc = ShClX11ThreadStart(&pCtx->X11, true /* grab shared clipboard */);
                 if (RT_FAILURE(vrc))
-                    ShClX11Destroy(&pCtx->X11);
+                    ShClX11Term(&pCtx->X11);
             }
 
             if (RT_FAILURE(vrc))
@@ -264,7 +264,7 @@ int ShClBackendDisconnect(PSHCLBACKEND pBackend, PSHCLCLIENT pClient)
      *        it won't go wrong. */
     AssertRC(vrc);
 
-    ShClX11Destroy(&pCtx->X11);
+    ShClX11Term(&pCtx->X11);
     RTCritSectDelete(&pCtx->CritSect);
 
     RTMemFree(pCtx);

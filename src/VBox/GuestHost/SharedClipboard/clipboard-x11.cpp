@@ -1257,20 +1257,20 @@ int ShClX11Init(PSHCLX11CTX pCtx, PSHCLCALLBACKS pCallbacks, PSHCLCONTEXT pParen
 }
 
 /**
- * Destroys a Shared Clipboard X11 context.
+ * Terminates (uninitializes) a Shared Clipboard X11 context.
  *
  * @returns VBox status code.
  * @param   pCtx                The X11 clipboard context to destroy.
  */
-int ShClX11Destroy(PSHCLX11CTX pCtx)
+int ShClX11Term(PSHCLX11CTX pCtx)
 {
     if (!pCtx)
         return VINF_SUCCESS;
 
     LogFlowFunc(("pCtx=%p\n", pCtx));
 
-    /* Destroy clipboard cache. */
-    ShClCacheDestroy(&pCtx->Cache);
+    /* Delete the clipboard cache. */
+    ShClCacheTerm(&pCtx->Cache);
 
     int rc = VINF_SUCCESS;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP

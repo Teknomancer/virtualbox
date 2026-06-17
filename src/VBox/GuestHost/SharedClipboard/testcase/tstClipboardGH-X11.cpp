@@ -1,4 +1,4 @@
-/* $Id: tstClipboardGH-X11.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardGH-X11.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard guest/host X11 code test cases.
  */
@@ -867,7 +867,7 @@ int main()
     RTTestSub(hTest, "recovery from a bad format request");
     tstBadFormatRequestFromHost(hTest, &X11Ctx);
 
-    ShClX11Destroy(&X11Ctx);
+    ShClX11Term(&X11Ctx);
 
     /*
      * Headless clipboard tests
@@ -894,7 +894,7 @@ int main()
                         sizeof("hello world") * 2);
     tstNoSelectionOwnership(&X11Ctx, "reading from VBox, headless clipboard");
 
-    RTTEST_CHECK_RC_OK(hTest, ShClX11Destroy(&X11Ctx));
+    RTTEST_CHECK_RC_OK(hTest, ShClX11Term(&X11Ctx));
     ShClEventSourceTerm(&g_EventSource);
 
     return RTTestSummaryAndDestroy(hTest);

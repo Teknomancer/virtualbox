@@ -1,4 +1,4 @@
-/* $Id: tstClipboardMockHGCM.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardMockHGCM.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -477,7 +477,7 @@ static void tstTestReadFromHost_MockDestroy(PTSTUSERMOCK pUsrMock)
 {
 #if defined(RT_OS_LINUX) || defined(RT_OS_SOLARIS)
     ShClX11ThreadStop(&pUsrMock->X11Ctx);
-    ShClX11Destroy(&pUsrMock->X11Ctx);
+    ShClX11Term(&pUsrMock->X11Ctx);
     RTMemFree(pUsrMock->pCtx);
 #else
     RT_NOREF(pUsrMock);

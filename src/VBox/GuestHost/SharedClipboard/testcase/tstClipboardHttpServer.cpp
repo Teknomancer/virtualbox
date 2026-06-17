@@ -1,4 +1,4 @@
-/* $Id: tstClipboardHttpServer.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardHttpServer.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard HTTP server test case.
  */
@@ -167,7 +167,7 @@ static void tstManual(RTTEST hTest, PSHCLTRANSFERCTX pTransferCtx, PSHCLHTTPSERV
     {
         RTTEST_CHECK_RC_OK(hTest, ShClEventSourceTerm(&EventSource));
         ShClX11ThreadStop(&X11Ctx);
-        ShClX11Destroy(&X11Ctx);
+        ShClX11Term(&X11Ctx);
     }
 #endif
 
