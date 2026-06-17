@@ -27,8 +27,8 @@
 
 @startuml
 title Enumerating a guest directory
-!include include\guestctrl_header.iuml
-!include include\guestctrl_sessioncreate.iuml
+!include include/guestctrl_header.iuml
+!include include/guestctrl_sessioncreate.iuml
 API -> IGuestSession : DirectoryOpen
 create IGuestDirectory
 IGuestSession -> IGuestDirectory : << Creates >>
@@ -64,6 +64,6 @@ API -> IGuestDirectory : << Releases >>
 IGuestDirectory -> IGuestProcess : Kill
 destroy IGuestProcess
 destroy IGuestDirectory
-!include include\guestctrl_sessiondestroy.iuml
-!include include\guestctrl_footer.iuml
+!include include/guestctrl_sessiondestroy.iuml
+!include include/guestctrl_footer.iuml
 @enduml

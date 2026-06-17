@@ -1,4 +1,4 @@
-' $Id: guestctrl_ex_process.iuml 113990 2026-04-23 14:00:31Z knut.osmundsen@oracle.com $
+' $Id: guestctrl_ex_process.iuml 114403 2026-06-17 13:10:57Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - Guest Control process handling sequence diagram.
 '
@@ -27,9 +27,9 @@
 
 @startuml
 title Creating and handling a guest process
-!include include\guestctrl_header.iuml
-!include include\guestctrl_sessioncreate.iuml
-!include include\guestctrl_processcreate.iuml
+!include include/guestctrl_header.iuml
+!include include/guestctrl_sessioncreate.iuml
+!include include/guestctrl_processcreate.iuml
 == Using the guest process ==
 activate API
 loop Process is not completed
@@ -43,7 +43,7 @@ loop Process is not completed
     end
 end
 deactivate API
-!include include\guestctrl_processdestroy.iuml
-!include include\guestctrl_sessiondestroy.iuml
-!include include\guestctrl_footer.iuml
+!include include/guestctrl_processdestroy.iuml
+!include include/guestctrl_sessiondestroy.iuml
+!include include/guestctrl_footer.iuml
 @enduml
