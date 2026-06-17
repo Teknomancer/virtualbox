@@ -1,4 +1,4 @@
-/* $Id: clipboard-helper.h 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-helper.h 114402 2026-06-17 12:35:45Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Helper functions.
  */
@@ -231,6 +231,14 @@ const char *ShClHlpModeToString(uint32_t uMode);
  * @param   uState              Clipboard transfer state value.
  */
 const char *ShClHlpTransferStateToString(uint32_t uState);
+
+/**
+ * Converts a Main API clipboard event type value to a printable string.
+ *
+ * @returns Printable event type name.
+ * @param   uEventType          Main API VBoxEventType value.
+ */
+const char *ShClHlpVBoxEventTypeToString(uint32_t uEventType);
 
 /**
  * Parses a clipboard sharing mode value.

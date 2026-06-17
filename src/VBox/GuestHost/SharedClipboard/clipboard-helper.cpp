@@ -1,4 +1,4 @@
-/* $Id: clipboard-helper.cpp 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-helper.cpp 114402 2026-06-17 12:35:45Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Helper functions.
  */
@@ -589,6 +589,30 @@ const char *ShClHlpTransferStateToString(uint32_t uState)
         case VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_CANCELED:    return "canceled";
         case VBOX_SHCL_CLIPBOARD_TRANSFER_STATE_FAILED:      return "failed";
         default:                                            break;
+    }
+
+    AssertFailedReturn("unknown");
+}
+
+
+/**
+ * Converts a Main API clipboard event type value to a printable string.
+ *
+ * @returns Printable event type name.
+ * @param   uEventType          Main API VBoxEventType value.
+ */
+const char *ShClHlpVBoxEventTypeToString(uint32_t uEventType)
+{
+    switch (uEventType)
+    {
+        case 72:  return "OnClipboardModeChanged";
+        case 104: return "OnClipboardFileTransferModeChanged";
+        case 122: return "OnClipboardError";
+        case 126: return "OnClipboardSourceChanged";
+        case 127: return "OnClipboardFormatChanged";
+        case 128: return "OnClipboardDataChanged";
+        case 129: return "OnClipboardTransfer";
+        default:  break;
     }
 
     AssertFailedReturn("unknown");
