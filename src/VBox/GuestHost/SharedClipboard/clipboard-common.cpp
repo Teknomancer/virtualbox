@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-common.cpp 114414 2026-06-17 21:44:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -1112,12 +1112,12 @@ SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFOR
     RT_NOREF(pClient);
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
-    char *pszFmts = ShClFormatsToStrA(fFormats);
-    if (pszFmts)
+    if (LogRelIs2Enabled())
     {
-        LogRel2(("Shared Clipboard: %s reported formats '%s' to %s\n",
+        char *pszFmts = ShClFormatsToStrA(fFormats);
+        LogRel2(("Shared Clipboard: %s reported formats %#x/'%s' to %s\n",
                  fHostToGuest ? "Host" : "Guest",
-                 pszFmts,
+                 fFormats, pszFmts ? pszFmts : "<alloc error>",
                  fHostToGuest ? "guest" : "host"));
         RTStrFree(pszFmts);
     }

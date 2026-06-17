@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-utils.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-utils.cpp 114414 2026-06-17 21:44:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service utility functions.
  */
@@ -148,12 +148,13 @@ int ShClSvcReadDataFromGuestAsync(PSHCLCLIENT pClient, SHCLFORMATS fFormats, PSH
         /* Remove it from the mask. */
         fFormats &= ~fFormat;
 
-#ifdef LOG_ENABLED
-        char *pszFmt = ShClFormatsToStrA(fFormat);
-        AssertPtrReturn(pszFmt, VERR_NO_MEMORY);
-        LogRel2(("Shared Clipboard: Requesting guest clipboard data in format '%s'\n", pszFmt));
-        RTStrFree(pszFmt);
-#endif
+        if (LogRelIs2Enabled())
+        {
+            char *pszFmt = ShClFormatsToStrA(fFormat);
+            LogRel2(("Shared Clipboard: Requesting guest clipboard data in format %#x/'%s'\n",
+                     fFormat, pszFmt ? pszFmt : "<alloc failed>"));
+            RTStrFree(pszFmt);
+        }
         /*
          * Allocate messages, one for each format.
          */

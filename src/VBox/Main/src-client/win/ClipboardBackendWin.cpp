@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendWin.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendWin.cpp 114414 2026-06-17 21:44:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Win32 host.
  */
@@ -519,12 +519,13 @@ static LRESULT CALLBACK vboxClipboardSvcWinWndProcMain(PSHCLCONTEXT pCtx,
             const SHCLFORMAT uFmtVBox = ShClWinClipboardFormatToVBox(uFmtWin);
 
             LogFunc(("WM_RENDERFORMAT: uFmtWin=%u -> uFmtVBox=0x%x\n", uFmtWin, uFmtVBox));
-#ifdef LOG_ENABLED
-            char *pszFmts = ShClFormatsToStrA(uFmtVBox);
-            AssertPtrReturn(pszFmts, 0);
-            LogRel(("Shared Clipboard: Rendering Windows format %#x as VBox format '%s'\n", uFmtWin, pszFmts));
-            RTStrFree(pszFmts);
-#endif
+            if (LogRelIsEnabled())
+            {
+                char *pszFmts = ShClFormatsToStrA(uFmtVBox);
+                LogRel(("Shared Clipboard: Rendering Windows format %#x as VBox format %#x/'%s'\n",
+                        uFmtWin, uFmtVBox, pszFmts ? pszFmts : "<alloc failed>"));
+                RTStrFree(pszFmts);
+            }
             if (   uFmtVBox      == VBOX_SHCL_FMT_NONE
                 || pCtx->pClient == NULL)
             {
