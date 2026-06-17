@@ -1,4 +1,4 @@
-' $Id: clipboard_api.iuml 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $
+' $Id: clipboard_api.iuml 114405 2026-06-17 13:18:09Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - VirtualBox Clipboard API - Draft
 '
@@ -26,7 +26,7 @@
 '
 
 @startuml
-title VirtualBox Clipboard API - 7.2 Draft
+title VirtualBox Clipboard API - 7.x Draft
 hide empty description
 
 enum ClipboardAction
@@ -115,7 +115,8 @@ enum ClipboardMode
 ' Events derived from IClipboardEvent can veto the announced operation.
 abstract class IClipboardEvent
 {
-    +item : ClipboardItem
+    +id : wstring
+    +item : IClipboardItem
     +veto : BOOL
 }
 
@@ -133,6 +134,21 @@ note left of IClipboardSourceChangedEvent
   When enabling / disabling VRDE extension
 end note
 
+abstract class IClipboardFormatChangedEvent
+{
+    +source : ClipboardSource
+}
+
+abstract class IClipboardDataChangedEvent
+{
+    +action : ClipboardAction
+}
+
+abstract class IClipboardErrorEvent
+{
+    +msg : wstring
+    +rcError : LONG
+}
 
 abstract class IClipboardTransferEvent
 {
@@ -153,6 +169,7 @@ IEvent <|-- IClipboardModeChangedEvent
 IEvent <|-- IClipboardSourceChangedEvent
 IClipboardEvent <|-- IClipboardFormatChangedEvent
 IClipboardEvent <|-- IClipboardDataChangedEvent
+IClipboardEvent <|-- IClipboardErrorEvent
 IEvent <|-- IClipboardTransferEvent
 
 ' A single clipboard transfer
@@ -189,13 +206,19 @@ abstract class IClipboard
 {
     +getFileList : SafeArray<wstring>
     +setFileList(SafeArray<wstring>) : HRESULT
-    +readData(ClipboardAction) : ClipboardItem
-    +readFormats : SafeArray<ClipboardFormat>
-    +writeData(ClipboardAction, ClipboardItem) : ClipboardItem
-    +writeFormats(SafeArray<ClipboardFormat>)
+    +getUseHostClipboard : BOOL
+    +setUseHostClipboard(BOOL) : HRESULT
+    +createFormat(wstring) : IClipboardFormat
+    +createItem(ClipboardSource, IClipboardFormat, SafeArray<octet>) : IClipboardItem
+    +readData(ClipboardAction) : IClipboardItem
+    +readFormats : SafeArray<IClipboardFormat>
+    +writeData(ClipboardAction, IClipboardItem) : IClipboardItem
+    +readDataRaw(ClipboardAction) : SafeArray<octet>
+    +writeDataRaw(ClipboardAction, ClipboardSource, wstring, SafeArray<octet>) : SafeArray<octet>
+    +writeFormats(SafeArray<IClipboardFormat>) : HRESULT
     +reset : HRESULT
-    +isFormatAvailable(ClipboardSource, ClipboardFormat) : BOOL
-    +getSupportedFormats(ClipboardSource) : SafeArray<ClipboardFormat>
+    +isFormatAvailable(ClipboardSource, IClipboardFormat) : BOOL
+    +getSupportedFormats(ClipboardSource) : SafeArray<IClipboardFormat>
 
     __ Data / file transfers
 
@@ -207,12 +230,21 @@ abstract class IClipboard
 }
 
 IClipboard *-- IClipboardTransferManager
+IClipboard ..> IClipboardFormat : creates
+IClipboard ..> IClipboardItem : creates
 
-note left of IClipboard::read
-  Reads current clipboard item from the guest.
+note left of IClipboard::createFormat
+  Factory needed by public API clients before using methods
+  accepting IClipboardFormat values.
 end note
-note left of IClipboard::write
-  Writes a clipboard item to the guest.
+note left of IClipboard::createItem
+  Factory needed by public API clients before using writeData().
+end note
+note left of IClipboard::readData
+  Reads current clipboard item from the active clipboard source.
+end note
+note left of IClipboard::writeData
+  Writes a clipboard item and announces it to the opposite side.
 end note
 note left of IClipboard::reset
   Resets all clipboard data.

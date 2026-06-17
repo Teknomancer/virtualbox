@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114369 2026-06-15 19:59:09Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114405 2026-06-17 13:18:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -499,6 +499,77 @@ HRESULT Clipboard::i_createItem(ClipboardSource_T aSource,
     Log2Func(("Created item id=%RU32, source=%RU32, mime=%s, cb=%zu\n",
               (uint32_t)idItem, (uint32_t)aSource, aMimeType.c_str(), aBuffer.size()));
     return ptrItemObj.queryInterfaceTo(aItem.asOutParam());
+}
+
+
+/**
+ * Creates a public clipboard format object.
+ *
+ * @returns COM status code.
+ * @param   aMimeType       MIME type for the format object.
+ * @param   aFormat         Where to return the created format object.
+ */
+HRESULT Clipboard::createFormat(const com::Utf8Str &aMimeType,
+                                ComPtr<IClipboardFormat> &aFormat)
+{
+    Log2Func(("aMimeType=%s\n", aMimeType.c_str()));
+    if (aMimeType.isEmpty())
+    {
+        LogFunc(("Rejecting empty clipboard MIME type\n"));
+        return E_INVALIDARG;
+    }
+
+    return i_createFormat(aMimeType, aFormat);
+}
+
+
+/**
+ * Creates a public clipboard item object.
+ *
+ * @returns COM status code.
+ * @param   aSource         Clipboard item source.
+ * @param   aFormat         Clipboard format object.
+ * @param   aBuffer         Payload bytes.
+ * @param   aItem           Where to return the created item object.
+ */
+HRESULT Clipboard::createItem(ClipboardSource_T aSource,
+                              const ComPtr<IClipboardFormat> &aFormat,
+                              const std::vector<BYTE> &aBuffer,
+                              ComPtr<IClipboardItem> &aItem)
+{
+    Log2Func(("aSource=%RU32, aFormat=%p, cb=%zu\n", (uint32_t)aSource, (void *)aFormat, aBuffer.size()));
+
+    switch (aSource)
+    {
+        case ClipboardSource_Host:
+        case ClipboardSource_Guest:
+        case ClipboardSource_Remote:
+        case ClipboardSource_Custom:
+            break;
+        default:
+            LogFunc(("Rejecting invalid clipboard source %RU32\n", (uint32_t)aSource));
+            return E_INVALIDARG;
+    }
+
+    if (aFormat.isNull())
+    {
+        LogFunc(("Rejecting NULL clipboard format\n"));
+        return E_INVALIDARG;
+    }
+
+    com::Bstr bstrMimeType;
+    HRESULT hrc = aFormat->COMGETTER(MimeType)(bstrMimeType.asOutParam());
+    if (FAILED(hrc))
+        return hrc;
+
+    com::Utf8Str strMimeType(bstrMimeType);
+    if (strMimeType.isEmpty())
+    {
+        LogFunc(("Rejecting clipboard item with empty MIME type\n"));
+        return E_INVALIDARG;
+    }
+
+    return i_createItem(aSource, strMimeType, aBuffer, aItem);
 }
 
 

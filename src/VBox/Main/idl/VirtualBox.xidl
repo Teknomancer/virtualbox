@@ -15773,7 +15773,7 @@
 
   <interface
     name="IClipboard" extends="$unknown"
-    uuid="27cfe16a-0a4b-4d35-9875-06f388a036c7"
+    uuid="019ed598-4e48-7f91-9c93-06c174e95161"
     wsmap="managed"
     reservedMethods="8" reservedAttributes="8"
     >
@@ -15804,6 +15804,36 @@
         Whether this console clipboard uses the host clipboard.
       </desc>
     </attribute>
+
+    <method name="createFormat">
+      <desc>
+        Creates a clipboard format object.
+      </desc>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type for the created format object.</desc>
+      </param>
+      <param name="format" type="IClipboardFormat" dir="return">
+        <desc>Created clipboard format object.</desc>
+      </param>
+    </method>
+
+    <method name="createItem">
+      <desc>
+        Creates a clipboard item object.
+      </desc>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source for the created item.</desc>
+      </param>
+      <param name="format" type="IClipboardFormat" dir="in">
+        <desc>Clipboard format for the created item.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="in">
+        <desc>Clipboard item payload.</desc>
+      </param>
+      <param name="item" type="IClipboardItem" dir="return">
+        <desc>Created clipboard item object.</desc>
+      </param>
+    </method>
 
     <method name="readData">
       <desc>

@@ -1,4 +1,4 @@
-' $Id: clipboard_sequence.iuml 113990 2026-04-23 14:00:31Z knut.osmundsen@oracle.com $
+' $Id: clipboard_sequence.iuml 114405 2026-06-17 13:18:09Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - VirtualBox Clipboard Sequence - Draft
 '
@@ -26,7 +26,7 @@
 '
 
 @startuml
-title VirtualBox Clipboard API Sequence - 7.2 Draft
+title VirtualBox Clipboard API Sequence - 7.x Draft
 hide empty description
 
 actor "User (Host)" as U
@@ -45,15 +45,21 @@ loop
 end
 VBoxSVC -> VBoxC: issues IClipboardFormatChangedEvent
 VBoxC -> Client: issues IClipboardFormatChangedEvent
-Client -> VBoxC : sends format via Clipboard::write()
-VBoxC -> VBoxService  : <HGCM send format to guest>
-VBoxService -> G  : <reports format to guest clipboard>
+Client -> VBoxC : IClipboard::createFormat(mimeType)
+Client -> VBoxC : IClipboard::writeFormats(formats)
+VBoxC -> VBoxService  : queue VBOX_SHCL_HOST_MSG_FORMATS_REPORT
+G -> VBoxService : VBOX_SHCL_GUEST_FN_MSG_PEEK_WAIT / MSG_GET
+VBoxService -> G  : VBOX_SHCL_HOST_MSG_FORMATS_REPORT(formats)
+G -> G : reports formats to guest clipboard
 U -> G: Paste data (e.g., Ctrl+V)
-VBoxService -> VBoxC  : <HGCM request data>
-VBoxC -> Client : issues IClipboardDataReadEvent
-Client -> VBoxC : Clipboard::write()
-VBoxC -> VBoxService  : <HGCM send data to guest>
-VBoxService -> G  : <writes data to guest clipboard>
+G -> VBoxService  : VBOX_SHCL_GUEST_FN_DATA_READ(format)
+VBoxService -> VBoxC  : request cached host data for guest
+VBoxC -> Client : issues IClipboardDataChangedEvent after data is read
+Client -> VBoxC : IClipboard::createFormat(mimeType)
+Client -> VBoxC : IClipboard::createItem(Host, format, buffer)
+Client -> VBoxC : IClipboard::writeData(Copy, item)
+VBoxC -> VBoxService  : provide data for VBOX_SHCL_GUEST_FN_DATA_READ
+VBoxService -> G  : VBOX_SHCL_GUEST_FN_DATA_READ returns data
 
 == Guest > Host (Data) ==
 
@@ -61,16 +67,19 @@ U -> G: Copy data (e.g., Ctrl+C)
 loop
   Guest -> VBoxService : <watches guest clipboard>
 end
-VBoxService -> VBoxC : <HGCM report format>
+G -> VBoxService : VBOX_SHCL_GUEST_FN_REPORT_FORMATS(formats)
+VBoxService -> VBoxC : report guest formats
 VBoxC -> Client: issues IClipboardFormatChangedEvent
-Client -> VBoxC : requests data via Clipboard::read()
-VBoxC -> VBoxService : <HGCM request data>
-VBoxService -> G : <read guest clipboard data>
-VBoxService -> VBoxC : <HGCM send data to host>
-VBoxC -> VBoxSVC : issues IClipboardDataChangedEvent
-VBoxSVC -> H : writes to host clipboard
-VBoxSVC -> VBoxC : issues IClipboardDataChangedEvent
+Client -> VBoxC : IClipboard::readFormats()
+Client -> VBoxC : IClipboard::readData(Copy)
+VBoxC -> VBoxService : queue VBOX_SHCL_HOST_MSG_READ_DATA[_CID](format)
+G -> VBoxService : VBOX_SHCL_GUEST_FN_MSG_PEEK_WAIT / MSG_GET
+VBoxService -> G : VBOX_SHCL_HOST_MSG_READ_DATA[_CID](format)
+G -> VBoxService : VBOX_SHCL_GUEST_FN_DATA_WRITE(format, data)
+VBoxService -> VBoxC : report guest data
 VBoxC -> Client : issues IClipboardDataChangedEvent
+Client -> VBoxC : IClipboard::writeData(Copy, item)
+VBoxC -> VBoxSVC : writes to host clipboard
 
 == Host > Guest (Files) ==
 
