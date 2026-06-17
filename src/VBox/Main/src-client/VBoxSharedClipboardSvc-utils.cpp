@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-utils.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-utils.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service utility functions.
  */
@@ -87,7 +87,7 @@ int ShClSvcGuestDataSignal(PSHCLCLIENT pClient, PSHCLCLIENTCMDCTX pCmdCtx, SHCLF
     int vrc = VINF_SUCCESS;
     PSHCLEVENTPAYLOAD pPayload = NULL;
     if (cbData > 0)
-        vrc = ShClPayloadAlloc(idEvent, pvData, cbData, &pPayload);
+        vrc = ShClPayloadCreateDupData(idEvent, pvData, cbData, &pPayload);
 
     /*
      * Signal the event.
@@ -96,7 +96,7 @@ int ShClSvcGuestDataSignal(PSHCLCLIENT pClient, PSHCLCLIENTCMDCTX pCmdCtx, SHCLF
     if (RT_FAILURE(vrc2))
     {
         vrc = vrc2;
-        ShClPayloadFree(pPayload);
+        ShClPayloadDestroy(pPayload);
         LogRel(("Shared Clipboard: Signalling of guest clipboard data to the host failed: %Rrc\n", vrc));
     }
 

@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-common.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -70,8 +70,7 @@ DECLINLINE(PSHCLEVENT) shclEventGet(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEven
  * @param   cbData              Size (in bytes) of data to associate.
  * @param   ppPayload           Where to store the allocated event payload on success.
  */
-int ShClPayloadInit(uint32_t uID, void *pvData, uint32_t cbData,
-                    PSHCLEVENTPAYLOAD *ppPayload)
+int ShClPayloadCreate(uint32_t uID, void *pvData, uint32_t cbData, PSHCLEVENTPAYLOAD *ppPayload)
 {
     AssertPtrReturn(pvData, VERR_INVALID_POINTER);
     AssertReturn(cbData > 0, VERR_INVALID_PARAMETER);
@@ -91,7 +90,7 @@ int ShClPayloadInit(uint32_t uID, void *pvData, uint32_t cbData,
 }
 
 /**
- * Allocates a new event payload.
+ * Allocates a new event payload, duplicating the data.
  *
  * @returns VBox status code.
  * @param   uID                 Payload ID to set for this payload. Useful for consequtive payloads.
@@ -99,15 +98,19 @@ int ShClPayloadInit(uint32_t uID, void *pvData, uint32_t cbData,
  * @param   cbData              Size (in bytes) of data block to allocate.
  * @param   ppPayload           Where to store the allocated event payload on success.
  */
-int ShClPayloadAlloc(uint32_t uID, const void *pvData, uint32_t cbData,
-                     PSHCLEVENTPAYLOAD *ppPayload)
+int ShClPayloadCreateDupData(uint32_t uID, const void *pvData, uint32_t cbData, PSHCLEVENTPAYLOAD *ppPayload)
 {
     AssertPtrReturn(pvData, VERR_INVALID_POINTER);
     AssertReturn(cbData > 0, VERR_INVALID_PARAMETER);
 
     void *pvDataDup = RTMemDup(pvData, cbData);
     if (pvDataDup)
-        return ShClPayloadInit(uID, pvDataDup, cbData, ppPayload);
+    {
+        int rc = ShClPayloadCreate(uID, pvDataDup, cbData, ppPayload);
+        if (RT_FAILURE(rc))
+            RTMemFree(pvDataDup);
+        return rc;
+    }
 
     return VERR_NO_MEMORY;
 }
@@ -118,7 +121,7 @@ int ShClPayloadAlloc(uint32_t uID, const void *pvData, uint32_t cbData,
  * @returns VBox status code.
  * @param   pPayload            Event payload to free.
  */
-void ShClPayloadFree(PSHCLEVENTPAYLOAD pPayload)
+void ShClPayloadDestroy(PSHCLEVENTPAYLOAD pPayload)
 {
     if (!pPayload)
         return;
@@ -322,7 +325,7 @@ static void shClEventDestroy(PSHCLEVENT pEvent)
         pEvent->hEvtMulSem = NIL_RTSEMEVENT;
     }
 
-    ShClPayloadFree(pEvent->pPayload);
+    ShClPayloadDestroy(pEvent->pPayload);
     pEvent->pPayload = NULL;
 
     pEvent->idEvent = NIL_SHCLEVENTID;

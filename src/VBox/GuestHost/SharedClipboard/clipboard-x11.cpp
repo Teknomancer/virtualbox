@@ -2433,7 +2433,7 @@ SHCL_X11_DECL(void) clipConvertDataFromX11Worker(void *pClient, void *pvSrc, uns
 
             pvDst = NULL; /* The response owns the data now. */
 
-            rc = ShClPayloadInit(0 /* ID, unused */, pResp, cbResp, &pPayload);
+            rc = ShClPayloadCreate(0 /* ID, unused */, pResp, cbResp, &pPayload);
         }
         else
             rc = VERR_NO_MEMORY;
@@ -2449,7 +2449,7 @@ SHCL_X11_DECL(void) clipConvertDataFromX11Worker(void *pClient, void *pvSrc, uns
 
     if (pPayload) /* Free payload on error. */
     {
-        ShClPayloadFree(pPayload);
+        ShClPayloadDestroy(pPayload);
         pPayload = NULL;
     }
 
@@ -2746,7 +2746,7 @@ static int shClX11ReadDataFromX11Internal(PSHCLX11CTX pCtx, PSHCLEVENTSOURCE pEv
                             pPayload->pvData = NULL; /* pvData (pResp) is owned by ppResp now. */
                             pPayload->cbData = 0;
 
-                            ShClPayloadFree(pPayload);
+                            ShClPayloadDestroy(pPayload);
 
                             *ppResp = pResp;
                         }

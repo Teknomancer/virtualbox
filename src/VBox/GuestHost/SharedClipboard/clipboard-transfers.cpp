@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -3652,7 +3652,7 @@ int ShClSvcTransferGHRootListReadHdr(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfe
 
             LogFlowFunc(("cRoots=%RU32, fFeatures=0x%x\n", pHdr->cEntries, pHdr->fFeatures));
 
-            ShClPayloadFree(pPayload);
+            ShClPayloadDestroy(pPayload);
         }
         else
             rc = rcEvent;
@@ -3868,7 +3868,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHListOpen(PSHCLTXPROVIDERCTX pCtx,
 
                         *phList = pReply->u.ListOpen.uHandle;
 
-                        ShClPayloadFree(pPayload);
+                        ShClPayloadDestroy(pPayload);
                     }
                     else
                         rc = rcEvent;
@@ -3956,7 +3956,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHListClose(PSHCLTXPROVIDERCTX pCtx, SHCLL
                     rc = ShClEventWaitEx(pEvent, pCtx->pTransfer->uTimeoutMs, &rcEvent, &pPayload);
                     if (RT_SUCCESS(rc))
                     {
-                        ShClPayloadFree(pPayload);
+                        ShClPayloadDestroy(pPayload);
                     }
                     else
                         rc = rcEvent;
@@ -4020,7 +4020,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHListHdrRead(PSHCLTXPROVIDERCTX pCtx,
 
                     *pListHdr = *(PSHCLLISTHDR)pPayload->pvData;
 
-                    ShClPayloadFree(pPayload);
+                    ShClPayloadDestroy(pPayload);
                 }
                 else
                     rc = rcEvent;
@@ -4083,7 +4083,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHListEntryRead(PSHCLTXPROVIDERCTX pCtx,
 
                     rc = ShClTransferListEntryCopy(pListEntry, (PSHCLLISTENTRY)pPayload->pvData);
 
-                    ShClPayloadFree(pPayload);
+                    ShClPayloadDestroy(pPayload);
                 }
                 else
                     rc = rcEvent;
@@ -4160,7 +4160,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHObjOpen(PSHCLTXPROVIDERCTX pCtx, PSHCLOB
 
                         *phObj = pReply->u.ObjOpen.uHandle;
 
-                        ShClPayloadFree(pPayload);
+                        ShClPayloadDestroy(pPayload);
                     }
                     else
                         rc = rcEvent;
@@ -4227,7 +4227,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHObjClose(PSHCLTXPROVIDERCTX pCtx, SHCLOB
 
                     LogFlowFunc(("hObj=%RU64\n", pReply->u.ObjClose.uHandle));
 #endif
-                    ShClPayloadFree(pPayload);
+                    ShClPayloadDestroy(pPayload);
                 }
                 else
                     rc = rcEvent;
@@ -4299,7 +4299,7 @@ DECLCALLBACK(int) ShClSvcTransferIfaceGHObjRead(PSHCLTXPROVIDERCTX pCtx, SHCLOBJ
                     if (pcbRead)
                         *pcbRead = cbRead;
 
-                    ShClPayloadFree(pPayload);
+                    ShClPayloadDestroy(pPayload);
                 }
                 else
                     rc = rcEvent;

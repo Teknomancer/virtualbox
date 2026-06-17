@@ -245,9 +245,9 @@ typedef struct SHCLEVENTSOURCE
 /** @name Shared Clipboard data payload functions.
  *  @{
  */
-int ShClPayloadInit(uint32_t uID, void *pvData, uint32_t cbData, PSHCLEVENTPAYLOAD *ppPayload);
-int ShClPayloadAlloc(uint32_t uID, const void *pvData, uint32_t cbData, PSHCLEVENTPAYLOAD *ppPayload);
-void ShClPayloadFree(PSHCLEVENTPAYLOAD pPayload);
+int ShClPayloadCreate(uint32_t uID, void *pvData, uint32_t cbData, PSHCLEVENTPAYLOAD *ppPayload);
+int ShClPayloadCreateDupData(uint32_t uID, const void *pvData, uint32_t cbData, PSHCLEVENTPAYLOAD *ppPayload);
+void ShClPayloadDestroy(PSHCLEVENTPAYLOAD pPayload);
 /** @} */
 
 /** @name Shared Clipboard event source functions.

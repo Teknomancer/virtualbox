@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -711,7 +711,7 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
                     if (pPayload)
                     {
                         memcpy(pvData, pPayload->pvData, RT_MIN(cbData, pPayload->cbData));
-                        ShClPayloadFree(pPayload);
+                        ShClPayloadDestroy(pPayload);
                         pPayload = NULL;
                     }
                     else
