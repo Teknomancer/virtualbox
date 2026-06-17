@@ -297,7 +297,7 @@ typedef enum SHCLSOURCE
  *
  * One entry marks exactly one clipboard format at a time.
  */
-typedef struct _SHCLCACHEENTRY
+typedef struct SHCLCACHEENTRY
 {
     /** Entry data.
      *  Acts as a beacon for entry validation. */
@@ -311,7 +311,7 @@ typedef SHCLCACHEENTRY *PSHCLCACHEENTRY;
 /**
  * A (very simple) Shared Clipboard cache.
  */
-typedef struct _SHCLCACHE
+typedef struct SHCLCACHE
 {
     /** Entries for all formats.
      *  Right now this is static to keep it simple. */
@@ -340,7 +340,7 @@ typedef struct SHCLCONTEXT SHCLCONTEXT;
 typedef SHCLCONTEXT *PSHCLCONTEXT;
 
 /**
- * @name Shared Clipboard callback table.
+ * Shared Clipboard callback table.
  *
  * This table gets used by
  *   - the backends on the host (where required)
@@ -352,10 +352,8 @@ typedef SHCLCONTEXT *PSHCLCONTEXT;
  *
  * So overriding required callbacks on runtime for testing purposes makes this approach much
  * more flexible without implementing separate code paths for production code and test units.
- *
- * @{
  */
-typedef struct _SHCLCALLBACKS
+typedef struct SHCLCALLBACKS
 {
     /**
      * Callback for reporting supported clipoard formats of current clipboard data.
@@ -442,7 +440,6 @@ typedef struct _SHCLCALLBACKS
 } SHCLCALLBACKS;
 /** Pointer to a Shared Clipboard callback table. */
 typedef SHCLCALLBACKS *PSHCLCALLBACKS;
-/** @} */
 
 #endif /* !VBOX_INCLUDED_GuestHost_SharedClipboard_h */
 
