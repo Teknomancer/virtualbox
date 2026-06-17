@@ -1,4 +1,4 @@
-/* $Id: main.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114416 2026-06-17 23:01:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -876,10 +876,10 @@ int main(int argc, char *argv[])
     if (RT_SUCCESS(rc))
     {
         VBClLogInfo("Creating worker thread ...\n");
-        rc = RTThreadCreate(&g_Service.Thread, vbclThread, (void *)&g_Service, 0,
-                            RTTHREADTYPE_DEFAULT, RTTHREADFLAGS_WAITABLE, g_Service.pDesc->pszName);
+        rc = RTThreadCreate(&g_Service.Thread, vbclThread, (void *)&g_Service, 0, RTTHREADTYPE_DEFAULT,
+                            RTTHREADFLAGS_WAITABLE | RTTHREADFLAGS_USER_SIGNAL_ON_TERM, g_Service.pDesc->pszName);
         if (RT_FAILURE(rc))
-            VBClLogError("Creating worker thread failed, rc=%Rrc\n", rc);
+            VBClLogError("Creating worker thread failed: %Rrc\n", rc);
         else
         {
             g_Service.fStarted = true;
