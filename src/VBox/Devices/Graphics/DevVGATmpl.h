@@ -1,4 +1,4 @@
-/* $Id: DevVGATmpl.h 114126 2026-05-13 15:03:58Z michal.necasek@oracle.com $ */
+/* $Id: DevVGATmpl.h 114401 2026-06-17 12:03:54Z michal.necasek@oracle.com $ */
 /** @file
  * DevVGA - VBox VGA/VESA device, code templates.
  */
@@ -264,6 +264,10 @@ static void RT_CONCAT(vga_draw_glyph_slow_, DEPTH)(uint8_t *d, int linesize,
     } while (h > 0);
 }
 
+/* VGA memory access macro, reads 32 bits at a time and applies plane mask */
+#define GET_VGA_DW(p_vram, v_ofs, adr_mask, pl_mask)  \
+    (*((uint32_t *)(p_vram + (v_ofs & adr_mask))) & pl_mask)
+
 /*
  * 4 color mode
  */
@@ -282,8 +286,7 @@ static void RT_CONCAT(vga_draw_line2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
     src_inc = 4 << dwb_mode;
     width >>= 3;
 
-    s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-    data = ((uint32_t *)s)[0] & plane_mask;
+    data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
     v1  = expand2[GET_PLANE(data, 0)] << 16;
     v1 |= expand2[GET_PLANE(data, 2)] << 18;
     v1 |= expand2[GET_PLANE(data, 1)] << 0;
@@ -293,8 +296,7 @@ static void RT_CONCAT(vga_draw_line2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
     for(x = 0; x < width; x++) {
 
         vram_ofs += src_inc;
-        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-        data = ((uint32_t *)s)[0] & plane_mask;
+        data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
         v2  = expand2[GET_PLANE(data, 0)] << 16;
         v2 |= expand2[GET_PLANE(data, 2)] << 18;
         v2 |= expand2[GET_PLANE(data, 1)] << 0;
@@ -345,8 +347,7 @@ static void RT_CONCAT(vga_draw_line2d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
     src_inc = 4 << dwb_mode;
     width >>= 3;
 
-    s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-    data = ((uint32_t *)s)[0] & plane_mask;
+    data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
     v1  = expand2[GET_PLANE(data, 0)] << 16;
     v1 |= expand2[GET_PLANE(data, 2)] << 18;
     v1 |= expand2[GET_PLANE(data, 1)] << 0;
@@ -356,8 +357,7 @@ static void RT_CONCAT(vga_draw_line2d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
     for(x = 0; x < width; x++) {
 
         vram_ofs += src_inc;
-        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-        data = ((uint32_t *)s)[0] & plane_mask;
+        data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
         v2  = expand2[GET_PLANE(data, 0)] << 16;
         v2 |= expand2[GET_PLANE(data, 2)] << 18;
         v2 |= expand2[GET_PLANE(data, 1)] << 0;
@@ -403,8 +403,7 @@ static void RT_CONCAT(vga_draw_line4_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
     // planes.
 
     // Preload and shift the first 8 pixels
-    s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-    data = ((uint32_t *)s)[0] & plane_mask;
+    data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
     v1 = expand4[GET_PLANE(data, 0)];
     v1 |= expand4[GET_PLANE(data, 1)] << 1;
     v1 |= expand4[GET_PLANE(data, 2)] << 2;
@@ -415,8 +414,7 @@ static void RT_CONCAT(vga_draw_line4_, DEPTH)(VGAState *s1, PVGASTATER3 pThisCC,
 
         // Advance address counter and load the next 8 pixels
         vram_ofs += 4;
-        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-        data = ((uint32_t *)s)[0] & plane_mask;
+        data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
         v2 = expand4[GET_PLANE(data, 0)];
         v2 |= expand4[GET_PLANE(data, 1)] << 1;
         v2 |= expand4[GET_PLANE(data, 2)] << 2;
@@ -456,8 +454,7 @@ static void RT_CONCAT(vga_draw_line4d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
     plane_mask = mask16[s1->ar[0x12] & 0xf];
     width >>= 3;
 
-    s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-    data = ((uint32_t *)s)[0] & plane_mask;
+    data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
     v1 = expand4[GET_PLANE(data, 0)];
     v1 |= expand4[GET_PLANE(data, 1)] << 1;
     v1 |= expand4[GET_PLANE(data, 2)] << 2;
@@ -467,8 +464,7 @@ static void RT_CONCAT(vga_draw_line4d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
     for(x = 0; x < width; x++) {
 
         vram_ofs += 4;
-        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-        data = ((uint32_t *)s)[0] & plane_mask;
+        data = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
         v2 = expand4[GET_PLANE(data, 0)];
         v2 |= expand4[GET_PLANE(data, 1)] << 1;
         v2 |= expand4[GET_PLANE(data, 2)] << 2;
@@ -525,15 +521,13 @@ static void RT_CONCAT(vga_draw_line8d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
 
     // Preload one group of 4 pixels in case shifting is in effect. This only
     // needs to be done once per scanline.
-    s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-    v = ((uint32_t *)s)[0] & plane_mask;
+    v = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
     v >>= lskip * 8;
 
     for(x = 0; x < width; x++) {
         // Advance address counter and load the next four pixels
         vram_ofs += src_inc;
-        s = pThisCC->pbVRam + (vram_ofs & s1->vga_addr_mask);
-        v1 = ((uint32_t *)s)[0] & plane_mask;
+        v1 = GET_VGA_DW(pThisCC->pbVRam, vram_ofs, s1->vga_addr_mask, plane_mask);
 
         // Place the next 4 pixels in the pipeline
         v1 <<= 32 - (lskip * 8);
@@ -548,6 +542,8 @@ static void RT_CONCAT(vga_draw_line8d2_, DEPTH)(VGAState *s1, PVGASTATER3 pThisC
         d += BPP * 8;
     }
 }
+
+#undef GET_VGA_DW
 
 /*
  * standard 256 color mode
