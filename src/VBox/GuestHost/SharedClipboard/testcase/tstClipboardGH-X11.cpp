@@ -1,4 +1,4 @@
-/* $Id: tstClipboardGH-X11.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardGH-X11.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard guest/host X11 code test cases.
  */
@@ -664,7 +664,7 @@ int main()
     uint32_t cbActual = 0;
     uint8_t  abBuf[TESTCASE_MAX_BUF_SIZE];
 
-    RTTESTI_CHECK_RC_OK(ShClEventSourceCreate(&g_EventSource, 0 /* ID */));
+    RTTESTI_CHECK_RC_OK(ShClEventSourceInit(&g_EventSource, 0 /* ID */));
 
     /* UTF-8 from X11 */
     RTTestSub(hTest, "reading UTF-8 from X11");
@@ -895,7 +895,7 @@ int main()
     tstNoSelectionOwnership(&X11Ctx, "reading from VBox, headless clipboard");
 
     RTTEST_CHECK_RC_OK(hTest, ShClX11Destroy(&X11Ctx));
-    ShClEventSourceDestroy(&g_EventSource);
+    ShClEventSourceTerm(&g_EventSource);
 
     return RTTestSummaryAndDestroy(hTest);
 }

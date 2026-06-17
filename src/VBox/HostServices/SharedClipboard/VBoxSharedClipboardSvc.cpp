@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114369 2026-06-15 19:59:09Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -312,7 +312,7 @@ static void shClSvcClientDestroy(PSHCLCLIENT pClient);
 static void shClSvcClientMsgQueueReset(PSHCLCLIENT pClient);
 
 static int  shClSvcClientStateInit(PSHCLCLIENTSTATE pState, uint32_t uClientID);
-static int  shClSvcClientStateDestroy(PSHCLCLIENTSTATE pState);
+static int  shClSvcClientStateTerm(PSHCLCLIENTSTATE pState);
 static void shclSvcClientStateReset(PSHCLCLIENTSTATE pState);
 
 
@@ -469,7 +469,7 @@ int ShClSvcClientInit(PSHCLCLIENT pClient, uint32_t uClientID)
     if (RT_SUCCESS(rc))
     {
         /* Create the client's own event source. */
-        rc = ShClEventSourceCreate(&pClient->EventSrc, 0 /* ID, ignored */);
+        rc = ShClEventSourceInit(&pClient->EventSrc, 0 /* ID, ignored */);
         if (RT_SUCCESS(rc))
         {
             LogFlowFunc(("[Client %RU32] Using event source %RU32\n", uClientID, pClient->EventSrc.uID));
@@ -523,8 +523,8 @@ static void shClSvcClientDestroy(PSHCLCLIENT pClient)
     ShClTransferCtxDestroy(&pClient->Transfers.Ctx);
 #endif
 
-    ShClEventSourceDestroy(&pClient->EventSrc);
-    shClSvcClientStateDestroy(&pClient->State);
+    ShClEventSourceUninit(&pClient->EventSrc);
+    shClSvcClientStateTerm(&pClient->State);
 
     ShClSvcClientUnlock(pClient);
 
@@ -1857,12 +1857,12 @@ static int shClSvcClientStateInit(PSHCLCLIENTSTATE pClientState, uint32_t uClien
 }
 
 /**
- * Destroys a Shared Clipboard service's client state.
+ * Terminated (uninitializes) a Shared Clipboard service's client state.
  *
  * @returns VBox status code.
  * @param   pState              Client state to destroy.
  */
-static int shClSvcClientStateDestroy(PSHCLCLIENTSTATE pState)
+static int shClSvcClientStateTerm(PSHCLCLIENTSTATE pState)
 {
     LogFlowFuncEnter();
 

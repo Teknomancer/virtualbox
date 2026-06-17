@@ -253,8 +253,8 @@ void ShClPayloadFree(PSHCLEVENTPAYLOAD pPayload);
 /** @name Shared Clipboard event source functions.
  *  @{
  */
-int ShClEventSourceCreate(PSHCLEVENTSOURCE pSource, SHCLEVENTSOURCEID idEvtSrc);
-int ShClEventSourceDestroy(PSHCLEVENTSOURCE pSource);
+int ShClEventSourceInit(PSHCLEVENTSOURCE pSource, SHCLEVENTSOURCEID idEvtSrc);
+int ShClEventSourceTerm(PSHCLEVENTSOURCE pSource);
 void ShClEventSourceReset(PSHCLEVENTSOURCE pSource);
 int ShClEventSourceGenerateAndRegisterEvent(PSHCLEVENTSOURCE pSource, PSHCLEVENT *ppEvent);
 PSHCLEVENT ShClEventSourceGetFromId(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEvent);

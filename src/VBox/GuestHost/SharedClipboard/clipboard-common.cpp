@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114381 2026-06-16 06:43:15Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -137,13 +137,13 @@ void ShClPayloadFree(PSHCLEVENTPAYLOAD pPayload)
 }
 
 /**
- * Creates a new event source.
+ * Initializes a new event source.
  *
  * @returns VBox status code.
- * @param   pSource             Event source to create.
+ * @param   pSource             Event source to initialize.
  * @param   uID                 ID to use for event source.
  */
-int ShClEventSourceCreate(PSHCLEVENTSOURCE pSource, SHCLEVENTSOURCEID uID)
+int ShClEventSourceInit(PSHCLEVENTSOURCE pSource, SHCLEVENTSOURCEID uID)
 {
     LogFlowFunc(("pSource=%p, uID=%RU16\n", pSource, uID));
     AssertPtrReturn(pSource, VERR_INVALID_POINTER);
@@ -161,12 +161,12 @@ int ShClEventSourceCreate(PSHCLEVENTSOURCE pSource, SHCLEVENTSOURCEID uID)
 }
 
 /**
- * Destroys an event source.
+ * Terminates (uninitializes) an event source.
  *
  * @returns VBox status code.
- * @param   pSource             Event source to destroy.
+ * @param   pSource             Event source to delete.
  */
-int ShClEventSourceDestroy(PSHCLEVENTSOURCE pSource)
+int ShClEventSourceTerm(PSHCLEVENTSOURCE pSource)
 {
     if (!pSource)
         return VINF_SUCCESS;
