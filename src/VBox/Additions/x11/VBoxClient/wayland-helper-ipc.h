@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-ipc.h 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-ipc.h 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for IPC between VBoxClient and vboxwl tool.
  */
@@ -232,7 +232,7 @@ namespace vbcl
             };
 
             /** IPC flow description (DnD): DnD operation started inside guest and
-             *  guest reports DnD content mime-type list. Host side picks up one
+             *  guest reports DnD content MIME type list. Host side picks up one
              *  of the formats and requests data in this format. Guest sends
              *  data in requested format. */
             const flow_t GHDragFlow[4] =
@@ -244,7 +244,7 @@ namespace vbcl
             };
 
             /** IPC flow description (DnD): DnD operation started on host and
-             *  host reports DnD content mime-type list. Guest side picks up one
+             *  host reports DnD content MIME type list. Guest side picks up one
              *  of the formats and requests data in this format. Host sends
              *  data in requested format. */
             const flow_t HGDragFlow[4] =

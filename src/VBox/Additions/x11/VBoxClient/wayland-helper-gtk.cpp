@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -356,8 +356,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker(RTTHREAD ThreadSelf, void *
                             {
                                 VBClLogVerbose(1, "new IPC connection\n");
 
-                                rc = vbcl_wayland_session_join(&pCtx->Session.Base,
-                                                               vbcl_wayland_hlp_gtk_worker_join_cb, pCtx);
+                                rc = VBClWaylandSessionJoinAnyType(&pCtx->Session.Base, vbcl_wayland_hlp_gtk_worker_join_cb, pCtx);
 
                                 VBClLogVerbose(1, "IPC flow completed, rc=%Rrc\n", rc);
 
@@ -457,37 +456,26 @@ static DECLCALLBACK(void) vbcl_wayland_hlp_gtk_clip_set_ctx(PVBGLR3SHCLCMDCTX pC
 }
 
 /**
- * Session callback: Announce clipboard to the host.
+ * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
+ *      Session callback: Announce clipboard to the host.
  *
  * This callback (1) waits for the guest to report its clipboard content
  * via IPC connection from vboxwl tool, and (2) reports these formats
  * to the host.
- *
- * @returns IPRT status code.
- * @param   enmSessionType      Session type, must be verified as
- *                              a consistency check.
- * @param   pvUser              User data.
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_popup_join_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_popup_join_cb(void *pvUser)
 {
-    int rc = (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
     VBCL_LOG_CALLBACK;
 
     vbox_wl_gtk_ctx_t *pCtx = (vbox_wl_gtk_ctx_t *)pvUser;
     AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
 
-    if (RT_SUCCESS(rc))
-    {
-        SHCLFORMATS fFmts = pCtx->Session.oDataIpc->m_fFmts.wait();
-        if (fFmts !=  pCtx->Session.oDataIpc->m_fFmts.defaults())
-            rc = VbglR3ClipboardReportFormats(pCtx->pClipboardCtx->idClient, fFmts);
-        else
-            rc = VERR_TIMEOUT;
-    }
-
+    int rc;
+    SHCLFORMATS fFmts = pCtx->Session.oDataIpc->m_fFmts.wait();
+    if (fFmts != pCtx->Session.oDataIpc->m_fFmts.defaults())
+        rc = VbglR3ClipboardReportFormats(pCtx->pClipboardCtx->idClient, fFmts);
+    else
+        rc = VERR_TIMEOUT;
     return rc;
 }
 
@@ -506,17 +494,15 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_popup(void)
                                     &vbcl_wayland_hlp_gtk_session_start_generic_cb,
                                     pCtx);
     if (RT_SUCCESS(rc))
-    {
-        rc = vbcl_wayland_session_join(&pCtx->Session.Base,
-                                       &vbcl_wayland_hlp_gtk_clip_popup_join_cb,
-                                       pCtx);
-    }
+        rc = VBClWaylandSessionJoin(&pCtx->Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST,
+                                    vbcl_wayland_hlp_gtk_clip_popup_join_cb, pCtx);
 
     return rc;
 }
 
 /**
- * Session callback: Copy clipboard from the host.
+ * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
+ *      Session callback: Copy clipboard from the host.}
  *
  * This callback (1) sets host clipboard formats list to the session,
  * (2) waits for guest to request clipboard in specific format, (3) read
@@ -526,52 +512,36 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_popup(void)
  * This callback should not return until clipboard data is read from
  * the host or error occurred. It must block host events loop until
  * current host event is fully processed.
- *
- * @returns IPRT status code.
- * @param   enmSessionType      Session type, must be verified as
- *                              a consistency check.
- * @param   pvUser              User data (host clipboard formats).
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report_join_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report_join_cb(void *pvUser)
 {
-    struct vbcl_wayland_hlp_gtk_clip_hg_report_priv *pPriv =
-        (struct vbcl_wayland_hlp_gtk_clip_hg_report_priv *)pvUser;
-    AssertPtrReturn(pPriv, VERR_INVALID_POINTER);
+    AssertPtrReturn(pvUser, VERR_INVALID_POINTER);
+    vbox_wl_gtk_ctx_t * const pCtx  = ((struct vbcl_wayland_hlp_gtk_clip_hg_report_priv const *)pvUser)->pCtx;
+    SHCLFORMATS const         fFmts = ((struct vbcl_wayland_hlp_gtk_clip_hg_report_priv const *)pvUser)->fFormats;
+    VBClLogVerbose(3, "%s: %#x\n", __func__, fFmts);
 
-    SHCLFORMAT uFmt;
+    pCtx->Session.oDataIpc->m_fFmts.set(fFmts);
 
-    int rc =   (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
-    VBCL_LOG_CALLBACK;
-
-    if (RT_SUCCESS(rc))
+    /** @todo r=bird: The following makes no sense as there is no guarantee that
+     *        the clipboard will be read... */
+    int rc;
+    SHCLFORMAT const uFmt = pCtx->Session.oDataIpc->m_uFmt.wait();
+    if (uFmt != pCtx->Session.oDataIpc->m_uFmt.defaults())
     {
-        pPriv->pCtx->Session.oDataIpc->m_fFmts.set(pPriv->fFormats);
-
-        uFmt = pPriv->pCtx->Session.oDataIpc->m_uFmt.wait();
-        if (uFmt != pPriv->pCtx->Session.oDataIpc->m_uFmt.defaults())
+        void    *pvData = NULL;
+        uint32_t cbData = 0;
+        rc = VBClClipboardReadHostClipboard(pCtx->pClipboardCtx, uFmt, &pvData, &cbData);
+        if (RT_SUCCESS(rc))
         {
-            void *pvData;
-            uint32_t cbData;
-
-            rc = VBClClipboardReadHostClipboard(pPriv->pCtx->pClipboardCtx, uFmt, &pvData, &cbData);
-            if (RT_SUCCESS(rc))
-            {
-                VBClLogVerbose(5, "vbcl_wayland_hlp_gtk_clip_hg_report_join_cb: Setting pvDataBuf=%p cbDataBuf=%#x (uFmt=%#x)...\n",
-                               pvData, cbData, uFmt);
-                pPriv->pCtx->Session.oDataIpc->m_pvDataBuf.set((uint64_t)pvData);
-                pPriv->pCtx->Session.oDataIpc->m_cbDataBuf.set((uint64_t)cbData);
-            }
-            else
-                VBClLogError("VBClClipboardReadHostClipboard failed in vbcl_wayland_hlp_gtk_clip_hg_report_join_cb getting %#x: %Rrc\n",
-                             uFmt, rc);
+            VBClLogVerbose(5, "%s: Setting pvDataBuf=%p cbDataBuf=%#x (uFmt=%#x)...\n", __func__, pvData, cbData, uFmt);
+            pCtx->Session.oDataIpc->m_pvDataBuf.set((uint64_t)pvData);
+            pCtx->Session.oDataIpc->m_cbDataBuf.set((uint64_t)cbData);
         }
         else
-            rc = VERR_TIMEOUT;
+            VBClLogError("VBClClipboardReadHostClipboard failed in %s getting %#x: %Rrc\n", __func__, uFmt, rc);
     }
-
+    else
+        rc = VERR_TIMEOUT;
     return rc;
 }
 
@@ -580,25 +550,28 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report_join_cb(
  */
 static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report(SHCLFORMATS fFormats)
 {
-    int rc = VERR_NO_DATA;
-    vbox_wl_gtk_ctx_t *pCtx = &g_GtkClipCtx;
+    VBClLogVerbose(3, "%s: %#x\n", __func__, fFormats);
 
-    VBCL_LOG_CALLBACK;
-
+    int rc;
     if (fFormats != VBOX_SHCL_FMT_NONE)
     {
+        vbox_wl_gtk_ctx_t *pCtx = &g_GtkClipCtx;
         rc = vbcl_wayland_session_start(&pCtx->Session.Base,
                                         VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST,
                                         &vbcl_wayland_hlp_gtk_session_start_generic_cb,
                                         pCtx);
         if (RT_SUCCESS(rc))
         {
-            struct vbcl_wayland_hlp_gtk_clip_hg_report_priv priv = { pCtx, fFormats };
-
-            rc = vbcl_wayland_session_join(&pCtx->Session.Base,
-                                           &vbcl_wayland_hlp_gtk_clip_hg_report_join_cb,
-                                           &priv);
+            struct vbcl_wayland_hlp_gtk_clip_hg_report_priv Args = { pCtx, fFormats };
+            rc = VBClWaylandSessionJoin(&pCtx->Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST,
+                                        vbcl_wayland_hlp_gtk_clip_hg_report_join_cb, &Args);
         }
+    }
+    else
+    {
+        /** @todo r=bird: if the current session is copy-to-copy, end it. Can we tell
+         *        the rest of wayland that we no longer have any clipboard data?  */
+        rc = VERR_NO_DATA;
     }
 
     return rc;
@@ -620,20 +593,17 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report(SHCLFORMATS fFormat
  *                              a consistency check.
  * @param   pvUser              User data (requested format).
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_gh_read_join_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_gh_read_join_cb(vbcl_wl_session_type_t enmSessionType, void *pvUser)
 {
     struct vbcl_wayland_hlp_gtk_clip_gh_read_priv *pPriv =
         (struct vbcl_wayland_hlp_gtk_clip_gh_read_priv *)pvUser;
     AssertPtrReturn(pPriv, VERR_INVALID_POINTER);
 
-    int rc = (   enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST
-              || enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST)
-             ? VINF_SUCCESS : VERR_WRONG_ORDER;
-
     VBCL_LOG_CALLBACK;
 
-    if (RT_SUCCESS(rc))
+    int rc;
+    if (   enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST
+        || enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST)
     {
         void *pvData;
         uint32_t cbData;
@@ -653,7 +623,8 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_gh_read_join_cb(
         else
             rc = VERR_TIMEOUT;
     }
-
+    else
+        rc = VERR_WRONG_ORDER;
     return rc;
 }
 
@@ -697,11 +668,8 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_gh_read(SHCLFORMAT uFmt)
 
         if (RT_SUCCESS(rc))
         {
-            struct vbcl_wayland_hlp_gtk_clip_gh_read_priv priv = { pCtx, uFmt };
-
-            rc = vbcl_wayland_session_join(&pCtx->Session.Base,
-                                           &vbcl_wayland_hlp_gtk_clip_gh_read_join_cb,
-                                           &priv);
+            struct vbcl_wayland_hlp_gtk_clip_gh_read_priv Args = { pCtx, uFmt };
+            rc = VBClWaylandSessionJoinAnyType(&pCtx->Session.Base, vbcl_wayland_hlp_gtk_clip_gh_read_join_cb, &Args);
         }
     }
 

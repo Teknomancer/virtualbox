@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114374 2026-06-15 20:35:25Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -72,7 +72,7 @@ typedef struct
 {
     /** IPRT list node. */
     RTLISTNODE  Node;
-    /** Data mime-type in string representation. */
+    /** Data MIME type in string representation. */
     RT_FLEXIBLE_ARRAY_EXTENSION
     char        szMimeType[RT_FLEXIBLE_ARRAY];
 } vbox_wl_dcp_mime_t;
@@ -163,16 +163,16 @@ typedef struct
 /** Data required to write clipboard content to Wayland. */
 struct vbcl_wl_dcp_write_ctx
 {
-    /** Content mime-type in string representation. */
+    /** Content MIME type in string representation. */
     const char *pcszMimeType;
     /** Active file descriptor to write data into. */
     int32_t fd;
 };
 
-/** Data required to enumerate clipboard content by mime-type. */
+/** Data required to enumerate clipboard content by MIME type. */
 struct vbcl_wl_dcp_enumerate_ctx
 {
-    /** Content mime-type in string representation. */
+    /** Content MIME type in string representation. */
     const char *pcszMimeType;
     /** Active file descriptor to write data into. */
     vbox_wl_dcp_session_t *pSession;
@@ -200,7 +200,7 @@ RTDECL(void) vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx);
 /**
  * Collect clipboard format advertised by Wayland.
  *
- * This callback adds mime-type just advertised by Wayland into a list
+ * This callback adds MIME type just advertised by Wayland into a list
  * of MIME types which in turn later will be advertised to the host.
  *
  * @returns IPRT status code.

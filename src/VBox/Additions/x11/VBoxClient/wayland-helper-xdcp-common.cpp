@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -439,7 +439,7 @@ RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx)
             pNode->szMimeType[cchMimeType] = '\0';
 
             RTListAppend(&pSession->clip.mimeTypesList, &pNode->Node);
-            VBClLogVerbose(5, "Wayland announces mime-type: %s\n", pNode->szMimeType);
+            VBClLogVerbose(5, "Wayland announces MIME type: %s\n", pNode->szMimeType);
 
             rc = VINF_SUCCESS;
         }
@@ -514,7 +514,7 @@ RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
             pCtx->Session.clip.cbDataBuf.set((uint64_t)cbBufOut);
 
             rc = VbghMimeConvCacheSetByMime(pCtx->hCache, pszMimeType, pvBufOut, cbBufOut);
-            VBClLogVerbose(5, "Put %u bytes into cache for mime-type: %s\n", cbBufOut, pszMimeType);
+            VBClLogVerbose(5, "Put %u bytes into cache for MIME type: %s\n", cbBufOut, pszMimeType);
         }
 
         RTMemFree(pvBuf);
@@ -588,6 +588,8 @@ RTDECL(int) vbcl_wayland_xdcp_get_host_clipboard(vbox_wl_xdcp_base_ctx_t *pCtx, 
     int rc;
 
     /* Wait for the guest to request certain clipboard format. */
+    /** @todo r=bird: The following makes no sense as there is no guarantee that
+     *        the clipboard will be read... */
     SHCLFORMAT const uFmt = pCtx->Session.clip.uFmt.wait();
     if (uFmt != pCtx->Session.clip.uFmt.defaults())
     {

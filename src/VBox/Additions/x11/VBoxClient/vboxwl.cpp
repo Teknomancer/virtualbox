@@ -1,4 +1,4 @@
-/* $Id: vboxwl.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
+/* $Id: vboxwl.cpp 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland helper for grabbing input focus, drag-n-drop and clipboard sharing.
  */
@@ -313,7 +313,7 @@ static void vboxwl_gtk_clipboard_write(GtkClipboard *pClipboard,
             /* Ask Gtk to quit on the next event loop iteration. */
             g_nsGtkQuit = RTTimeMilliTS();
 
-            VBClLogVerbose(2, "session %u: paste %u bytes of mime-type '%s' into Gtk\n",
+            VBClLogVerbose(2, "session %u: paste %u bytes of MIME type '%s' into Gtk\n",
                            g_idSession, cbOut, sTargetName);
         }
         else
