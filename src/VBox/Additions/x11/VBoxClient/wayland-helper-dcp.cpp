@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -449,7 +449,7 @@ static const struct zwlr_data_control_device_v1_listener g_data_device_listener 
 
 /**
  * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Copy clipboard to the guest.
+ *      Session callback: Copy clipboard to the guest.}
  *
  * Worker for vbcl_wayland_hlp_dcp_data_source_send().
  *
@@ -673,7 +673,7 @@ vbcl_wayland_hlp_dcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPri
 
 /**
  * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Advertise clipboard to the guest.
+ *      Session callback: Advertise clipboard to the guest.}
  *
  * This callback must be executed in context of Wayland event thread
  * in order to be able to inject clipboard content into Wayland.
@@ -841,7 +841,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_popup(void)
 
 /**
  * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Copy clipboard from the host.
+ *      Session callback: Copy clipboard from the host.}
  *
  * This callback (1) sets host clipboard formats list to the session,
  * (2) asks Wayland event thread to advertise these formats to the guest,

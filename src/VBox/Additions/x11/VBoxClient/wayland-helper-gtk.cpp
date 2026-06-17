@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -457,7 +457,7 @@ static DECLCALLBACK(void) vbcl_wayland_hlp_gtk_clip_set_ctx(PVBGLR3SHCLCMDCTX pC
 
 /**
  * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Announce clipboard to the host.
+ *      Session callback: Announce clipboard to the host.}
  *
  * This callback (1) waits for the guest to report its clipboard content
  * via IPC connection from vboxwl tool, and (2) reports these formats

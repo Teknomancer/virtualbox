@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -81,7 +81,8 @@ typedef struct
  * DCP session data.
  *
  * A structure which accumulates all the necessary data required to
- * maintain session between host and Wayland for clipboard sharing. */
+ * maintain session between host and Wayland for clipboard sharing.
+ */
 typedef struct
 {
     /** Generic VBoxClient Wayland session data (synchronization point). */
@@ -118,8 +119,9 @@ typedef struct
 } vbox_wl_dcp_session_t;
 
 /**
- * A set of objects required to handle clipboard sharing over
- * Data Control Protocol. */
+ * A set of objects required to handle clipboard sharing over Ext or Legacy Data
+ * Control Protocol.
+ */
 typedef struct
 {
     /** Wayland event loop thread. */
@@ -134,10 +136,12 @@ typedef struct
     /** MIME types data cache. */
     VBGHMIMECONVCACHE                           hCache;
 
-    /** When set, incoming clipboard announcements will
-     *  be ignored. This flag is used in order to prevent a feedback
-     *  loop when host advertises clipboard data to Wayland. In this case,
-     *  Wayland will send the same advertisements back to us.  */
+    /** When set, incoming clipboard announcements will be ignored.
+     *
+     * This flag is used in order to prevent a feedback loop when host advertises
+     * clipboard data to Wayland. In this case, Wayland will send the same
+     * advertisements back
+     * to us. */
     bool                                        fIngnoreWlClipIn;
 
     /** A flag which indicates that host has announced new clipboard content

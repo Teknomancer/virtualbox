@@ -1,4 +1,4 @@
-/* $Id: wayland-helper.h 114400 2026-06-17 10:35:00Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.h 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Wayland helpers.
  */
@@ -428,7 +428,7 @@ int VBClWaylandSessionJoinEx(vbcl_wl_session_t *pSession, vbcl_wl_session_type_t
  *                      for logging)
  */
 int VBClWaylandSessionJoinAnyTypeEx(vbcl_wl_session_t *pSession, PFNVBCLWLSESSIONCB pfnCallback,
-                                    void *pvUser, const char *pcszCaller);
+                                    void *pvUser, const char *pszCaller);
 
 /**
  * Join any type of session.
