@@ -1,4 +1,4 @@
-/* $Id: display-ipc.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: display-ipc.cpp 114399 2026-06-17 07:56:34Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - DRM IPC communication core functions.
  */
@@ -81,7 +81,7 @@
  * @param   pfnRxCb             IPC RX callback function pointer.
  */
 RTDECL(int) vbDrmIpcClientInit(PVBOX_DRMIPC_CLIENT pClient, RTTHREAD hThread, RTLOCALIPCSESSION hClientSession,
-                             uint32_t cTxListCapacity, PFNDRMIPCRXCB pfnRxCb)
+                               uint32_t cTxListCapacity, PFNDRMIPCRXCB pfnRxCb)
 {
     AssertReturn(pClient,           VERR_INVALID_PARAMETER);
     AssertReturn(hThread,           VERR_INVALID_PARAMETER);

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114396 2026-06-16 19:46:08Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114399 2026-06-17 07:56:34Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -698,7 +698,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_event_loop(RTTHREAD ThreadSelf, vo
             {
                 int rc2 = vbcl_wayland_xdcp_next_event(&pCtx->BaseCtx);
                 if (   rc2 != VERR_TIMEOUT
-                    && RT_FAILURE(rc))
+                    && RT_FAILURE(rc2))
                     VBClLogError("cannot read event from Wayland: rc2=%Rrc\n", rc2);
 
                 if (pCtx->BaseCtx.fSendToGuest.reset())
