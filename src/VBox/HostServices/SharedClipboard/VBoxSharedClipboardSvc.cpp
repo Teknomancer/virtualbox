@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114410 2026-06-17 21:11:52Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -523,7 +523,7 @@ static void shClSvcClientDestroy(PSHCLCLIENT pClient)
     ShClTransferCtxDestroy(&pClient->Transfers.Ctx);
 #endif
 
-    ShClEventSourceUninit(&pClient->EventSrc);
+    ShClEventSourceTerm(&pClient->EventSrc);
     shClSvcClientStateTerm(&pClient->State);
 
     ShClSvcClientUnlock(pClient);
