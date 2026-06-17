@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114404 2026-06-17 13:13:12Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114406 2026-06-17 13:29:40Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for regenerating PlantUML diagrams under doc/iuml.
 #
@@ -40,15 +40,15 @@ OTHERS += $(VBOX_IUML_PNGS)
 
 VBOX_IUML_JAVA ?= java
 VBOX_IUML_PLANTUML_JAR ?= $(firstword \
-	$(rsort $(wildcard $(KBUILD_DEVTOOLS)/common/plantuml/v*/plantuml.jar)) \
-	$(rsort $(wildcard $(PATH_ROOT)/tools/common/plantuml/v*/plantuml.jar)))
+		$(rsort $(wildcard $(KBUILD_DEVTOOLS)/common/plantuml/v*/plantuml.jar)) \
+		$(rsort $(wildcard $(PATH_ROOT)/tools/common/plantuml/v*/plantuml.jar)))
 VBOX_IUML_PLANTUML_DOT ?= $(GRAPHVIZ_DOT)
 
 .PHONY: iuml-png
 
 iuml-png: $(VBOX_IUML_PNGS)
 
-$(VBOX_IUML_PNGS): %.png: %.iuml $(VBOX_IUML_INCLUDE_FILES) $(VBOX_IUML_PLANTUML_JAR)
+$(VBOX_IUML_PNGS): %.png : %.iuml $(VBOX_IUML_INCLUDE_FILES) $(VBOX_IUML_PLANTUML_JAR)
 	$(call MSG_L1,Generating $@)
 	$(QUIET)$(REDIRECT) -C $(PATH_SUB_CURRENT) -- $(VBOX_IUML_JAVA) -jar "$(VBOX_IUML_PLANTUML_JAR)" \
 		$(if $(VBOX_IUML_PLANTUML_DOT),-graphvizdot "$(VBOX_IUML_PLANTUML_DOT)",) \
