@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.h 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.h 114423 2026-06-18 07:53:57Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - header file for shared clipboard data transfer
  * interfaces and platform-dependent backend functionality.
@@ -491,13 +491,6 @@ int ShClBackendTransferHandleStatusReply(PSHCLBACKEND pBackend, PSHCLCLIENT pCli
 #endif
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-/** @name Internal Shared Clipboard transfer host service functions.
- * @{
- */
-int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE callHandle, uint32_t u32Function, uint32_t cParms, VBOXHGCMSVCPARM paParms[], uint64_t tsArrival);
-int ShClSvcTransferMsgHostHandler(uint32_t u32Function, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
-/** @} */
-
 /** @name Shared Clipboard transfer interface implementations for guest -> host transfers.
  * @{
  */

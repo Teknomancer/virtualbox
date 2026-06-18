@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114421 2026-06-18 07:33:09Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114423 2026-06-18 07:53:57Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -1129,23 +1129,11 @@ static DECLCALLBACK(void) svcCall(void *,
         default:
         {
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-            if (   u32Function <= VBOX_SHCL_GUEST_FN_LAST
-                && (pClient->State.fGuestFeatures0 &  VBOX_SHCL_GF_0_CONTEXT_ID) )
-            {
-                if (g_fTransferMode & VBOX_SHCL_TRANSFER_MODE_F_ENABLED)
-                    rc = ShClSvcTransferMsgClientHandler(pClient, callHandle, u32Function, cParms, paParms, tsArrival);
-                else
-                {
-                    LogRel2(("Shared Clipboard: File transfers are disabled for this VM\n"));
-                    rc = VERR_ACCESS_DENIED;
-                }
-            }
-            else
+            rc = ShClSvcTransferMsgClientHandler(pClient, callHandle, u32Function, cParms, paParms, tsArrival);
+#else
+            LogRel2(("Shared Clipboard: Unknown guest function: %u (%#x)\n", u32Function, u32Function));
+            rc = VERR_NOT_IMPLEMENTED;
 #endif
-            {
-                LogRel2(("Shared Clipboard: Unknown guest function: %u (%#x)\n", u32Function, u32Function));
-                rc = VERR_NOT_IMPLEMENTED;
-            }
             break;
         }
     }
@@ -1210,23 +1198,6 @@ static DECLCALLBACK(int) svcHostCall(void *,
             break;
         }
 
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-        case VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE:
-        {
-            if (cParms != 1)
-            {
-                rc = VERR_INVALID_PARAMETER;
-            }
-            else
-            {
-                uint32_t fTransferMode;
-                rc = HGCMSvcGetU32(&paParms[0], &fTransferMode);
-                if (RT_SUCCESS(rc))
-                    rc = shClSvcTransferModeSet(fTransferMode);
-            }
-            break;
-        }
-#endif
         case VBOX_SHCL_HOST_FN_SET_HEADLESS:
         {
             if (cParms != 1)

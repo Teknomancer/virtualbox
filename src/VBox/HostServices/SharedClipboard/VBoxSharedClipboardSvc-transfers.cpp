@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114421 2026-06-18 07:33:09Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114423 2026-06-18 07:53:57Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -48,6 +48,12 @@
 
 #include "VBoxSharedClipboardSvc-internal.h"
 #include "VBoxSharedClipboardSvc-transfers.h"
+
+
+/*********************************************************************************************************************************
+*   Internal Functions                                                                                                           *
+*********************************************************************************************************************************/
+static int shClSvcTransferModeSet(uint32_t fMode);
 
 
 /**
@@ -839,6 +845,16 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
     LogFlowFunc(("uClient=%RU32, u32Function=%RU32 (%s), cParms=%RU32, g_ExtState.pfnExtension=%p\n",
                  pClient->State.uClientID, u32Function, ShClGuestMsgToStr(u32Function), cParms, g_ExtState.pfnExtension));
 
+    if (   u32Function > VBOX_SHCL_GUEST_FN_LAST
+        || !(pClient->State.fGuestFeatures0 & VBOX_SHCL_GF_0_CONTEXT_ID))
+        return VERR_NOT_IMPLEMENTED;
+
+    if (!(g_fTransferMode & VBOX_SHCL_TRANSFER_MODE_F_ENABLED))
+    {
+        LogRel2(("Shared Clipboard: File transfers are disabled for this VM\n"));
+        return VERR_ACCESS_DENIED;
+    }
+
     /* Check if we've the right mode set. */
     if (!shClSvcTransferMsgIsAllowed(ShClSvcGetMode(), u32Function))
     {
@@ -1282,12 +1298,24 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
                                   uint32_t cParms,
                                   VBOXHGCMSVCPARM aParms[])
 {
-    RT_NOREF(cParms, aParms);
-
     int rc = VERR_NOT_IMPLEMENTED; /* Play safe. */
 
     switch (u32Function)
     {
+        case VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE:
+        {
+            if (cParms != 1)
+                rc = VERR_INVALID_PARAMETER;
+            else
+            {
+                uint32_t fTransferMode;
+                rc = HGCMSvcGetU32(&aParms[0], &fTransferMode);
+                if (RT_SUCCESS(rc))
+                    rc = shClSvcTransferModeSet(fTransferMode);
+            }
+            break;
+        }
+
         case VBOX_SHCL_HOST_FN_CANCEL: /** @todo BUGBUG Implement this. */
             break;
 
@@ -1417,7 +1445,7 @@ int ShClSvcTransferStop(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, bool fWait
  * @returns VBox status code.
  * @param   fMode               Transfer mode to set.
  */
-int shClSvcTransferModeSet(uint32_t fMode)
+static int shClSvcTransferModeSet(uint32_t fMode)
 {
     if (fMode & ~VBOX_SHCL_TRANSFER_MODE_F_VALID_MASK)
         return VERR_INVALID_FLAGS;
