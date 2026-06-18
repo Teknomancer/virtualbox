@@ -1,4 +1,4 @@
-/* $Id: DevPciVfio.cpp 114122 2026-05-11 16:25:57Z alexander.eichner@oracle.com $ */
+/* $Id: DevPciVfio.cpp 114420 2026-06-18 07:05:22Z alexander.eichner@oracle.com $ */
 /** @file
  * PCI passthrough device emulation using VFIO/IOMMUFD.
  */
@@ -1940,10 +1940,15 @@ static int pciVfioCfgSpaceParseExtCapabilities(PVFIOPCI pThis, PVFIOPCIFUN pFun,
         if (!offCapNext)
             break;
 
-        if (   offCapNext < offCap
-            || offCapNext < offCap + cbCap)
+        /*
+         * Don't allow pointing inside the current capability, pointing backwards is allowed as that was seen on
+         * an Intel ARC Pro B70 GPU and there is nothing in the PCIe specification prohibiting that.
+         */
+        /** @todo Maybe check whether the new capability was visited already to avoid endless loops, which would
+         * indicate a broken device. */
+        if (offCapNext < offCap + cbCap)
             return PDMDevHlpVMSetError(pDevIns, VERR_INVALID_STATE, RT_SRC_POS,
-                                       N_("Next capability pointer points backwards or inside the current capability (next offset %#x )"), offCapNext);
+                                       N_("Next capability pointer points inside the current capability (next offset %#x )"), offCapNext);
 
         offCap = offCapNext;
     }
