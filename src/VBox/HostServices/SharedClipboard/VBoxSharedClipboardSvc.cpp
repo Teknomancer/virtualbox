@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114423 2026-06-18 07:53:57Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114424 2026-06-18 08:17:05Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -283,25 +283,7 @@ uint32_t ShClSvcGetMode(void)
     return g_uMode;
 }
 
-/**
- * Returns the Shared Clipboard backend in use.
- *
- * @returns Pointer to backend instance.
- */
-PSHCLBACKEND ShClSvcGetBackend(void)
-{
-    return &g_ShClBackend;
-}
 
-/**
- * Getter for headless setting. Also needed by testcase.
- *
- * @returns Whether service currently running in headless mode or not.
- */
-bool ShClSvcGetHeadless(void)
-{
-    return g_fHeadless;
-}
 
 static int shClSvcModeSet(uint32_t uMode)
 {
@@ -353,83 +335,7 @@ void ShClSvcUnlock(void)
     AssertRC(rc2);
 }
 
-static int shClSvcHostCallback(uint32_t u32Function, PSHCLEXTPARMS pvParms, uint32_t cbParms)
-{
-    LogFlowFunc(("u32Function=%RU32, pvParms=%p, cbParms=%RU32\n", u32Function, pvParms, cbParms));
 
-    int rc;
-    if (g_ExtState.pfnExtension)
-        rc = g_ExtState.pfnExtension(g_ExtState.pvExtension, u32Function, pvParms, cbParms);
-    else
-        rc = VERR_NOT_SUPPORTED;
-
-    LogFlowFunc(("Returning rc=%Rrc\n", rc));
-    return rc;
-}
-
-/**
- * Reports clipboard formats to the guest.
- *
- * @note    Host backend callers must check if it's active (use
- *          ShClSvcIsBackendActive) before calling to prevent mixing up the
- *          VRDE clipboard.
- *
- * @returns VBox status code.
- * @param   pClient             Client to report clipboard formats to.
- * @param   fFormats            The formats to report (VBOX_SHCL_FMT_XXX), zero
- *                              is okay (empty the clipboard).
- * @param   enmSource           Source the reported formats came from.
- *
- * @thread  Backend thread.
- */
-static int shClSvcReportFormatsEx(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource)
-{
-    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
-
-    LogFlowFunc(("fFormats=%#x, enmSource=%RU32\n", fFormats, enmSource));
-
-    /*
-     * Check if the service mode allows this operation and whether the guest is
-     * supposed to be reading from the host. Otherwise, silently ignore reporting
-     * formats and return VINF_SUCCESS in order to do not trigger client
-     * termination in svcConnect().
-     */
-    uint32_t uMode = ShClSvcGetMode();
-    if (   uMode == VBOX_SHCL_MODE_BIDIRECTIONAL
-        || uMode == VBOX_SHCL_MODE_HOST_TO_GUEST)
-    { /* likely */ }
-    else
-        return VINF_SUCCESS;
-
-    fFormats = shClSvcHandleFormats(true /* fHostToGuest */, pClient, fFormats);
-
-    int rc;
-
-    /*
-     * Check if the HGCM callback can handle this first.
-     * This is needed in order to not mess up the clipboard if VRDE is active, for example.
-     */
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    parms.u.ReportFormats.uFormats  = fFormats;
-    parms.u.ReportFormats.pClient   = pClient;
-    parms.u.ReportFormats.enmSource = enmSource;
-
-    /* The backend in Main calls: ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats); */
-    rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST, &parms, sizeof(parms));
-
-    if (RT_FAILURE(rc))
-        LogRel(("Shared Clipboard: Reporting formats %#x to guest failed with %Rrc\n", fFormats, rc));
-
-    LogFlowFuncLeaveRC(rc);
-    return rc;
-}
-
-int ShClSvcReportFormats(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
-{
-    return shClSvcReportFormatsEx(pClient, fFormats, SHCLSOURCE_LOCAL);
-}
 
 /**
  * Implements VBOX_SHCL_GUEST_FN_REPORT_FORMATS.
@@ -498,14 +404,7 @@ static int shClSvcClientMsgReportFormats(PSHCLCLIENT pClient, uint32_t cParms, V
         rc = RTCritSectEnter(&g_CritSect);
         if (RT_SUCCESS(rc))
         {
-            SHCLEXTPARMS parms;
-            RT_ZERO(parms);
-
-            parms.u.ReportFormats.uFormats = fFormats;
-            parms.u.ReportFormats.pClient  = pClient;
-
-            /* The backend in Main calls: ShClBackendReportFormats(pClient->pBackend, pClient, fFormats); */
-            rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST, &parms, sizeof(parms));
+            rc = shClSvcBackendReportFormatsToHost(pClient, fFormats);
 
             RTCritSectLeave(&g_CritSect);
         }
@@ -621,30 +520,20 @@ static int shClSvcClientMsgDataRead(PSHCLCLIENT pClient, uint32_t cParms, VBOXHG
     int rc = RTCritSectEnter(&g_CritSect);
     AssertRCReturn(rc, rc);
 
-    /* If there is a service extension active, try reading data from it first. */
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    parms.u.ReadWriteData.uFormat  = uFormat;
-    parms.u.ReadWriteData.pvData   = pvData;
-    parms.u.ReadWriteData.cbData   = cbData;
-    parms.u.ReadWriteData.cbActual = cbActual;
-    parms.u.ReadWriteData.pClient  = pClient;
-
     g_ExtState.fReadingData = true;
 
-    /* Read clipboard data from the extension. */
-    rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_DATA_READ, &parms, sizeof(parms));
+    /* If there is a service extension active, try reading data from it first. */
+    rc = shClSvcBackendReadData(pClient, uFormat, pvData, cbData, &cbActual);
 
     LogRel2(("Shared Clipboard: Read extension clipboard data (fDelayedAnnouncement=%RTbool, fDelayedFormats=%#x, "
              "max %RU32 bytes), got %RU32 bytes: rc=%Rrc\n", g_ExtState.fDelayedAnnouncement, g_ExtState.fDelayedFormats,
-             cbData, parms.u.ReadWriteData.cbData, rc));
+             cbData, cbActual, rc));
 
     /* Did the extension send the clipboard formats yet?
      * Otherwise, do this now. */
     if (g_ExtState.fDelayedAnnouncement)
     {
-        int rc2 = shClSvcReportFormatsEx(pClient, g_ExtState.fDelayedFormats, SHCLSOURCE_REMOTE);
+        int rc2 = shClSvcBackendReportFormatsToGuest(pClient, g_ExtState.fDelayedFormats, SHCLSOURCE_REMOTE);
         AssertRC(rc2);
 
         g_ExtState.fDelayedAnnouncement = false;
@@ -652,9 +541,6 @@ static int shClSvcClientMsgDataRead(PSHCLCLIENT pClient, uint32_t cParms, VBOXHG
     }
 
     g_ExtState.fReadingData = false;
-
-    if (RT_SUCCESS(rc))
-        cbActual = parms.u.ReadWriteData.cbActual;
 
     if (RT_SUCCESS(rc))
     {
@@ -810,17 +696,7 @@ static int shClSvcClientMsgDataWrite(PSHCLCLIENT pClient, uint32_t cParms, VBOXH
     int rc = RTCritSectEnter(&g_CritSect);
     AssertRCReturn(rc, rc);
 
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    parms.u.ReadWriteData.uFormat = uFormat;
-    parms.u.ReadWriteData.pvData  = pvData;
-    parms.u.ReadWriteData.cbData  = cbData;
-    parms.u.ReadWriteData.pClient = pClient;
-    parms.u.ReadWriteData.pCmdCtx = &cmdCtx;
-
-    /* The backend in Main calls: ShClBackendWriteData(pClient->pBackend, pClient, pCmdCtx, fFormats, pvData, cbData); */
-    rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_DATA_WRITE, &parms, sizeof(parms));
+    rc = shClSvcBackendWriteData(pClient, &cmdCtx, uFormat, pvData, cbData);
 
     RTCritSectLeave(&g_CritSect);
 
@@ -884,12 +760,7 @@ static DECLCALLBACK(int) svcUnload(void *)
 {
     LogFlowFuncEnter();
 
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    parms.u.ReadWriteData.pBackend = ShClSvcGetBackend();
-    /* The backend in Main calls: ShClBackendDestroy(ShClSvcGetBackend()); */
-    (void) shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY, &parms, sizeof(parms));
+    shClSvcBackendDestroy();
 
     RTCritSectDelete(&g_CritSect);
 
@@ -913,13 +784,7 @@ static DECLCALLBACK(int) svcDisconnect(void *, uint32_t u32ClientID, void *pvCli
         g_ExtState.uClientID = 0;
     }
 
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    parms.u.ReadWriteData.pClient = pClient;
-
-    /* The backend in Main calls: ShClBackendDisconnect(&g_ShClBackend, pClient); */
-    (void) shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT, &parms, sizeof(parms));
+    shClSvcBackendDisconnect(pClient);
 
     shClSvcClientDestroy(pClient);
 
@@ -944,32 +809,13 @@ static DECLCALLBACK(int) svcConnect(void *, uint32_t u32ClientID, void *pvClient
          *        crash any worse that racing map insertion/removal. */
         g_mapClients[u32ClientID] = pClient; /** @todo Handle OOM / collisions? */
 
-        SHCLEXTPARMS parms;
-        RT_ZERO(parms);
-
-        parms.u.ReadWriteData.pBackend = ShClSvcGetBackend();
-        parms.u.ReadWriteData.pTable = g_pTable;
-        /* The backend in Main calls: ShClBackendInit(ShClSvcGetBackend(), pTable); */
-        rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT, &parms, sizeof(parms));
+        rc = shClSvcBackendInit(g_pTable);
         if (RT_SUCCESS(rc))
         {
-            RT_ZERO(parms);
-
-            parms.u.ReadWriteData.pBackend = ShClSvcGetBackend();
-            parms.u.ReadWriteData.pClient = pClient;
-            parms.u.ReadWriteData.fHeadless = ShClSvcGetHeadless();
-            /* The backend in Main calls: ShClBackendConnect(&g_ShClBackend, pClient, ShClSvcGetHeadless())); */
-            rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT, &parms, sizeof(parms));
+            rc = shClSvcBackendConnect(pClient);
             if (RT_SUCCESS(rc))
             {
-                /* Sync the host clipboard content with the client. */
-                RT_ZERO(parms);
-
-                parms.u.ReadWriteData.pBackend = ShClSvcGetBackend();
-                parms.u.ReadWriteData.pClient = pClient;
-
-                /* The backend in Main calls: ShClBackendSync(&g_ShClBackend, pClient); */
-                rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC, &parms, sizeof(parms));
+                rc = shClSvcBackendSync(pClient);
                 if (RT_SUCCESS(rc))
                 {
                     /* For now we ASSUME that the first client that connects is in charge for
@@ -987,11 +833,7 @@ static DECLCALLBACK(int) svcConnect(void *, uint32_t u32ClientID, void *pvClient
                     return VINF_SUCCESS;
                 }
                 LogFunc(("ShClBackendSync failed: %Rrc\n", rc));
-                RT_ZERO(parms);
-                parms.u.ReadWriteData.pClient = pClient;
-
-                /* The backend in Main calls: ShClBackendDisconnect(&g_ShClBackend, pClient); */
-                (void) shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT, &parms, sizeof(parms));
+                shClSvcBackendDisconnect(pClient);
             }
             LogFunc(("ShClBackendConnect failed: %Rrc\n", rc));
         }
@@ -1529,13 +1371,7 @@ static DECLCALLBACK(int) svcLoadState(void *, uint32_t u32ClientID, void *pvClie
     }
 
     /* Actual host data are to be reported to guest (SYNC). */
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    parms.u.ReadWriteData.pBackend = ShClSvcGetBackend();
-    parms.u.ReadWriteData.pClient = pClient;
-    /* The backend in Main calls: ShClBackendSync(&g_ShClBackend, pClient); */
-    (void) shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC, &parms, sizeof(parms));
+    (void) shClSvcBackendSync(pClient);
 
 #else  /* UNIT_TEST */
     RT_NOREF(u32ClientID, pvClient, pSSM, pVMM, uVersion);
@@ -1543,122 +1379,7 @@ static DECLCALLBACK(int) svcLoadState(void *, uint32_t u32ClientID, void *pvClie
     return VINF_SUCCESS;
 }
 
-static DECLCALLBACK(int) extCallback(uint32_t u32Function, uint32_t u32Format, void *pvData, uint32_t cbData)
-{
-    RT_NOREF(pvData, cbData);
 
-    LogFlowFunc(("u32Function=%RU32\n", u32Function));
-
-    int rc = VINF_SUCCESS;
-
-    /* Figure out if the client in charge for the service extension still is connected. */
-    ClipboardClientMap::const_iterator itClient = g_mapClients.find(g_ExtState.uClientID);
-    if (itClient != g_mapClients.end())
-    {
-        PSHCLCLIENT pClient = itClient->second;
-        AssertPtr(pClient);
-        switch (u32Function)
-        {
-            /* The service extension announces formats to the host. */
-            case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST:
-            {
-                LogFlowFunc(("VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST: g_ExtState.fReadingData=%RTbool\n", g_ExtState.fReadingData));
-                if (!g_ExtState.fReadingData)
-                    rc = shClSvcReportFormatsEx(pClient, u32Format, SHCLSOURCE_REMOTE);
-                else
-                {
-                    g_ExtState.fDelayedAnnouncement = true;
-                    g_ExtState.fDelayedFormats = u32Format;
-                    rc = VINF_SUCCESS;
-                }
-                break;
-            }
-
-            /* The service extension wants read data from the guest. */
-            case VBOX_CLIPBOARD_EXT_FN_DATA_READ:
-            {
-                SHCLEXTPARMS parms;
-                RT_ZERO(parms);
-
-                parms.u.ReadWriteData.uFormat  = u32Format;
-                parms.u.ReadWriteData.pvData   = pvData;
-                parms.u.ReadWriteData.cbData   = cbData;
-                parms.u.ReadWriteData.pClient  = pClient;
-
-                /* Read clipboard data from the VRDE extension. */
-                rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_DATA_READ_VRDE, &parms, sizeof(parms));
-
-                break;
-            }
-
-            default:
-                /* Just skip other messages. */
-                break;
-        }
-    }
-    else
-        rc = VERR_NOT_FOUND;
-
-    LogFlowFuncLeaveRC(rc);
-    return rc;
-}
-
-static DECLCALLBACK(int) svcRegisterExtension(void *, PFNHGCMSVCEXT pfnExtension, void *pvExtension)
-{
-    LogFlowFunc(("pfnExtension=%p\n", pfnExtension));
-
-    SHCLEXTPARMS parms;
-    RT_ZERO(parms);
-
-    /*
-     * Reference counting for service extension registration is done a few
-     * layers up (in ConsoleVRDPServer::ClipboardCreate()).
-     */
-
-    int rc = RTCritSectEnter(&g_CritSect);
-    AssertLogRelRCReturn(rc, rc);
-
-    if (pfnExtension)
-    {
-        /* Install extension. */
-        g_ExtState.pfnExtension = pfnExtension;
-        g_ExtState.pvExtension  = pvExtension;
-
-        parms.u.SetCallback.pfnCallback = extCallback;
-
-        rc = shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_SET_CALLBACK, &parms, sizeof(parms));
-
-        LogRel2(("Shared Clipboard: registered service extension\n"));
-    }
-    else
-    {
-        (void) shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_SET_CALLBACK, &parms, sizeof(parms));
-
-        /*
-         * When a guest VM using the Shared Clipboard shuts down Console::i_powerDown()
-         * will call HGCMHostUnregisterServiceExtension() and then VMMDev::hgcmShutdown()
-         * shortly thereafter. The former call lands here to unregister the extension and
-         * the latter calls svcUnload() to unload the SharedClipboardSvc.so shared object
-         * and tear down the backend infrastructure via ShClBackendDestroy(). Unregistering
-         * the extension disables the host callback which means shClSvcHostCallback() isn't
-         * able to call ShClBackendDestroy() in svcUnload() so we do that here while the
-         * host callback is still available.
-         */
-        parms.u.ReadWriteData.pBackend = ShClSvcGetBackend();
-        /* The backend in Main calls: ShClBackendDestroy(ShClSvcGetBackend()); */
-        (void) shClSvcHostCallback(VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY, &parms, sizeof(parms));
-
-        /* Uninstall extension. */
-        g_ExtState.pvExtension  = NULL;
-        g_ExtState.pfnExtension = NULL;
-
-        LogRel2(("Shared Clipboard: de-registered service extension\n"));
-    }
-
-    RTCritSectLeave(&g_CritSect);
-
-    return rc;
-}
 
 extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad(VBOXHGCMSVCFNTABLE *pTable)
 {
@@ -1705,7 +1426,7 @@ extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad(VBOXHGCMSVCFNTABLE *pTa
             pTable->pfnHostCall          = svcHostCall;
             pTable->pfnSaveState         = svcSaveState;
             pTable->pfnLoadState         = svcLoadState;
-            pTable->pfnRegisterExtension = svcRegisterExtension;
+            pTable->pfnRegisterExtension = shClSvcRegisterExtension;
             pTable->pfnNotify            = NULL;
             pTable->pvService            = NULL;
 

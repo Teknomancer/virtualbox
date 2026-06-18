@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-internal.h 114422 2026-06-18 07:43:19Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-internal.h 114424 2026-06-18 08:17:05Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal service instance state.
  */
@@ -124,6 +124,20 @@ int shClSvcClientMsgOldGet(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
 int shClSvcClientMsgGet(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
                         uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
 int shClSvcClientMsgCancel(PSHCLCLIENT pClient, uint32_t cParms);
+/** @} */
+
+/** @name Backend and extension bridge handling.
+ * @{ */
+int  shClSvcBackendInit(VBOXHGCMSVCFNTABLE *pTable);
+int  shClSvcBackendConnect(PSHCLCLIENT pClient);
+int  shClSvcBackendSync(PSHCLCLIENT pClient);
+void shClSvcBackendDisconnect(PSHCLCLIENT pClient);
+void shClSvcBackendDestroy(void);
+int  shClSvcBackendReportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource);
+int  shClSvcBackendReportFormatsToHost(PSHCLCLIENT pClient, SHCLFORMATS fFormats);
+int  shClSvcBackendReadData(PSHCLCLIENT pClient, SHCLFORMAT uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual);
+int  shClSvcBackendWriteData(PSHCLCLIENT pClient, PSHCLCLIENTCMDCTX pCmdCtx, SHCLFORMAT uFormat, void *pvData, uint32_t cbData);
+DECLCALLBACK(int) shClSvcRegisterExtension(void *pvService, PFNHGCMSVCEXT pfnExtension, void *pvExtension);
 /** @} */
 
 #endif /* !VBOX_INCLUDED_SRC_SharedClipboard_VBoxSharedClipboardSvc_internal_h */
