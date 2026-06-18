@@ -590,6 +590,13 @@
   gEfiMdeModulePkgTokenSpaceGuid.PcdRequireSelfSignedPk|TRUE
 !endif
 
+!ifdef $(VBOX)
+  # Don't move 64-bit BARs to 32-bit if an option ROM is present as this
+  # might fail in case the BAR exceeds the MMIO hole. This is only relevant
+  # for PCI passthrough as our emulated devices don't offer any option ROMs.
+  gEfiMdeModulePkgTokenSpaceGuid.PcdPciDegradeResourceForOptionRom|FALSE
+!endif
+
 [PcdsFixedAtBuild]
   gEfiMdeModulePkgTokenSpaceGuid.PcdStatusCodeMemorySize|1
 !if $(SMM_REQUIRE) == FALSE
@@ -791,6 +798,9 @@
   #
   # On VirtualBox it is dynamic.
   gEfiMdePkgTokenSpaceGuid.PcdPciExpressBaseAddress|0x80000000
+
+  # Enable support for resizable BARs on PCI devices (used for PCI passthrough).
+  gEfiMdeModulePkgTokenSpaceGuid.PcdPcieResizableBarSupport|TRUE
 !endif
 
 [PcdsDynamicHii]
