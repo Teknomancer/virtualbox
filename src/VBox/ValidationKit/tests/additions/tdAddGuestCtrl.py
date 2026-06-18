@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-lines
-# $Id: tdAddGuestCtrl.py 113081 2026-02-19 10:01:13Z serkan.bayraktar@oracle.com $
+# $Id: tdAddGuestCtrl.py 114431 2026-06-18 09:52:13Z andreas.loeffler@oracle.com $
 
 """
 VirtualBox Validation Kit - Guest Control Tests.
@@ -38,7 +38,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 113081 $"
+__version__ = "$Revision: 114431 $"
 
 # Standard Python imports.
 import errno
@@ -1816,9 +1816,8 @@ class SubTstDrvAddGuestCtrl(base.SubTestDriverBase):
             fRestartVBoxService = False;
 
             if oTestVm.isWindows():
-                asArgs = [ sRegEditorExePath ] + asRegEditorArgs;
                 fRestartVBoxService = self.oTstDrv.txsRunTest(oTxsSession, 'Enabling VBoxService verbose logging (via registry)',
-                                                              30 * 1000,
+                                                              5 * 60 * 1000,
                                                               sRegEditorExePath, asRegEditorArgs);
             elif oTestVm.isLinux():
                 # Need to use some stupid trickery here to locate the sed binary,
