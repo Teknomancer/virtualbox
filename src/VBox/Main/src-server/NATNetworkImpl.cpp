@@ -1,4 +1,4 @@
-/* $Id: NATNetworkImpl.cpp 113483 2026-03-20 02:22:35Z jack.doherty@oracle.com $ */
+/* $Id: NATNetworkImpl.cpp 114438 2026-06-18 15:37:26Z andreas.loeffler@oracle.com $ */
 /** @file
  * INATNetwork implementation.
  */
@@ -46,6 +46,16 @@
 #include "VirtualBoxImpl.h"
 #include <algorithm>
 #include <list>
+
+enum NATNETWORK_IPV4_RESERVED_OFFSET
+{
+    /** NAT gateway address, e.g. 10.0.2.1 for the default NAT Network. */
+    NATNETWORK_IPV4_GATEWAY_OFFSET    = 1,
+    /** Default host loopback mapping address, e.g. 10.0.2.2. */
+    NATNETWORK_IPV4_LOOPBACK_OFFSET   = 2,
+    /** NAT DNS proxy fallback address, e.g. 10.0.2.3. */
+    NATNETWORK_IPV4_NAMESERVER_OFFSET = 3
+};
 
 #ifndef RT_OS_WINDOWS
 # include <netinet/in.h>
@@ -134,12 +144,12 @@ HRESULT NATNetwork::init(VirtualBox *aVirtualBox, com::Utf8Str aName)
     unconst(m->pVirtualBox) = aVirtualBox;
     m->s.strNetworkName = aName;
     m->s.strIPv4NetworkCidr = "10.0.2.0/24";
-    m->offGateway = 1;
+    m->offGateway = NATNETWORK_IPV4_GATEWAY_OFFSET;
     i_recalculateIPv6Prefix();  /* set m->strIPv6Prefix based on IPv4 */
 
     settings::NATHostLoopbackOffset off;
     off.strLoopbackHostAddress = "127.0.0.1";
-    off.u32Offset = (uint32_t)2;
+    off.u32Offset = NATNETWORK_IPV4_LOOPBACK_OFFSET;
     m->s.llHostLoopbackOffsetList.push_back(off);
 
     i_recalculateIpv4AddressAssignments();
@@ -1205,13 +1215,19 @@ int NATNetwork::i_findFirstAvailableOffset(ADDRESSLOOKUPTYPE addrType, uint32_t 
     uint32_t off;
     for (off = 1; off < ~netmask.u; ++off)
     {
-        for (settings::NATLoopbackOffsetList::iterator it = m->s.llHostLoopbackOffsetList.begin();
-             it != m->s.llHostLoopbackOffsetList.end();
-             ++it)
-        {
-            if ((*it).u32Offset == off)
-                continue;
-        }
+        if (std::find(m->s.llHostLoopbackOffsetList.begin(),
+                      m->s.llHostLoopbackOffsetList.end(),
+                      off) != m->s.llHostLoopbackOffsetList.end())
+            continue;
+
+        /*
+         * Keep automatically generated service addresses out of the DHCP
+         * range.  VBoxNetSlirpNAT uses the nameserver offset as the fallback
+         * DNS proxy address, so leasing it to a guest can trigger duplicate
+         * address detection failures.  See github:gh-627.
+         */
+        if (off == NATNETWORK_IPV4_NAMESERVER_OFFSET)
+            continue;
 
         if (off == m->offGateway)
         {
