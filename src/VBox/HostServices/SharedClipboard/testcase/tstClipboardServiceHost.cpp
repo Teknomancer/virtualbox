@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114390 2026-06-16 14:28:28Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114425 2026-06-18 08:30:00Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -156,7 +156,7 @@ DECLCALLBACK(int) tstHgcmMockSvcDispatcher(void *pvExtension, uint32_t u32Functi
             break;
         }
 
-        // via VbglR3HGCMDisconnect()->...HGCMService::DisconnectClient()->...HGCMService::instanceDestroy()->...svcUnload()
+        // via VbglR3HGCMDisconnect()->...HGCMService::DisconnectClient()->...HGCMService::instanceDestroy()->...shClSvcUnload()
         case VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY:
         {
             PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;

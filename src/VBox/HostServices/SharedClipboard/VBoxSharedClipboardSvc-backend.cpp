@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-backend.cpp 114424 2026-06-18 08:17:05Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-backend.cpp 114425 2026-06-18 08:30:00Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Backend and extension bridge handling.
  */
@@ -178,7 +178,7 @@ int shClSvcBackendReportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats
      * Check if the service mode allows this operation and whether the guest is
      * supposed to be reading from the host. Otherwise, silently ignore reporting
      * formats and return VINF_SUCCESS in order to do not trigger client
-     * termination in svcConnect().
+     * termination in shClSvcConnect().
      */
     uint32_t uMode = ShClSvcGetMode();
     if (   uMode == VBOX_SHCL_MODE_BIDIRECTIONAL
@@ -363,10 +363,10 @@ DECLCALLBACK(int) shClSvcRegisterExtension(void *, PFNHGCMSVCEXT pfnExtension, v
          * When a guest VM using the Shared Clipboard shuts down Console::i_powerDown()
          * will call HGCMHostUnregisterServiceExtension() and then VMMDev::hgcmShutdown()
          * shortly thereafter. The former call lands here to unregister the extension and
-         * the latter calls svcUnload() to unload the SharedClipboardSvc.so shared object
+         * the latter calls shClSvcUnload() to unload the SharedClipboardSvc.so shared object
          * and tear down the backend infrastructure via ShClBackendDestroy(). Unregistering
          * the extension disables the host callback which means shClSvcBackendHostCallback() isn't
-         * able to call ShClBackendDestroy() in svcUnload() so we do that here while the
+         * able to call ShClBackendDestroy() in shClSvcUnload() so we do that here while the
          * host callback is still available.
          */
         shClSvcBackendDestroy();

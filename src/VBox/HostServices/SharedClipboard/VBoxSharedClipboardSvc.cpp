@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114424 2026-06-18 08:17:05Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114425 2026-06-18 08:30:00Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -730,7 +730,7 @@ static int shClSvcClientMsgError(uint32_t cParms, VBOXHGCMSVCPARM paParms[], int
     return rc;
 }
 
-static int svcInit(VBOXHGCMSVCFNTABLE *pTable)
+static int shClSvcInit(VBOXHGCMSVCFNTABLE *pTable)
 {
     int rc = RTCritSectInit(&g_CritSect);
 
@@ -741,11 +741,11 @@ static int svcInit(VBOXHGCMSVCFNTABLE *pTable)
         /* Normally we would call ShClBackendInit() here but the service extension
          * has not been loaded at this early stage of the Shared Clipboard service
          * bringup so thus we save the HGCM service function table now so that we can
-         * pass it along to ShClBackendInit() later at svcConnect() time. */
+         * pass it along to ShClBackendInit() later at shClSvcConnect() time. */
         g_pTable = pTable;
 
-        /* Clean up on failure, because 'svcUnload' will not be called
-         * if 'svcInit' returns an error.
+        /* Clean up on failure, because 'shClSvcUnload' will not be called
+         * if 'shClSvcInit' returns an error.
          */
         if (RT_FAILURE(rc))
         {
@@ -756,7 +756,7 @@ static int svcInit(VBOXHGCMSVCFNTABLE *pTable)
     return rc;
 }
 
-static DECLCALLBACK(int) svcUnload(void *)
+static DECLCALLBACK(int) shClSvcUnload(void *)
 {
     LogFlowFuncEnter();
 
@@ -767,7 +767,7 @@ static DECLCALLBACK(int) svcUnload(void *)
     return VINF_SUCCESS;
 }
 
-static DECLCALLBACK(int) svcDisconnect(void *, uint32_t u32ClientID, void *pvClient)
+static DECLCALLBACK(int) shClSvcDisconnect(void *, uint32_t u32ClientID, void *pvClient)
 {
     LogFunc(("u32ClientID=%RU32\n", u32ClientID));
 
@@ -775,9 +775,9 @@ static DECLCALLBACK(int) svcDisconnect(void *, uint32_t u32ClientID, void *pvCli
     AssertPtr(pClient);
 
     /* In order to communicate with guest service, HGCM VRDP clipboard extension
-     * needs to know its connection client ID. Currently, in svcConnect() we always
+     * needs to know its connection client ID. Currently, in shClSvcConnect() we always
      * cache ID of the first ever connected client. When client disconnects,
-     * we need to forget its ID and let svcConnect() to pick up the next ID when a new
+     * we need to forget its ID and let shClSvcConnect() pick up the next ID when a new
      * connection will be requested by guest service (see #10115). */
     if (g_ExtState.uClientID == u32ClientID)
     {
@@ -791,7 +791,7 @@ static DECLCALLBACK(int) svcDisconnect(void *, uint32_t u32ClientID, void *pvCli
     return VINF_SUCCESS;
 }
 
-static DECLCALLBACK(int) svcConnect(void *, uint32_t u32ClientID, void *pvClient, uint32_t fRequestor, bool fRestoring)
+static DECLCALLBACK(int) shClSvcConnect(void *, uint32_t u32ClientID, void *pvClient, uint32_t fRequestor, bool fRestoring)
 {
     RT_NOREF(fRequestor, fRestoring);
 
@@ -846,14 +846,14 @@ static DECLCALLBACK(int) svcConnect(void *, uint32_t u32ClientID, void *pvClient
     return rc;
 }
 
-static DECLCALLBACK(void) svcCall(void *,
-                                  VBOXHGCMCALLHANDLE callHandle,
-                                  uint32_t u32ClientID,
-                                  void *pvClient,
-                                  uint32_t u32Function,
-                                  uint32_t cParms,
-                                  VBOXHGCMSVCPARM paParms[],
-                                  uint64_t tsArrival)
+static DECLCALLBACK(void) shClSvcCall(void *,
+                                      VBOXHGCMCALLHANDLE callHandle,
+                                      uint32_t u32ClientID,
+                                      void *pvClient,
+                                      uint32_t u32Function,
+                                      uint32_t cParms,
+                                      VBOXHGCMSVCPARM paParms[],
+                                      uint64_t tsArrival)
 {
     RT_NOREF(u32ClientID, pvClient, tsArrival);
     PSHCLCLIENT pClient = (PSHCLCLIENT)pvClient;
@@ -1011,10 +1011,10 @@ static void shClSvcHostReset(void)
 /*
  * We differentiate between a function handler for the guest and one for the host.
  */
-static DECLCALLBACK(int) svcHostCall(void *,
-                                     uint32_t u32Function,
-                                     uint32_t cParms,
-                                     VBOXHGCMSVCPARM paParms[])
+static DECLCALLBACK(int) shClSvcHostCall(void *,
+                                         uint32_t u32Function,
+                                         uint32_t cParms,
+                                         VBOXHGCMSVCPARM paParms[])
 {
     int rc = VINF_SUCCESS;
 
@@ -1174,7 +1174,7 @@ static SSMFIELD const s_aShClSSMClientMsgCtx[] =
 };
 #endif /* !UNIT_TEST */
 
-static DECLCALLBACK(int) svcSaveState(void *, uint32_t u32ClientID, void *pvClient, PSSMHANDLE pSSM, PCVMMR3VTABLE pVMM)
+static DECLCALLBACK(int) shClSvcSaveState(void *, uint32_t u32ClientID, void *pvClient, PSSMHANDLE pSSM, PCVMMR3VTABLE pVMM)
 {
     LogFlowFuncEnter();
 
@@ -1183,7 +1183,7 @@ static DECLCALLBACK(int) svcSaveState(void *, uint32_t u32ClientID, void *pvClie
      * When the state will be restored, pending requests will be reissued
      * by VMMDev. The service therefore must save state as if there were no
      * pending request.
-     * Pending requests, if any, will be completed in svcDisconnect.
+     * Pending requests, if any, will be completed in shClSvcDisconnect.
      */
     RT_NOREF(u32ClientID);
     LogFunc(("u32ClientID=%RU32\n", u32ClientID));
@@ -1234,7 +1234,7 @@ static DECLCALLBACK(int) svcSaveState(void *, uint32_t u32ClientID, void *pvClie
 }
 
 #ifndef UNIT_TEST
-static int svcLoadStateV0(uint32_t u32ClientID, void *pvClient, PSSMHANDLE pSSM, PCVMMR3VTABLE pVMM, uint32_t uVersion)
+static int shClSvcLoadStateV0(uint32_t u32ClientID, void *pvClient, PSSMHANDLE pSSM, PCVMMR3VTABLE pVMM, uint32_t uVersion)
 {
     RT_NOREF(u32ClientID, pvClient, pSSM, uVersion);
 
@@ -1268,8 +1268,8 @@ static int svcLoadStateV0(uint32_t u32ClientID, void *pvClient, PSSMHANDLE pSSM,
 }
 #endif /* UNIT_TEST */
 
-static DECLCALLBACK(int) svcLoadState(void *, uint32_t u32ClientID, void *pvClient,
-                                      PSSMHANDLE pSSM, PCVMMR3VTABLE pVMM, uint32_t uVersion)
+static DECLCALLBACK(int) shClSvcLoadState(void *, uint32_t u32ClientID, void *pvClient,
+                                          PSSMHANDLE pSSM, PCVMMR3VTABLE pVMM, uint32_t uVersion)
 {
     LogFlowFuncEnter();
 
@@ -1288,7 +1288,7 @@ static DECLCALLBACK(int) svcLoadState(void *, uint32_t u32ClientID, void *pvClie
     LogFunc(("u32ClientID=%RU32, lenOrVer=%#RX64\n", u32ClientID, lenOrVer));
 
     if (lenOrVer == VBOX_SHCL_SAVED_STATE_VER_3_1)
-        return svcLoadStateV0(u32ClientID, pvClient, pSSM, pVMM, uVersion);
+        return shClSvcLoadStateV0(u32ClientID, pvClient, pSSM, pVMM, uVersion);
 
     if (   lenOrVer >= VBOX_SHCL_SAVED_STATE_VER_6_1B2
         && lenOrVer <= VBOX_SHCL_SAVED_STATE_VER_CURRENT)
@@ -1419,19 +1419,19 @@ extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad(VBOXHGCMSVCFNTABLE *pTa
             for (uintptr_t i = 0; i < RT_ELEMENTS(pTable->acMaxClients); i++)
                 pTable->acMaxCallsPerClient[i] = 16;
 
-            pTable->pfnUnload            = svcUnload;
-            pTable->pfnConnect           = svcConnect;
-            pTable->pfnDisconnect        = svcDisconnect;
-            pTable->pfnCall              = svcCall;
-            pTable->pfnHostCall          = svcHostCall;
-            pTable->pfnSaveState         = svcSaveState;
-            pTable->pfnLoadState         = svcLoadState;
+            pTable->pfnUnload            = shClSvcUnload;
+            pTable->pfnConnect           = shClSvcConnect;
+            pTable->pfnDisconnect        = shClSvcDisconnect;
+            pTable->pfnCall              = shClSvcCall;
+            pTable->pfnHostCall          = shClSvcHostCall;
+            pTable->pfnSaveState         = shClSvcSaveState;
+            pTable->pfnLoadState         = shClSvcLoadState;
             pTable->pfnRegisterExtension = shClSvcRegisterExtension;
             pTable->pfnNotify            = NULL;
             pTable->pvService            = NULL;
 
             /* Service specific initialization. */
-            rc = svcInit(pTable);
+            rc = shClSvcInit(pTable);
         }
     }
 

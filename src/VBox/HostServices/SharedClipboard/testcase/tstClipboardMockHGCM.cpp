@@ -1,4 +1,4 @@
-/* $Id: tstClipboardMockHGCM.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardMockHGCM.cpp 114425 2026-06-18 08:30:00Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -651,7 +651,7 @@ static DECLCALLBACK(int) tstSetClipboardContents(RTTHREAD hThread, void *pvUser)
             /* X11 clients which want to paste the contents of the clipboard selection
              * call XConvertSelection(3X11) which the X server responds to by sending
              * a 'SelectionRequest' event to the X11 client which currently owns the
-             * clipboard selection. This happens in our case via: svcConnect() ->
+             * clipboard selection. This happens in our case via: shClSvcConnect() ->
              * ShClBackendConnect() -> ShClX11ThreadStart() -> ShClX11ThreadStartEx() ->
              * clipThreadMain() -> clipQueryX11Targets() -> XtGetSelectionValue().
              * XtGetSelectionValue() calls XConvertSelection() internally. */
