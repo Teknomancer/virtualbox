@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-internal.h 114427 2026-06-18 08:48:19Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-internal.h 114428 2026-06-18 08:57:28Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal service instance state.
  */
@@ -117,8 +117,11 @@ DECLCALLBACK(int) shClSvcHostCall(void *pvService, uint32_t u32Function, uint32_
  * @{ */
 void shClSvcClientDestroy(PSHCLCLIENT pClient);
 void shClSvcClientReset(PSHCLCLIENT pClient);
+DECLCALLBACK(void) shClSvcClientCall(void *pvService, VBOXHGCMCALLHANDLE hCall, uint32_t u32ClientID,
+                                     void *pvClient, uint32_t u32Function, uint32_t cParms,
+                                     VBOXHGCMSVCPARM paParms[], uint64_t tsArrival);
 
-int shClSvcClientNegogiateChunkSize(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
+int shClSvcClientNegotiateChunkSize(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
                                     uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
 int shClSvcClientReportFeatures(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
                                 uint32_t cParms, VBOXHGCMSVCPARM paParms[]);

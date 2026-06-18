@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114427 2026-06-18 08:48:19Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114428 2026-06-18 08:57:28Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -422,145 +422,6 @@ static DECLCALLBACK(int) shClSvcConnect(void *, uint32_t u32ClientID, void *pvCl
     return rc;
 }
 
-static DECLCALLBACK(void) shClSvcCall(void *,
-                                      VBOXHGCMCALLHANDLE callHandle,
-                                      uint32_t u32ClientID,
-                                      void *pvClient,
-                                      uint32_t u32Function,
-                                      uint32_t cParms,
-                                      VBOXHGCMSVCPARM paParms[],
-                                      uint64_t tsArrival)
-{
-    RT_NOREF(u32ClientID, pvClient, tsArrival);
-    PSHCLCLIENT pClient = (PSHCLCLIENT)pvClient;
-    AssertPtr(pClient);
-    pClient->State.uMode = ShClSvcGetMode();
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-    pClient->State.Transfers.uTransferMode = g_fTransferMode;
-#endif
-
-#ifdef LOG_ENABLED
-    Log2Func(("u32ClientID=%RU32, fn=%RU32 (%s), cParms=%RU32, paParms=%p\n",
-              u32ClientID, u32Function, ShClGuestMsgToStr(u32Function), cParms, paParms));
-    for (uint32_t i = 0; i < cParms; i++)
-    {
-        switch (paParms[i].type)
-        {
-            case VBOX_HGCM_SVC_PARM_32BIT:
-                Log3Func(("    paParms[%RU32]: type uint32_t - value %RU32\n", i, paParms[i].u.uint32));
-                break;
-            case VBOX_HGCM_SVC_PARM_64BIT:
-                Log3Func(("    paParms[%RU32]: type uint64_t - value %RU64\n", i, paParms[i].u.uint64));
-                break;
-            case VBOX_HGCM_SVC_PARM_PTR:
-                Log3Func(("    paParms[%RU32]: type ptr - value 0x%p (%RU32 bytes)\n",
-                          i, paParms[i].u.pointer.addr, paParms[i].u.pointer.size));
-                break;
-            case VBOX_HGCM_SVC_PARM_PAGES:
-                Log3Func(("    paParms[%RU32]: type pages - cb=%RU32, cPages=%RU16\n",
-                          i, paParms[i].u.Pages.cb, paParms[i].u.Pages.cPages));
-                break;
-            default:
-                AssertFailed();
-        }
-    }
-    Log2Func(("Client state: fFlags=0x%x, fGuestFeatures0=0x%x, fGuestFeatures1=0x%x\n",
-              pClient->State.fFlags, pClient->State.fGuestFeatures0, pClient->State.fGuestFeatures1));
-#endif
-
-    int rc;
-    switch (u32Function)
-    {
-        case VBOX_SHCL_GUEST_FN_MSG_OLD_GET_WAIT:
-            RTCritSectEnter(&pClient->CritSect);
-            rc = shClSvcClientMsgOldGet(pClient, callHandle, cParms, paParms);
-            RTCritSectLeave(&pClient->CritSect);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_CONNECT:
-            LogRel(("Shared Clipboard: 6.1.0 beta or rc Guest Additions detected. Please upgrade!\n"));
-            rc = VERR_NOT_IMPLEMENTED;
-            break;
-
-        case VBOX_SHCL_GUEST_FN_NEGOTIATE_CHUNK_SIZE:
-            rc = shClSvcClientNegogiateChunkSize(pClient, callHandle, cParms, paParms);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_REPORT_FEATURES:
-            rc = shClSvcClientReportFeatures(pClient, callHandle, cParms, paParms);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_QUERY_FEATURES:
-            rc = shClSvcClientMsgQueryFeatures(callHandle, cParms, paParms);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_MSG_PEEK_NOWAIT:
-            RTCritSectEnter(&pClient->CritSect);
-            rc = shClSvcClientMsgPeek(pClient, callHandle, cParms, paParms, false /*fWait*/);
-            RTCritSectLeave(&pClient->CritSect);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_MSG_PEEK_WAIT:
-            RTCritSectEnter(&pClient->CritSect);
-            rc = shClSvcClientMsgPeek(pClient, callHandle, cParms, paParms, true /*fWait*/);
-            RTCritSectLeave(&pClient->CritSect);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_MSG_GET:
-            RTCritSectEnter(&pClient->CritSect);
-            rc = shClSvcClientMsgGet(pClient, callHandle, cParms, paParms);
-            RTCritSectLeave(&pClient->CritSect);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_MSG_CANCEL:
-            RTCritSectEnter(&pClient->CritSect);
-            rc = shClSvcClientMsgCancel(pClient, cParms);
-            RTCritSectLeave(&pClient->CritSect);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_REPORT_FORMATS:
-            rc = shClSvcClientMsgReportFormats(pClient, cParms, paParms);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_DATA_READ:
-            rc = shClSvcClientMsgDataRead(pClient, cParms, paParms);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_DATA_WRITE:
-            rc = shClSvcClientMsgDataWrite(pClient, cParms, paParms);
-            break;
-
-        case VBOX_SHCL_GUEST_FN_ERROR:
-        {
-            int rcGuest;
-            rc = shClSvcClientMsgError(cParms,paParms, &rcGuest);
-            if (RT_SUCCESS(rc))
-            {
-                LogRel(("Shared Clipboard: Error reported from guest side: %Rrc\n", rcGuest));
-
-                /* Start over. */
-                shClSvcClientReset(pClient);
-            }
-            break;
-        }
-
-        default:
-        {
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-            rc = ShClSvcTransferMsgClientHandler(pClient, callHandle, u32Function, cParms, paParms, tsArrival);
-#else
-            LogRel2(("Shared Clipboard: Unknown guest function: %u (%#x)\n", u32Function, u32Function));
-            rc = VERR_NOT_IMPLEMENTED;
-#endif
-            break;
-        }
-    }
-
-    LogFlowFunc(("[Client %RU32] rc=%Rrc\n", pClient->State.uClientID, rc));
-
-    if (rc != VINF_HGCM_ASYNC_EXECUTE)
-        g_pHelpers->pfnCallComplete(callHandle, rc);
-}
 
 #ifndef UNIT_TEST
 
@@ -897,7 +758,7 @@ extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad(VBOXHGCMSVCFNTABLE *pTa
             pTable->pfnUnload            = shClSvcUnload;
             pTable->pfnConnect           = shClSvcConnect;
             pTable->pfnDisconnect        = shClSvcDisconnect;
-            pTable->pfnCall              = shClSvcCall;
+            pTable->pfnCall              = shClSvcClientCall;
             pTable->pfnHostCall          = shClSvcHostCall;
             pTable->pfnSaveState         = shClSvcSaveState;
             pTable->pfnLoadState         = shClSvcLoadState;
