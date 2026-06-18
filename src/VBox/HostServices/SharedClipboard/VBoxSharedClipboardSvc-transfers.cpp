@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114411 2026-06-17 21:14:10Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114421 2026-06-18 07:33:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -46,17 +46,8 @@
 
 #include <VBox/GuestHost/SharedClipboard-transfers.h>
 
+#include "VBoxSharedClipboardSvc-internal.h"
 #include "VBoxSharedClipboardSvc-transfers.h"
-
-
-/*********************************************************************************************************************************
-*   Externals                                                                                                                    *
-*********************************************************************************************************************************/
-extern uint32_t             g_fTransferMode;
-extern SHCLEXTSTATE         g_ExtState;
-extern PVBOXHGCMSVCHELPERS  g_pHelpers;
-extern ClipboardClientMap   g_mapClients;
-extern ClipboardClientQueue g_listClientsDeferred;
 
 
 /**
