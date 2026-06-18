@@ -51,7 +51,7 @@
  *
  * Whether the thread support is configured in
  */
-#if 1
+#if !defined(RT_OS_OS2) /* vbox */
 #define LIBXML_THREAD_ENABLED
 #endif
 
