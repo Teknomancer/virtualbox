@@ -1962,7 +1962,7 @@ static void clipGrabX11Clipboard(PSHCLX11CTX pCtx, SHCLFORMATS uFormats)
 {
     LogFlowFuncEnter();
 
-    /** @ŧodo r=andy The docs say: "the value CurrentTime is not acceptable" here!? */
+    /** @todo r=andy The docs say: "the value CurrentTime is not acceptable" here!? */
     if (XtOwnSelection(pCtx->pWidget, clipGetAtom(pCtx, "CLIPBOARD"),
                        CurrentTime,
                        clipXtConvertSelectionProc, clipXtConvertSelectionProcLose, clipXtConvertSelectionProcDone))
