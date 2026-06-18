@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: vbox.py 112699 2026-01-26 15:19:48Z alexander.rudnev@oracle.com $
+# $Id: vbox.py 114430 2026-06-18 09:43:51Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 112699 $"
+__version__ = "$Revision: 114430 $"
 
 # pylint: disable=unnecessary-semicolon
 
@@ -4112,7 +4112,8 @@ class TestDriver(base.TestDriver):                                              
                   oSession,             # type: vboxwrappers.SessionWrapper
                   oTxsSession,          # type: txsclient.Session
                   cMsTimeout = 30000,   # type: int
-                  sFile = None          # type: String
+                  sFile = None,         # type: String
+                  oTestVm = None        # type: vboxtestvms.TestVm
                   ):                    # -> bool
         """
         Mostly an internal helper for txsRebootAndReconnectViaTcp and
@@ -4174,10 +4175,19 @@ class TestDriver(base.TestDriver):                                              
 
         if not fRc:
             # Do some diagnosis to find out why this failed.
-            ## @todo Identify guest OS type and only run one of the following commands.
-            fIsNotWindows = True;
+            if oTestVm is None and self.oTestVmSet is not None:
+                oTestVm = self.oTestVmSet.findTestVmByName(oSession.sName);
+            fIsWindows = False;
+            if oTestVm is not None:
+                fIsWindows = oTestVm.isWindows();
+            else:
+                try:
+                    fIsWindows = oSession.o.machine.OSTypeId.lower().startswith('windows');
+                except:
+                    reporter.logXcpt('txsCdWait: Unable to determine guest OS type');
+
             reporter.log('txsCdWait: Listing root contents of ${CDROM}:');
-            if fIsNotWindows:
+            if not fIsWindows:
                 reporter.log('txsCdWait: Tiggering udevadm ...');
                 oTxsSession.syncExec("/sbin/udevadm", ("/sbin/udevadm", "trigger", "--verbose"), fIgnoreErrors = True);
                 time.sleep(15);
@@ -4213,7 +4223,7 @@ class TestDriver(base.TestDriver):                                              
                                      ("WMIC.exe", "logicaldisk", "get",
                                       "deviceid, volumename, description"),
                                      fIgnoreErrors = True);
-                oTxsSession.syncExec(sWinDir + " cmd.exe",
+                oTxsSession.syncExec(sWinDir + "cmd.exe",
                                      ('cmd.exe', '/C', 'dir', '${CDROM}'),
                                      fIgnoreErrors = True);
 
@@ -4302,7 +4312,7 @@ class TestDriver(base.TestDriver):                                              
                 if fCdWait:
                     # Wait for CD?
                     reporter.log2('startVmAndConnectToTxsViaTcp: Waiting for file "%s" to become available ...' % (sFileCdWait,));
-                    fRc = self.txsCdWait(oSession, oTxsSession, cMsCdWait, sFileCdWait);
+                    fRc = self.txsCdWait(oSession, oTxsSession, cMsCdWait, sFileCdWait, oTestVM);
                     if fRc is not True:
                         reporter.error('startVmAndConnectToTxsViaTcp: txsCdWait failed');
 
