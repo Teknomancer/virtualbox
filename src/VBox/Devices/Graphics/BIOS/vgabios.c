@@ -1024,29 +1024,29 @@ void biosfn_set_video_mode(uint8_t mode)
     {
      biosfn_perform_gray_scale_summing(0x00, 0x100);
     }
+
+   // Reset Attribute Ctl flip-flop
+   inb(VGAREG_ACTL_RESET);
+
+   // Set Attribute Ctl
+   for(i=0;i<=0x13;i++)
+    {outb(VGAREG_ACTL_ADDRESS,i);
+     outb(VGAREG_ACTL_WRITE_DATA,vpt->actl_regs[i]);
+    }
+   outb(VGAREG_ACTL_ADDRESS,0x14);
+   outb(VGAREG_ACTL_WRITE_DATA,0x00);
+
+   // Save palette into the save area if it exists.
+   if(save_area[1])
+   {
+      uint8_t __far *dyn_save;
+
+      dyn_save = save_area[1];
+      for (i = 0; i < 16; ++i)
+         dyn_save[i] = vpt->actl_regs[i];
+      dyn_save[16] = vpt->actl_regs[17];
+   }
   }
-
- // Reset Attribute Ctl flip-flop
- inb(VGAREG_ACTL_RESET);
-
- // Set Attribute Ctl
- for(i=0;i<=0x13;i++)
-  {outb(VGAREG_ACTL_ADDRESS,i);
-   outb(VGAREG_ACTL_WRITE_DATA,vpt->actl_regs[i]);
-  }
- outb(VGAREG_ACTL_ADDRESS,0x14);
- outb(VGAREG_ACTL_WRITE_DATA,0x00);
-
- // Save palette into the save area if it exists.
- if(save_area[1])
- {
-    uint8_t __far *dyn_save;
-
-    dyn_save = save_area[1];
-    for (i = 0; i < 16; ++i)
-       dyn_save[i] = vpt->actl_regs[i];
-    dyn_save[16] = vpt->actl_regs[17];
- }
 
  // Set Sequencer Ctl
  outb(VGAREG_SEQU_ADDRESS,0);
