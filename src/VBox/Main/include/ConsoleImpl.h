@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImpl.h 114439 2026-06-18 16:11:06Z klaus.espenlaub@oracle.com $ */
 /** @file
  * VBox Console COM Class definition
  */
@@ -179,7 +179,7 @@ public:
     void FinalRelease();
 
     // public initializers/uninitializers for internal purposes only
-    HRESULT initWithMachine(IMachine *aMachine, IInternalMachineControl *aControl, LockType_T aLockType);
+    HRESULT initWithMachine(IMachine *aMachine, IInternalMachineControl *aControl);
     void uninit();
 
 

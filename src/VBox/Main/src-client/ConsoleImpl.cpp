@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114439 2026-06-18 16:11:06Z klaus.espenlaub@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -524,8 +524,7 @@ void Console::FinalRelease()
 // public initializer/uninitializer for internal purposes only
 /////////////////////////////////////////////////////////////////////////////
 
-/** @todo r=bird: aLockType is always LockType_VM.   */
-HRESULT Console::initWithMachine(IMachine *aMachine, IInternalMachineControl *aControl, LockType_T aLockType)
+HRESULT Console::initWithMachine(IMachine *aMachine, IInternalMachineControl *aControl)
 {
     AssertReturn(aMachine && aControl, E_INVALIDARG);
 
@@ -571,211 +570,207 @@ HRESULT Console::initWithMachine(IMachine *aMachine, IInternalMachineControl *aC
     AssertComRCReturnRC(hrc);
 
     /* Now the VM specific parts */
-    /** @todo r=bird: aLockType is always LockType_VM.   */
-    if (aLockType == LockType_VM)
+    const char *pszVMM = NULL; /* Shut up MSVC. */
+
+    switch (platformArch)
     {
-        const char *pszVMM = NULL; /* Shut up MSVC. */
-
-        switch (platformArch)
-        {
-            case PlatformArchitecture_x86:
+        case PlatformArchitecture_x86:
 #if !defined(RT_ARCH_AMD64) && !defined(VBOX_WITH_X86_ON_ARM_ENABLED)
+            {
+                ComPtr<IVirtualBox> pVirtualBox;
+                hrc = mMachine->COMGETTER(Parent)(pVirtualBox.asOutParam());
+                if (SUCCEEDED(hrc))
                 {
-                    ComPtr<IVirtualBox> pVirtualBox;
-                    hrc = mMachine->COMGETTER(Parent)(pVirtualBox.asOutParam());
-                    if (SUCCEEDED(hrc))
+                    Bstr bstrEnableX86OnArm;
+                    hrc = pVirtualBox->GetExtraData(Bstr("VBoxInternal2/EnableX86OnArm").raw(), bstrEnableX86OnArm.asOutParam());
+                    if (FAILED(hrc) || !bstrEnableX86OnArm.equals("1"))
                     {
-                        Bstr bstrEnableX86OnArm;
-                        hrc = pVirtualBox->GetExtraData(Bstr("VBoxInternal2/EnableX86OnArm").raw(), bstrEnableX86OnArm.asOutParam());
-                        if (FAILED(hrc) || !bstrEnableX86OnArm.equals("1"))
-                        {
-                            hrc = setError(VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED,
-                                           tr("Cannot run the machine because its platform architecture %s is not supported on %s"),
-                                           Global::stringifyPlatformArchitecture(platformArch),
-                                           Global::stringifyPlatformArchitecture(PlatformArchitecture_ARM));
-                            break;
-                        }
+                        hrc = setError(VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED,
+                                       tr("Cannot run the machine because its platform architecture %s is not supported on %s"),
+                                       Global::stringifyPlatformArchitecture(platformArch),
+                                       Global::stringifyPlatformArchitecture(PlatformArchitecture_ARM));
+                        break;
                     }
                 }
+            }
 #endif
-                pszVMM = "VBoxVMM";
-                break;
+            pszVMM = "VBoxVMM";
+            break;
 #ifdef VBOX_WITH_VIRT_ARMV8
-            case PlatformArchitecture_ARM:
+        case PlatformArchitecture_ARM:
 #if !defined(RT_ARCH_ARM64) && !defined(VBOX_WITH_ARM_ON_X86_ENABLED)
+            {
+                ComPtr<IVirtualBox> pVirtualBox;
+                hrc = mMachine->COMGETTER(Parent)(pVirtualBox.asOutParam());
+                if (SUCCEEDED(hrc))
                 {
-                    ComPtr<IVirtualBox> pVirtualBox;
-                    hrc = mMachine->COMGETTER(Parent)(pVirtualBox.asOutParam());
-                    if (SUCCEEDED(hrc))
+                    Bstr bstrEnableArmOnX86;
+                    hrc = pVirtualBox->GetExtraData(Bstr("VBoxInternal2/EnableArmOnX86").raw(), bstrEnableArmOnX86.asOutParam());
+                    if (FAILED(hrc) || !bstrEnableArmOnX86.equals("1"))
                     {
-                        Bstr bstrEnableArmOnX86;
-                        hrc = pVirtualBox->GetExtraData(Bstr("VBoxInternal2/EnableArmOnX86").raw(), bstrEnableArmOnX86.asOutParam());
-                        if (FAILED(hrc) || !bstrEnableArmOnX86.equals("1"))
-                        {
-                            hrc = setError(VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED,
-                                           tr("Cannot run the machine because its platform architecture %s is not supported on %s"),
-                                           Global::stringifyPlatformArchitecture(platformArch),
-                                           Global::stringifyPlatformArchitecture(PlatformArchitecture_x86));
-                            break;
-                        }
+                        hrc = setError(VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED,
+                                       tr("Cannot run the machine because its platform architecture %s is not supported on %s"),
+                                       Global::stringifyPlatformArchitecture(platformArch),
+                                       Global::stringifyPlatformArchitecture(PlatformArchitecture_x86));
+                        break;
                     }
                 }
+            }
 #endif
-                pszVMM = "VBoxVMMArm";
-                break;
+            pszVMM = "VBoxVMMArm";
+            break;
 #endif
-            default:
-                hrc = setError(VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED,
-                               tr("Cannot run the machine because its platform architecture %s is not supported"),
-                               Global::stringifyPlatformArchitecture(platformArch));
-                break;
-        }
+        default:
+            hrc = setError(VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED,
+                           tr("Cannot run the machine because its platform architecture %s is not supported"),
+                           Global::stringifyPlatformArchitecture(platformArch));
+            break;
+    }
 
-        if (FAILED(hrc))
-            return hrc;
+    if (FAILED(hrc))
+        return hrc;
 
-        /* Load the VMM. We won't continue without it being successfully loaded here. */
-        hrc = i_loadVMM(pszVMM);
-        AssertComRCReturnRC(hrc);
+    /* Load the VMM. We won't continue without it being successfully loaded here. */
+    hrc = i_loadVMM(pszVMM);
+    AssertComRCReturnRC(hrc);
 
 #ifdef VBOX_WITH_VIRT_ARMV8
-        unconst(mptrResourceStore).createObject();
-        hrc = mptrResourceStore->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mptrResourceStore).createObject();
+    hrc = mptrResourceStore->init(this);
+    AssertComRCReturnRC(hrc);
 #endif
-        hrc = mMachine->COMGETTER(VRDEServer)(unconst(mVRDEServer).asOutParam());
-        AssertComRCReturnRC(hrc);
+    hrc = mMachine->COMGETTER(VRDEServer)(unconst(mVRDEServer).asOutParam());
+    AssertComRCReturnRC(hrc);
 
-        unconst(mGuest).createObject();
-        hrc = mGuest->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mGuest).createObject();
+    hrc = mGuest->init(this);
+    AssertComRCReturnRC(hrc);
 
-        ULONG cCpus = 1;
-        hrc = mMachine->COMGETTER(CPUCount)(&cCpus);
-        AssertComRCReturnRC(hrc);
-        mGuest->i_setCpuCount(cCpus);
+    ULONG cCpus = 1;
+    hrc = mMachine->COMGETTER(CPUCount)(&cCpus);
+    AssertComRCReturnRC(hrc);
+    mGuest->i_setCpuCount(cCpus);
 
-        unconst(mKeyboard).createObject();
-        hrc = mKeyboard->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mKeyboard).createObject();
+    hrc = mKeyboard->init(this);
+    AssertComRCReturnRC(hrc);
 
-        unconst(mMouse).createObject();
-        hrc = mMouse->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mMouse).createObject();
+    hrc = mMouse->init(this);
+    AssertComRCReturnRC(hrc);
 
-        unconst(mDisplay).createObject();
-        hrc = mDisplay->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mDisplay).createObject();
+    hrc = mDisplay->init(this);
+    AssertComRCReturnRC(hrc);
 
-        unconst(mClipboard).createObject();
-        hrc = mClipboard->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mClipboard).createObject();
+    hrc = mClipboard->init(this);
+    AssertComRCReturnRC(hrc);
 
-        unconst(mVRDEServerInfo).createObject();
-        hrc = mVRDEServerInfo->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mVRDEServerInfo).createObject();
+    hrc = mVRDEServerInfo->init(this);
+    AssertComRCReturnRC(hrc);
 
-        unconst(mEmulatedUSB).createObject();
-        hrc = mEmulatedUSB->init(this);
-        AssertComRCReturnRC(hrc);
+    unconst(mEmulatedUSB).createObject();
+    hrc = mEmulatedUSB->init(this);
+    AssertComRCReturnRC(hrc);
 
-        /* Init the NVRAM store. */
-        ComPtr<INvramStore> pNvramStore;
-        hrc = aMachine->COMGETTER(NonVolatileStore)(pNvramStore.asOutParam());
-        AssertComRCReturnRC(hrc);
+    /* Init the NVRAM store. */
+    ComPtr<INvramStore> pNvramStore;
+    hrc = aMachine->COMGETTER(NonVolatileStore)(pNvramStore.asOutParam());
+    AssertComRCReturnRC(hrc);
 
-        Bstr strNonVolatilePath;
-        pNvramStore->COMGETTER(NonVolatileStorageFile)(strNonVolatilePath.asOutParam());
+    Bstr strNonVolatilePath;
+    pNvramStore->COMGETTER(NonVolatileStorageFile)(strNonVolatilePath.asOutParam());
 
-        unconst(mptrNvramStore).createObject();
-        hrc = mptrNvramStore->init(this, strNonVolatilePath);
-        AssertComRCReturnRC(hrc);
+    unconst(mptrNvramStore).createObject();
+    hrc = mptrNvramStore->init(this, strNonVolatilePath);
+    AssertComRCReturnRC(hrc);
 
 #ifdef VBOX_WITH_FULL_VM_ENCRYPTION
-        Bstr bstrNvramKeyId;
-        Bstr bstrNvramKeyStore;
-        hrc = pNvramStore->COMGETTER(KeyId)(bstrNvramKeyId.asOutParam());
-        AssertComRCReturnRC(hrc);
-        hrc = pNvramStore->COMGETTER(KeyStore)(bstrNvramKeyStore.asOutParam());
-        AssertComRCReturnRC(hrc);
-        const Utf8Str strNvramKeyId(bstrNvramKeyId);
-        const Utf8Str strNvramKeyStore(bstrNvramKeyStore);
-        mptrNvramStore->i_updateEncryptionSettings(strNvramKeyId, strNvramKeyStore);
+    Bstr bstrNvramKeyId;
+    Bstr bstrNvramKeyStore;
+    hrc = pNvramStore->COMGETTER(KeyId)(bstrNvramKeyId.asOutParam());
+    AssertComRCReturnRC(hrc);
+    hrc = pNvramStore->COMGETTER(KeyStore)(bstrNvramKeyStore.asOutParam());
+    AssertComRCReturnRC(hrc);
+    const Utf8Str strNvramKeyId(bstrNvramKeyId);
+    const Utf8Str strNvramKeyStore(bstrNvramKeyStore);
+    mptrNvramStore->i_updateEncryptionSettings(strNvramKeyId, strNvramKeyStore);
 #endif
 
-        /* Grab global and machine shared folder lists */
+    /* Grab global and machine shared folder lists */
 
-        hrc = i_fetchSharedFolders(true /* aGlobal */);
-        AssertComRCReturnRC(hrc);
-        hrc = i_fetchSharedFolders(false /* aGlobal */);
-        AssertComRCReturnRC(hrc);
+    hrc = i_fetchSharedFolders(true /* aGlobal */);
+    AssertComRCReturnRC(hrc);
+    hrc = i_fetchSharedFolders(false /* aGlobal */);
+    AssertComRCReturnRC(hrc);
 
-        /* Create other child objects */
+    /* Create other child objects */
 
-        unconst(mConsoleVRDPServer) = new ConsoleVRDPServer(this);
-        AssertReturn(mConsoleVRDPServer, E_FAIL);
+    unconst(mConsoleVRDPServer) = new ConsoleVRDPServer(this);
+    AssertReturn(mConsoleVRDPServer, E_FAIL);
 
-        /* Figure out size of meAttachmentType vector */
-        ComPtr<IVirtualBox> pVirtualBox;
-        hrc = aMachine->COMGETTER(Parent)(pVirtualBox.asOutParam());
+    /* Figure out size of meAttachmentType vector */
+    ComPtr<IVirtualBox> pVirtualBox;
+    hrc = aMachine->COMGETTER(Parent)(pVirtualBox.asOutParam());
+    AssertComRC(hrc);
+
+    ComPtr<ISystemProperties> pSystemProperties;
+    ComPtr<IPlatformProperties> pPlatformProperties;
+    if (pVirtualBox)
+    {
+        hrc = pVirtualBox->COMGETTER(SystemProperties)(pSystemProperties.asOutParam());
         AssertComRC(hrc);
+        hrc = pVirtualBox->GetPlatformProperties(platformArch, pPlatformProperties.asOutParam());
+        AssertComRC(hrc);
+    }
 
-        ComPtr<ISystemProperties> pSystemProperties;
-        ComPtr<IPlatformProperties> pPlatformProperties;
-        if (pVirtualBox)
-        {
-            hrc = pVirtualBox->COMGETTER(SystemProperties)(pSystemProperties.asOutParam());
-            AssertComRC(hrc);
-            hrc = pVirtualBox->GetPlatformProperties(platformArch, pPlatformProperties.asOutParam());
-            AssertComRC(hrc);
-        }
-
-        ChipsetType_T chipsetType = ChipsetType_PIIX3;
-        pPlatform->COMGETTER(ChipsetType)(&chipsetType);
-        ULONG maxNetworkAdapters = 0;
-        if (pPlatformProperties)
-            pPlatformProperties->GetMaxNetworkAdapters(chipsetType, &maxNetworkAdapters);
-        meAttachmentType.resize(maxNetworkAdapters);
-        for (ULONG slot = 0; slot < maxNetworkAdapters; ++slot)
-            meAttachmentType[slot] = NetworkAttachmentType_Null;
+    ChipsetType_T chipsetType = ChipsetType_PIIX3;
+    pPlatform->COMGETTER(ChipsetType)(&chipsetType);
+    ULONG maxNetworkAdapters = 0;
+    if (pPlatformProperties)
+        pPlatformProperties->GetMaxNetworkAdapters(chipsetType, &maxNetworkAdapters);
+    meAttachmentType.resize(maxNetworkAdapters);
+    for (ULONG slot = 0; slot < maxNetworkAdapters; ++slot)
+        meAttachmentType[slot] = NetworkAttachmentType_Null;
 
 #ifdef VBOX_WITH_AUDIO_VRDE
-        unconst(mAudioVRDE) = new AudioVRDE(this);
-        AssertReturn(mAudioVRDE, E_FAIL);
+    unconst(mAudioVRDE) = new AudioVRDE(this);
+    AssertReturn(mAudioVRDE, E_FAIL);
 #endif
 #ifdef VBOX_WITH_AUDIO_RECORDING
-        unconst(mRecording.mAudioRec) = new AudioVideoRec(this);
-        AssertReturn(mRecording.mAudioRec, E_FAIL);
+    unconst(mRecording.mAudioRec) = new AudioVideoRec(this);
+    AssertReturn(mRecording.mAudioRec, E_FAIL);
 #endif
 
 #ifdef VBOX_WITH_USB_CARDREADER
-        unconst(mUsbCardReader) = new UsbCardReader(this);
-        AssertReturn(mUsbCardReader, E_FAIL);
+    unconst(mUsbCardReader) = new UsbCardReader(this);
+    AssertReturn(mUsbCardReader, E_FAIL);
 #endif
 
-        m_cDisksPwProvided = 0;
-        m_cDisksEncrypted = 0;
+    m_cDisksPwProvided = 0;
+    m_cDisksEncrypted = 0;
 
-        unconst(m_pKeyStore) = new SecretKeyStore(true /* fKeyBufNonPageable */);
-        AssertReturn(m_pKeyStore, E_FAIL);
+    unconst(m_pKeyStore) = new SecretKeyStore(true /* fKeyBufNonPageable */);
+    AssertReturn(m_pKeyStore, E_FAIL);
 
-        /* VirtualBox events registration. */
-        {
-            ComPtr<IEventSource> pES;
-            hrc = pVirtualBox->COMGETTER(EventSource)(pES.asOutParam());
-            AssertComRC(hrc);
-            ComObjPtr<VmEventListenerImpl> aVmListener;
-            aVmListener.createObject();
-            aVmListener->init(new VmEventListener(), this);
-            mVmListener = aVmListener;
-            com::SafeArray<VBoxEventType_T> eventTypes;
-            eventTypes.push_back(VBoxEventType_OnNATRedirect);
-            eventTypes.push_back(VBoxEventType_OnHostNameResolutionConfigurationChange);
-            eventTypes.push_back(VBoxEventType_OnHostPCIDevicePlug);
-            eventTypes.push_back(VBoxEventType_OnExtraDataChanged);
-            hrc = pES->RegisterListener(aVmListener, ComSafeArrayAsInParam(eventTypes), true);
-            AssertComRC(hrc);
-        }
+    /* VirtualBox events registration. */
+    {
+        ComPtr<IEventSource> pES;
+        hrc = pVirtualBox->COMGETTER(EventSource)(pES.asOutParam());
+        AssertComRC(hrc);
+        ComObjPtr<VmEventListenerImpl> aVmListener;
+        aVmListener.createObject();
+        aVmListener->init(new VmEventListener(), this);
+        mVmListener = aVmListener;
+        com::SafeArray<VBoxEventType_T> eventTypes;
+        eventTypes.push_back(VBoxEventType_OnNATRedirect);
+        eventTypes.push_back(VBoxEventType_OnHostNameResolutionConfigurationChange);
+        eventTypes.push_back(VBoxEventType_OnHostPCIDevicePlug);
+        eventTypes.push_back(VBoxEventType_OnExtraDataChanged);
+        hrc = pES->RegisterListener(aVmListener, ComSafeArrayAsInParam(eventTypes), true);
+        AssertComRC(hrc);
     }
 
     /* Confirm a successful initialization when it's the case */

@@ -1,4 +1,4 @@
-/* $Id: SessionImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: SessionImpl.cpp 114439 2026-06-18 16:11:06Z klaus.espenlaub@oracle.com $ */
 /** @file
  * VBox Client Session COM Class implementation in VBoxC.
  */
@@ -355,7 +355,7 @@ HRESULT Session::assignMachine(const ComPtr<IMachine> &aMachine,
         hrc = mConsole.createObject();
         AssertComRCReturn(hrc, hrc);
 
-        hrc = mConsole->initWithMachine(aMachine, mControl, aLockType);
+        hrc = mConsole->initWithMachine(aMachine, mControl);
         if (hrc != VBOX_E_PLATFORM_ARCH_NOT_SUPPORTED)
             AssertComRCReturn(hrc, hrc);
         else
