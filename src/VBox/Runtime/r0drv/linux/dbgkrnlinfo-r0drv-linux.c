@@ -1,4 +1,4 @@
-/* $Id: dbgkrnlinfo-r0drv-linux.c 114440 2026-06-18 16:44:03Z alexander.eichner@oracle.com $ */
+/* $Id: dbgkrnlinfo-r0drv-linux.c 114444 2026-06-18 18:35:31Z alexander.eichner@oracle.com $ */
 /** @file
  * IPRT - Kernel Debug Information, R0 Driver, Linux.
  */
@@ -61,6 +61,9 @@
 #include <iprt/dbg.h>
 
 #include <iprt/asm.h>
+#if defined(RT_ARCH_X86) || defined(RT_ARCH_AMD64)
+# include <iprt/asm-amd64-x86.h>
+#endif
 #include <iprt/assert.h>
 #include <iprt/ctype.h>
 #include <iprt/err.h>
