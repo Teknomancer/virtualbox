@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-internal.h 114424 2026-06-18 08:17:05Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-internal.h 114426 2026-06-18 08:37:14Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal service instance state.
  */
@@ -124,6 +124,10 @@ int shClSvcClientMsgOldGet(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
 int shClSvcClientMsgGet(PSHCLCLIENT pClient, VBOXHGCMCALLHANDLE hCall,
                         uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
 int shClSvcClientMsgCancel(PSHCLCLIENT pClient, uint32_t cParms);
+int shClSvcClientMsgReportFormats(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
+int shClSvcClientMsgDataRead(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
+int shClSvcClientMsgDataWrite(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
+int shClSvcClientMsgError(uint32_t cParms, VBOXHGCMSVCPARM paParms[], int *pRc);
 /** @} */
 
 /** @name Backend and extension bridge handling.
