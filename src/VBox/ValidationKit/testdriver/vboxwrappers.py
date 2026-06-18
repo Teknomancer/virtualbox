@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: vboxwrappers.py 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: vboxwrappers.py 114432 2026-06-18 10:11:13Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 112403 $"
+__version__ = "$Revision: 114432 $"
 
 
 # Standard Python imports.
@@ -3583,10 +3583,13 @@ class TxsConnectTask(TdTaskBase):
         """
         self.oCv.acquire();
         if self.oTxsSession is None:
-            reporter.log2('_openTcpSession: sIpAddr=%s, uPort=%d, fReversedSetup=%s' %
-                          (sIpAddr, uPort if uPort is not None else 0, fReversedSetup));
+            cMsTimeout = self.cMsTimeout;
+            if fReversedSetup:
+                cMsTimeout = max(min(self.cMsTimeout - self.getAgeAsMs(), 30000), 500);
+            reporter.log2('_openTcpSession: sIpAddr=%s, uPort=%d, fReversedSetup=%s, cMsTimeout=%d'
+                          % (sIpAddr, uPort if uPort is not None else 0, fReversedSetup, cMsTimeout));
             self.sIpAddr     = sIpAddr;
-            self.oTxsSession = txsclient.openTcpSession(self.cMsTimeout, sIpAddr, uPort, fReversedSetup,
+            self.oTxsSession = txsclient.openTcpSession(cMsTimeout, sIpAddr, uPort, fReversedSetup,
                                                         cMsIdleFudge, fnProcessEvents = self.fnProcessEvents);
             self.oTxsSession.setTaskOwner(self);
         else:
@@ -3618,13 +3621,14 @@ class TxsConnectTask(TdTaskBase):
         # Signal done, or retry?
         fDeregister = False;
         if   fSuccess \
-          or self.fReversedSetup \
           or self.getAgeAsMs() >= self.cMsTimeout:
             self.signalTaskLocked();
             fDeregister = True;
         else:
-            sIpAddr = self.sNextIpAddr if self.sNextIpAddr is not None else self.sIpAddr;
-            self._openTcpSession(sIpAddr, cMsIdleFudge = 5000);
+            # Reversed setup has to re-open the listening socket for each retry.
+            sIpAddr      = self.sNextIpAddr if self.sNextIpAddr is not None else self.sIpAddr;
+            cMsIdleFudge = 0 if self.fReversedSetup else 5000;
+            self._openTcpSession(sIpAddr, fReversedSetup = self.fReversedSetup, cMsIdleFudge = cMsIdleFudge);
 
         self.oCv.release();
 

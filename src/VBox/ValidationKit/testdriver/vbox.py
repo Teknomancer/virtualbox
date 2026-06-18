@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: vbox.py 114430 2026-06-18 09:43:51Z andreas.loeffler@oracle.com $
+# $Id: vbox.py 114432 2026-06-18 10:11:13Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 114430 $"
+__version__ = "$Revision: 114432 $"
 
 # pylint: disable=unnecessary-semicolon
 
@@ -4366,38 +4366,63 @@ class TestDriver(base.TestDriver):                                              
             fRc = self.txsDoTask(oSession, oTxsSession, oTxsSession.asyncReboot,
                                  (self.adjustTimeoutMs(cMsTimeout2, 60000), False));
             if fRc is True:
-                # Reconnect.
-                if fNatForwardingForTxs is True:
-                    self.sleep(22); # NAT fudge - Two fixes are wanted: 1. TXS connect retries.  2. Main API reboot/reset hint.
-                cMsElapsed = base.timestampMilli() - iStart;
-                (fRc, oTxsSession) = self.txsDoConnectViaTcp(oSession, cMsTimeout - cMsElapsed, fNatForwardingForTxs);
-                if fRc is True:
+                # Reconnect.  We may briefly reach the old TXS instance before the reboot has actually taken effect,
+                # so retry until the TXS UUID changes or the overall timeout expires.
+                fRc         = False;
+                oTxsSession = None;
+                while True:
+                    cMsElapsed  = base.timestampMilli() - iStart;
+                    cMsTimeout2 = cMsTimeout - cMsElapsed;
+                    if cMsTimeout2 <= 0:
+                        reporter.errorTimeout('txsRebootAndReconnectViaTcp: reconnect timed out');
+                        break;
+
+                    fRcConnect, oTxsSession = self.txsDoConnectViaTcp(oSession, cMsTimeout2, fNatForwardingForTxs);
+                    if fRcConnect is not True:
+                        reporter.error('txsRebootAndReconnectViaTcp: txsDoConnectViaTcp failed');
+                        break;
+
                     # Check the UUID.
                     cMsElapsed  = base.timestampMilli() - iStart;
                     cMsTimeout2 = min(60000, cMsTimeout - cMsElapsed);
-                    sUuidAfter  = self.txsDoTask(oSession, oTxsSession, oTxsSession.asyncUuid,
-                                                 (self.adjustTimeoutMs(cMsTimeout2, 60000), False));
-                    if sUuidBefore is not False:
-                        if sUuidAfter != sUuidBefore:
-                            reporter.log('The guest rebooted (UUID %s -> %s)' % (sUuidBefore, sUuidAfter))
+                    if cMsTimeout2 <= 0:
+                        reporter.errorTimeout('txsRebootAndReconnectViaTcp: UUID check timed out');
+                        self.txsDisconnect(oSession, oTxsSession, 5000, fIgnoreErrors = True);
+                        oTxsSession = None;
+                        break;
+                    sUuidAfter = self.txsUuid(oSession, oTxsSession, cMsTimeout2, fIgnoreErrors = True);
+                    if sUuidAfter is False:
+                        reporter.log('txsRebootAndReconnectViaTcp: failed to get UUID (after), retrying');
+                    elif sUuidAfter != sUuidBefore:
+                        reporter.log('The guest rebooted (UUID %s -> %s)' % (sUuidBefore, sUuidAfter));
 
-                            # Do CD wait if specified.
-                            if fCdWait:
-                                fRc = self.txsCdWait(oSession, oTxsSession, cMsCdWait, sFileCdWait);
-                                if fRc is not True:
-                                    reporter.error('txsRebootAndReconnectViaTcp: txsCdWait failed');
+                        # Do CD wait if specified.
+                        fRc = True;
+                        if fCdWait:
+                            fRc = self.txsCdWait(oSession, oTxsSession, cMsCdWait, sFileCdWait);
+                            if fRc is not True:
+                                reporter.error('txsRebootAndReconnectViaTcp: txsCdWait failed');
 
-                            sVer = self.txsVer(oSession, oTxsSession, cMsTimeout, fIgnoreErrors = True);
-                            if sVer is not False:
-                                reporter.log('txsRebootAndReconnectViaTcp: TestExecService version %s' % (sVer,));
-                            else:
-                                reporter.log('txsRebootAndReconnectViaTcp: Unable to retrieve TestExecService version');
+                        sVer = self.txsVer(oSession, oTxsSession, cMsTimeout, fIgnoreErrors = True);
+                        if sVer is not False:
+                            reporter.log('txsRebootAndReconnectViaTcp: TestExecService version %s' % (sVer,));
                         else:
-                            reporter.error('txsRebootAndReconnectViaTcp: failed to get UUID (after)');
+                            reporter.log('txsRebootAndReconnectViaTcp: Unable to retrieve TestExecService version');
+                        break;
                     else:
-                        reporter.error('txsRebootAndReconnectViaTcp: did not reboot (UUID %s)' % (sUuidBefore,));
-                else:
-                    reporter.error('txsRebootAndReconnectViaTcp: txsDoConnectViaTcp failed');
+                        reporter.log('txsRebootAndReconnectViaTcp: connected to pre-reboot TXS instance (UUID %s), retrying'
+                                     % (sUuidAfter,));
+
+                    self.txsDisconnect(oSession, oTxsSession, 5000, fIgnoreErrors = True);
+                    oTxsSession = None;
+                    cMsElapsed  = base.timestampMilli() - iStart;
+                    if cMsElapsed + 2000 >= cMsTimeout:
+                        if sUuidAfter is False:
+                            reporter.error('txsRebootAndReconnectViaTcp: failed to get UUID (after)');
+                        else:
+                            reporter.error('txsRebootAndReconnectViaTcp: did not reboot (UUID %s)' % (sUuidBefore,));
+                        break;
+                    self.sleep(2);
             else:
                 reporter.error('txsRebootAndReconnectViaTcp: reboot failed');
         else:
