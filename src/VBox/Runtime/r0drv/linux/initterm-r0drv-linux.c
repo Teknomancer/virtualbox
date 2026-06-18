@@ -1,4 +1,4 @@
-/* $Id: initterm-r0drv-linux.c 114440 2026-06-18 16:44:03Z alexander.eichner@oracle.com $ */
+/* $Id: initterm-r0drv-linux.c 114442 2026-06-18 16:55:24Z alexander.eichner@oracle.com $ */
 /** @file
  * IPRT - Initialization & Termination, R0 Driver, Linux.
  */
@@ -43,6 +43,9 @@
 #include <iprt/errcore.h>
 #include <iprt/assert.h>
 #include <iprt/dbg.h>
+#if defined(RT_ARCH_X86) || defined(RT_ARCH_AMD64)
+# include <iprt/asm-amd64-x86.h>
+#endif
 #include "internal/initterm.h"
 
 
