@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114429 2026-06-18 09:39:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -149,6 +149,26 @@ public:
     /** @}  */
 
 protected:
+
+    /** @name Service extension callback handlers.
+     * @{ */
+    int i_forwardToChainedSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtSetCallback(PSHCLEXTPARMS pParms);
+    int i_handleSvcExtReportFormatsToHost(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtReportFormatsToGuest(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtDataRead(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtDataReadVrde(PSHCLEXTPARMS pParms);
+    int i_handleSvcExtDataWrite(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtBackendInit(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtBackendDestroy(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtBackendConnect(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtBackendDisconnect(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtBackendSync(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+    int i_handleSvcExtError(PSHCLEXTPARMS pParms);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    int i_handleSvcExtFileTransfer(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
+#endif
+    /** @}  */
 
     /** @name Singleton properties.
      * @{ */
