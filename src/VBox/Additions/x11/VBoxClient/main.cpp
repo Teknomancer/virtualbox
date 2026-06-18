@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114416 2026-06-17 23:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114437 2026-06-18 13:10:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -786,9 +786,7 @@ int main(int argc, char *argv[])
 
     /* Try to detect the current session type early on, if needed. */
     if (g_enmDisplayServerType == VBGHDISPLAYSERVERTYPE_AUTO)
-    {
         g_enmDisplayServerType = VBGHDisplayServerTypeDetect();
-    }
     else
         VBClLogInfo("Session type was manually set to: %s\n", VBGHDisplayServerTypeToStr(g_enmDisplayServerType));
 
