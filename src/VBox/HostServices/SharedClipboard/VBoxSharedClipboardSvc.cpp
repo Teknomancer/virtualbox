@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114426 2026-06-18 08:37:14Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114427 2026-06-18 08:48:19Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -285,37 +285,6 @@ uint32_t ShClSvcGetMode(void)
 
 
 
-static int shClSvcModeSet(uint32_t uMode)
-{
-    int rc = VERR_NOT_SUPPORTED;
-
-    switch (uMode)
-    {
-        case VBOX_SHCL_MODE_OFF:
-            RT_FALL_THROUGH();
-        case VBOX_SHCL_MODE_HOST_TO_GUEST:
-            RT_FALL_THROUGH();
-        case VBOX_SHCL_MODE_GUEST_TO_HOST:
-            RT_FALL_THROUGH();
-        case VBOX_SHCL_MODE_BIDIRECTIONAL:
-        {
-            g_uMode = uMode;
-
-            rc = VINF_SUCCESS;
-            break;
-        }
-
-        default:
-        {
-            g_uMode = VBOX_SHCL_MODE_OFF;
-            break;
-        }
-    }
-
-    LogFlowFuncLeaveRC(rc);
-    return rc;
-}
-
 /**
  * Takes the global Shared Clipboard service lock.
  *
@@ -343,7 +312,7 @@ static int shClSvcInit(VBOXHGCMSVCFNTABLE *pTable)
 
     if (RT_SUCCESS(rc))
     {
-        shClSvcModeSet(VBOX_SHCL_MODE_OFF);
+        shClSvcHostModeSet(VBOX_SHCL_MODE_OFF);
 
         /* Normally we would call ShClBackendInit() here but the service extension
          * has not been loaded at this early stage of the Shared Clipboard service
@@ -591,107 +560,6 @@ static DECLCALLBACK(void) shClSvcCall(void *,
 
     if (rc != VINF_HGCM_ASYNC_EXECUTE)
         g_pHelpers->pfnCallComplete(callHandle, rc);
-}
-
-/**
- * Resets host-side live Shared Clipboard state.
- */
-static void shClSvcHostReset(void)
-{
-    int rc = RTCritSectEnter(&g_CritSect);
-    AssertRC(rc);
-    if (RT_FAILURE(rc))
-        return;
-
-    for (ClipboardClientMap::iterator itClient = g_mapClients.begin(); itClient != g_mapClients.end(); ++itClient)
-        if (itClient->second)
-            shClSvcClientReset(itClient->second);
-
-    g_ExtState.fReadingData = false;
-    g_ExtState.fDelayedAnnouncement = false;
-    g_ExtState.fDelayedFormats = 0;
-
-    RTCritSectLeave(&g_CritSect);
-}
-
-
-/*
- * We differentiate between a function handler for the guest and one for the host.
- */
-static DECLCALLBACK(int) shClSvcHostCall(void *,
-                                         uint32_t u32Function,
-                                         uint32_t cParms,
-                                         VBOXHGCMSVCPARM paParms[])
-{
-    int rc = VINF_SUCCESS;
-
-    LogFlowFunc(("u32Function=%RU32 (%s), cParms=%RU32, paParms=%p\n",
-                 u32Function, ShClHostFunctionToStr(u32Function), cParms, paParms));
-
-    switch (u32Function)
-    {
-        case VBOX_SHCL_HOST_FN_SET_MODE:
-        {
-            if (cParms != 1)
-            {
-                rc = VERR_INVALID_PARAMETER;
-            }
-            else
-            {
-                uint32_t u32Mode = VBOX_SHCL_MODE_OFF;
-
-                rc = HGCMSvcGetU32(&paParms[0], &u32Mode);
-                if (RT_SUCCESS(rc))
-                    rc = shClSvcModeSet(u32Mode);
-            }
-            break;
-        }
-
-        case VBOX_SHCL_HOST_FN_SET_HEADLESS:
-        {
-            if (cParms != 1)
-            {
-                rc = VERR_INVALID_PARAMETER;
-            }
-            else
-            {
-                uint32_t uHeadless;
-                rc = HGCMSvcGetU32(&paParms[0], &uHeadless);
-                if (RT_SUCCESS(rc))
-                {
-                    g_fHeadless = RT_BOOL(uHeadless);
-                    LogRel(("Shared Clipboard: Service running in %s mode\n", g_fHeadless ? "headless" : "normal"));
-                }
-            }
-            break;
-        }
-
-
-        case VBOX_SHCL_HOST_FN_CANCEL:
-        {
-            if (cParms > 1)
-                rc = VERR_INVALID_PARAMETER;
-            else
-            {
-                shClSvcHostReset();
-                rc = VINF_SUCCESS;
-            }
-            break;
-        }
-
-        default:
-        {
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-            rc = ShClSvcTransferMsgHostHandler(u32Function, cParms, paParms);
-#else
-            rc = VERR_NOT_IMPLEMENTED;
-#endif
-            break;
-        }
-    }
-
-    LogFlowFuncLeaveRC(rc);
-    return rc;
 }
 
 #ifndef UNIT_TEST

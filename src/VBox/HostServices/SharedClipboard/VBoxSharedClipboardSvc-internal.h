@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-internal.h 114426 2026-06-18 08:37:14Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-internal.h 114427 2026-06-18 08:48:19Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal service instance state.
  */
@@ -106,6 +106,12 @@ extern SHCLSERVICE g_ShClSvc;
 #define g_mapClients           (g_ShClSvc.mapClients)
 #define g_listClientsDeferred  (g_ShClSvc.listClientsDeferred)
 #define g_fHostFeatures0       (g_ShClSvc.fHostFeatures0)
+
+/** @name Host-controlled service handling.
+ * @{ */
+int shClSvcHostModeSet(uint32_t uMode);
+DECLCALLBACK(int) shClSvcHostCall(void *pvService, uint32_t u32Function, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
+/** @} */
 
 /** @name Client/session and guest message handling.
  * @{ */
