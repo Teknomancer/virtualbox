@@ -315,7 +315,7 @@
 
 <application
   name="VirtualBox"
-  uuid="61ff179a-5f10-4077-81f4-060beba09dec"
+  uuid="019edffc-d979-7493-abfa-b6ca9b817b1f"
   supportsErrorInfo="yes"
 >
 
@@ -491,6 +491,42 @@
   <result name="VBOX_E_RECORDING_ERROR" value="0x80BB0013">
     <desc>
       A recording error has occurred.
+    </desc>
+  </result>
+
+  <result name="VBOX_E_SHCL_ERROR" value="0x80BB0014">
+    <desc>
+      A clipboard error has occurred.
+    </desc>
+  </result>
+
+  <result name="VBOX_E_SHCL_ACCESS_DENIED" value="0x80BB0015">
+    <desc>
+      Access to the requested clipboard operation was denied.
+    </desc>
+  </result>
+
+  <result name="VBOX_E_SHCL_FORMAT_NOT_SUPPORTED" value="0x80BB0016">
+    <desc>
+      The requested clipboard format is not supported.
+    </desc>
+  </result>
+
+  <result name="VBOX_E_SHCL_NO_DATA" value="0x80BB0017">
+    <desc>
+      No clipboard data is available.
+    </desc>
+  </result>
+
+  <result name="VBOX_E_SHCL_TOO_MUCH_DATA" value="0x80BB0018">
+    <desc>
+      Clipboard data exceeded the supported size.
+    </desc>
+  </result>
+
+  <result name="VBOX_E_SHCL_GUEST_ERROR" value="0x80BB0019">
+    <desc>
+      The guest reported a clipboard error.
     </desc>
   </result>
 
