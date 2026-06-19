@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114452 2026-06-19 09:20:58Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114453 2026-06-19 09:25:11Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -249,12 +249,24 @@ bool GuestShCl::i_isHostDataSeqCurrent(uint64_t uSeq)
     int const vrc = lock();
     if (RT_SUCCESS(vrc))
     {
-        fIsCurrent = m_uHostDataSeq == uSeq;
+        fIsCurrent = i_isHostDataSeqCurrentLocked(uSeq);
         unlock();
     }
     else
         AssertMsgFailed(("Checking host data sequence counter failed with %Rrc\n", vrc));
     return fIsCurrent;
+}
+
+
+/**
+ * Checks whether a previously read host data sequence counter is still current while the caller owns the object lock.
+ *
+ * @returns true if \a uSeq matches the current host data sequence counter, false otherwise.
+ * @param   uSeq                Host data sequence counter value to check.
+ */
+bool GuestShCl::i_isHostDataSeqCurrentLocked(uint64_t uSeq)
+{
+    return m_uHostDataSeq == uSeq;
 }
 
 
@@ -534,7 +546,7 @@ int GuestShCl::reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64
     if (RT_FAILURE(vrc))
         return vrc;
 
-    if (uSeq != m_uHostDataSeq)
+    if (!i_isHostDataSeqCurrentLocked(uSeq))
     {
         unlock();
         return VINF_SUCCESS;
@@ -585,7 +597,7 @@ int GuestShCl::reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64
     {
         if (   cbRead > 0
             && cbRead <= cbActual
-            && uSeq == m_uHostDataSeq)
+            && i_isHostDataSeqCurrentLocked(uSeq))
         {
             HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Host, uFormat, pvData, cbRead);
             if (FAILED(hrc))

@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114452 2026-06-19 09:20:58Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114453 2026-06-19 09:25:11Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -130,6 +130,7 @@ protected:
     uint64_t i_incGuestDataSeq(void);
     uint64_t i_getHostDataSeq(void);
     bool i_isHostDataSeqCurrent(uint64_t uSeq);
+    bool i_isHostDataSeqCurrentLocked(uint64_t uSeq);
     uint64_t i_getGuestDataSeq(void);
     bool i_isGuestDataSeqCurrent(uint64_t uSeq);
     /** @}  */
