@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114449 2026-06-19 08:31:23Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114450 2026-06-19 09:05:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -107,8 +107,8 @@ GuestShCl::GuestShCl(Console *pConsole)
     : m_pConsole(pConsole)
     , m_pfnExtCallback(NULL)
     , m_pClient(NULL)
-    , m_uHostDataReportSeq(0)
-    , m_uGuestDataReportSeq(0)
+    , m_uHostDataSeq(0)
+    , m_uGuestDataSeq(0)
 {
     LogFlowFuncEnter();
 
@@ -138,8 +138,8 @@ void GuestShCl::uninit(void)
 
     m_pfnExtCallback = NULL;
     m_pClient = NULL;
-    m_uHostDataReportSeq = 0;
-    m_uGuestDataReportSeq = 0;
+    m_uHostDataSeq = 0;
+    m_uGuestDataSeq = 0;
 }
 
 /**
@@ -165,6 +165,95 @@ int GuestShCl::unlock(void)
     AssertRC(vrc);
     return vrc;
 }
+
+
+/**
+ * Gets the current host data sequence counter.
+ *
+ * The returned value can be passed to i_isHostDataSeqCurrent() later to check whether the host data
+ * observed by the caller is still current.
+ *
+ * @returns Current host data sequence counter, or 0 if the counter cannot be read.
+ */
+uint64_t GuestShCl::i_getHostDataSeq(void)
+{
+    uint64_t uSeq = 0;
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        uSeq = m_uHostDataSeq;
+        unlock();
+    }
+    else
+        AssertMsgFailed(("Getting host data sequence counter failed with %Rrc\n", vrc));
+    return uSeq;
+}
+
+
+/**
+ * Checks whether a previously read host data sequence counter is still current.
+ *
+ * @returns true if \a uSeq matches the current host data sequence counter, false otherwise.
+ * @param   uSeq                Host data sequence counter value to check.
+ */
+bool GuestShCl::i_isHostDataSeqCurrent(uint64_t uSeq)
+{
+    bool fIsCurrent = false;
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        fIsCurrent = m_uHostDataSeq == uSeq;
+        unlock();
+    }
+    else
+        AssertMsgFailed(("Checking host data sequence counter failed with %Rrc\n", vrc));
+    return fIsCurrent;
+}
+
+
+/**
+ * Gets the current guest data sequence counter.
+ *
+ * The returned value can be passed to i_isGuestDataSeqCurrent() later to check whether the guest data
+ * observed by the caller is still current.
+ *
+ * @returns Current guest data sequence counter, or 0 if the counter cannot be read.
+ */
+uint64_t GuestShCl::i_getGuestDataSeq(void)
+{
+    uint64_t uSeq = 0;
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        uSeq = m_uGuestDataSeq;
+        unlock();
+    }
+    else
+        AssertMsgFailed(("Getting guest data sequence counter failed with %Rrc\n", vrc));
+    return uSeq;
+}
+
+
+/**
+ * Checks whether a previously read guest data sequence counter is still current.
+ *
+ * @returns true if \a uSeq matches the current guest data sequence counter, false otherwise.
+ * @param   uSeq                Guest data sequence counter value to check.
+ */
+bool GuestShCl::i_isGuestDataSeqCurrent(uint64_t uSeq)
+{
+    bool fIsCurrent = false;
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        fIsCurrent = m_uGuestDataSeq == uSeq;
+        unlock();
+    }
+    else
+        AssertMsgFailed(("Checking guest data sequence counter failed with %Rrc\n", vrc));
+    return fIsCurrent;
+}
+
 
 /**
  * Registers a Shared Clipboard service extension.
@@ -298,7 +387,7 @@ int GuestShCl::reportFormatsToGuest(SHCLFORMATS fFormats)
     if (RT_FAILURE(vrc))
         return vrc;
 
-    ++m_uHostDataReportSeq;
+    ++m_uHostDataSeq;
 
     PSHCLCLIENT pClient = m_pClient;
     if (pClient)
@@ -328,7 +417,7 @@ int GuestShCl::reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, S
         int vrc2 = lock();
         if (RT_FAILURE(vrc2))
             return vrc2;
-        uSeq = ++m_uHostDataReportSeq;
+        uSeq = ++m_uHostDataSeq;
         unlock();
     }
 
@@ -404,7 +493,7 @@ int GuestShCl::reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64
     if (RT_FAILURE(vrc))
         return vrc;
 
-    if (uSeq != m_uHostDataReportSeq)
+    if (uSeq != m_uHostDataSeq)
     {
         unlock();
         return VINF_SUCCESS;
@@ -455,7 +544,7 @@ int GuestShCl::reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64
     {
         if (   cbRead > 0
             && cbRead <= cbActual
-            && uSeq == m_uHostDataReportSeq)
+            && uSeq == m_uHostDataSeq)
         {
             HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Host, uFormat, pvData, cbRead);
             if (FAILED(hrc))

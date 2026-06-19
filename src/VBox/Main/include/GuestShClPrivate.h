@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114429 2026-06-18 09:39:21Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114450 2026-06-19 09:05:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -150,9 +150,19 @@ public:
 
 protected:
 
-    /** @name Service extension callback handlers.
+    /** @name Service extension callback helpers.
      * @{ */
     int i_forwardToChainedSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms);
+    uint64_t i_getHostDataSeq(void);
+    bool i_isHostDataSeqCurrent(uint64_t uSeq);
+    uint64_t i_getGuestDataSeq(void);
+    bool i_isGuestDataSeqCurrent(uint64_t uSeq);
+    /** @}  */
+
+protected:
+
+    /** @name Service extension callback handlers.
+     * @{ */
     int i_handleSvcExtSetCallback(PSHCLEXTPARMS pParms);
     int i_handleSvcExtReportFormatsToHost(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
     int i_handleSvcExtReportFormatsToGuest(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms);
@@ -189,10 +199,10 @@ protected:
     /** Active guest clipboard client, if any.
      *  Weak pointer owned by the HGCM service and protected by m_CritSect. */
     PSHCLCLIENT                 m_pClient;
-    /** Host clipboard sequence counter, protected by m_CritSect. */
-    uint64_t                    m_uHostDataReportSeq;
-    /** Guest clipboard sequence counter, protected by m_CritSect. */
-    uint64_t                    m_uGuestDataReportSeq;
+    /** Host data sequence counter, protected by m_CritSect. */
+    uint64_t                    m_uHostDataSeq;
+    /** Guest data sequence counter, protected by m_CritSect. */
+    uint64_t                    m_uGuestDataSeq;
     /** @}  */
 
 private:

@@ -1,4 +1,4 @@
-/* $Id: GuestShClSvcExt.cpp 114449 2026-06-19 08:31:23Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClSvcExt.cpp 114450 2026-06-19 09:05:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard service extension handling for Main.
  */
@@ -90,7 +90,7 @@ int GuestShCl::i_handleSvcExtReportFormatsToHost(PSHCLEXTPARMS pParms, void *pvP
     int vrc2 = lock();
     if (RT_SUCCESS(vrc2))
     {
-        ++m_uGuestDataReportSeq;
+        ++m_uGuestDataSeq;
         unlock();
     }
     else
@@ -164,17 +164,7 @@ int GuestShCl::i_handleSvcExtDataRead(PSHCLEXTPARMS pParms, void *pvParms, uint3
         void *pvData = pParms->u.ReadWriteData.pvData;
         uint32_t cbData = pParms->u.ReadWriteData.cbData;
         SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
-        uint64_t uHostSeq = 0;
-        bool fHaveHostSeq = false;
-        int vrcLock = lock();
-        if (RT_SUCCESS(vrcLock))
-        {
-            uHostSeq = m_uHostDataReportSeq;
-            fHaveHostSeq = true;
-            unlock();
-        }
-        else
-            AssertMsgFailed(("Snapshotting host clipboard sequence counter failed with %Rrc\n", vrcLock));
+        uint64_t const uHostDataSeq = i_getHostDataSeq();
 
         Clipboard *pClipboard = m_pConsole->i_getClipboard();
         bool fReadFromMain = false;
@@ -202,27 +192,14 @@ int GuestShCl::i_handleSvcExtDataRead(PSHCLEXTPARMS pParms, void *pvParms, uint3
                 && !fReadFromMain
                 && pClipboard
                 && pvData
-                && fHaveHostSeq
                 && pParms->u.ReadWriteData.cbActual > 0
-                && pParms->u.ReadWriteData.cbActual <= cbData)
+                && pParms->u.ReadWriteData.cbActual <= cbData
+                && i_isHostDataSeqCurrent(uHostDataSeq))
             {
-                bool fSeqUnchanged = false;
-                vrcLock = lock();
-                if (RT_SUCCESS(vrcLock))
-                {
-                    fSeqUnchanged = m_uHostDataReportSeq == uHostSeq;
-                    unlock();
-                }
-                else
-                    AssertMsgFailed(("Checking host clipboard sequence counter failed with %Rrc\n", vrcLock));
-
-                if (fSeqUnchanged)
-                {
-                    HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Host, fFormats, pvData,
-                                                           pParms->u.ReadWriteData.cbActual);
-                    if (FAILED(hrc))
-                        LogRelMax(16, ("Shared Clipboard: Reporting host clipboard data to Main failed with %Rhrc\n", hrc));
-                }
+                HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Host, fFormats, pvData,
+                                                       pParms->u.ReadWriteData.cbActual);
+                if (FAILED(hrc))
+                    LogRelMax(16, ("Shared Clipboard: Reporting host clipboard data to Main failed with %Rhrc\n", hrc));
             }
         }
         else
@@ -291,17 +268,7 @@ int GuestShCl::i_handleSvcExtDataWrite(PSHCLEXTPARMS pParms, void *pvParms, uint
         void *pvData = pParms->u.ReadWriteData.pvData;
         uint32_t cbData = pParms->u.ReadWriteData.cbData;
         SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
-        uint64_t uSeq = 0;
-        bool fHaveSeq = false;
-        int vrcLock = lock();
-        if (RT_SUCCESS(vrcLock))
-        {
-            uSeq = m_uGuestDataReportSeq;
-            fHaveSeq = true;
-            unlock();
-        }
-        else
-            AssertMsgFailed(("Snapshotting guest clipboard sequence counter failed with %Rrc\n", vrcLock));
+        uint64_t const uGuestDataSeq = i_getGuestDataSeq();
 
         vrc = ShClBackendWriteData(pClient->pBackend, pClient, pCmdCtx, fFormats, pvData, cbData);
         if (RT_FAILURE(vrc))
@@ -313,24 +280,13 @@ int GuestShCl::i_handleSvcExtDataWrite(PSHCLEXTPARMS pParms, void *pvParms, uint
         AssertRC(vrc2);
 
         Clipboard *pClipboard = m_pConsole->i_getClipboard();
-        if (RT_SUCCESS(vrc) && pClipboard && fHaveSeq)
+        if (   RT_SUCCESS(vrc)
+            && pClipboard
+            && i_isGuestDataSeqCurrent(uGuestDataSeq))
         {
-            bool fSeqUnchanged = false;
-            vrcLock = lock();
-            if (RT_SUCCESS(vrcLock))
-            {
-                fSeqUnchanged = m_uGuestDataReportSeq == uSeq;
-                unlock();
-            }
-            else
-                AssertMsgFailed(("Checking guest clipboard sequence counter failed with %Rrc\n", vrcLock));
-
-            if (fSeqUnchanged)
-            {
-                HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Guest, fFormats, pvData, cbData);
-                if (FAILED(hrc))
-                    LogRelMax(16, ("Shared Clipboard: Reporting guest clipboard data to Main failed with %Rhrc\n", hrc));
-            }
+            HRESULT hrc = pClipboard->i_reportData(ClipboardAction_Copy, ClipboardSource_Guest, fFormats, pvData, cbData);
+            if (FAILED(hrc))
+                LogRelMax(16, ("Shared Clipboard: Reporting guest clipboard data to Main failed with %Rhrc\n", hrc));
         }
     }
     return vrc;
