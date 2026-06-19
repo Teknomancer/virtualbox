@@ -1,4 +1,4 @@
-/* $Id: VBoxNetSlirpNAT.cpp 114337 2026-06-11 08:12:46Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxNetSlirpNAT.cpp 114457 2026-06-19 11:55:32Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxNetNAT - NAT Service for connecting to IntNet.
  */
@@ -416,6 +416,8 @@ private:
 
     int slirpTimersAdjustTimeoutDown(int cMsTimeout);
     void slirpNotifyPollThread(const char *pszWho);
+
+    int stopWorkerThreads(bool fWaitReceiveThread);
 
     int fetchNatPortForwardRules(VECNATSERVICEPF &vec, bool fIsIPv6);
     int natServiceProcessRegisteredPf(VECNATSERVICEPF &vecPf);
@@ -1504,6 +1506,45 @@ int VBoxNetSlirpNAT::initComEvents()
 }
 
 
+int VBoxNetSlirpNAT::stopWorkerThreads(bool fWaitReceiveThread)
+{
+    ASMAtomicWriteBool(&m_fShutdown, true);
+    if (m_hThrdPoll != NIL_RTTHREAD)
+        slirpNotifyPollThread("stop-worker-threads");
+
+    if (fWaitReceiveThread && m_hIf != NULL)
+        IntNetR3IfWaitAbort(m_hIf);
+
+    int rcRet = VINF_SUCCESS;
+    if (fWaitReceiveThread && m_hThrRecv != NIL_RTTHREAD)
+    {
+        int rc = RTThreadWait(m_hThrRecv, 5000, NULL);
+        if (RT_SUCCESS(rc))
+            m_hThrRecv = NIL_RTTHREAD;
+        else
+        {
+            logError("Worker thread cleanup failed: receive thread wait failed, rc=%Rrc", rc);
+            rcRet = rc;
+        }
+    }
+
+    if (m_hThrdPoll != NIL_RTTHREAD)
+    {
+        int rc = RTThreadWait(m_hThrdPoll, 5000, NULL);
+        if (RT_SUCCESS(rc))
+            m_hThrdPoll = NIL_RTTHREAD;
+        else
+        {
+            logError("Worker thread cleanup failed: poll thread wait failed, rc=%Rrc", rc);
+            if (RT_SUCCESS(rcRet))
+                rcRet = rc;
+        }
+    }
+
+    return rcRet;
+}
+
+
 /**
  * Run the pumps.
  *
@@ -1538,17 +1579,8 @@ VBoxNetSlirpNAT::run()
                         "RECV");
     if (RT_FAILURE(rc))
     {
-        ASMAtomicWriteBool(&m_fShutdown, true);
-        slirpNotifyPollThread("run-recv-create-failed");
-
-        int rcWait = RTThreadWait(m_hThrdPoll, 5000, NULL);
-        if (RT_SUCCESS(rcWait))
-            m_hThrdPoll = NIL_RTTHREAD;
-        else
-        {
-            logError("Startup failed: poll thread wait after receive thread creation failure failed, rc=%Rrc", rcWait);
-            AssertRC(rcWait);
-        }
+        int rcWait = stopWorkerThreads(false /* fWaitReceiveThread */);
+        AssertRC(rcWait);
         return rc;
     }
 
@@ -1557,27 +1589,8 @@ VBoxNetSlirpNAT::run()
     if (pQueue == NULL)
     {
         logError("Startup failed: main event queue is not available");
-        ASMAtomicWriteBool(&m_fShutdown, true);
-        slirpNotifyPollThread("run-no-event-queue");
-        IntNetR3IfWaitAbort(m_hIf);
-
-        int rcWait = RTThreadWait(m_hThrRecv, 5000, NULL);
-        if (RT_SUCCESS(rcWait))
-            m_hThrRecv = NIL_RTTHREAD;
-        else
-        {
-            logError("Startup failed: receive thread wait after event queue failure failed, rc=%Rrc", rcWait);
-            AssertRC(rcWait);
-        }
-
-        rcWait = RTThreadWait(m_hThrdPoll, 5000, NULL);
-        if (RT_SUCCESS(rcWait))
-            m_hThrdPoll = NIL_RTTHREAD;
-        else
-        {
-            logError("Startup failed: poll thread wait after event queue failure failed, rc=%Rrc", rcWait);
-            AssertRC(rcWait);
-        }
+        int const rcWait = stopWorkerThreads(true /* fWaitReceiveThread */);
+        AssertRC(rcWait);
         return VERR_GENERAL_FAILURE;
     }
 
@@ -1604,31 +1617,7 @@ VBoxNetSlirpNAT::run()
 
     logInfo("Stopping worker threads\n");
 
-    ASMAtomicWriteBool(&m_fShutdown, true);
-    slirpNotifyPollThread("run-shutdown");
-
-    /* tell the intnet input pump to terminate */
-    IntNetR3IfWaitAbort(m_hIf);
-
-    int rcRet = VINF_SUCCESS;
-    rc = RTThreadWait(m_hThrRecv, 5000, NULL);
-    if (RT_SUCCESS(rc))
-        m_hThrRecv = NIL_RTTHREAD;
-    else
-    {
-        logError("Shutdown failed: receive thread wait failed, rc=%Rrc", rc);
-        rcRet = rc;
-    }
-
-    rc = RTThreadWait(m_hThrdPoll, 5000, NULL);
-    if (RT_SUCCESS(rc))
-        m_hThrdPoll = NIL_RTTHREAD;
-    else
-    {
-        logError("Shutdown failed: poll thread wait failed, rc=%Rrc", rc);
-        if (RT_SUCCESS(rcRet))
-            rcRet = rc;
-    }
+    int rcRet = stopWorkerThreads(true /* fWaitReceiveThread */);
 
     if (RT_SUCCESS(rcRet))
         logInfo("Worker threads stopped\n");
