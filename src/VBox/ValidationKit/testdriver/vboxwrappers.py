@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: vboxwrappers.py 114446 2026-06-18 21:40:34Z andreas.loeffler@oracle.com $
+# $Id: vboxwrappers.py 114447 2026-06-19 07:51:52Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 114446 $"
+__version__ = "$Revision: 114447 $"
 
 
 # Standard Python imports.
@@ -3576,9 +3576,9 @@ class TxsConnectTask(TdTaskBase):
             reporter.log2('TxsConnectTask: Ignoring empty ip "%s"' % (sIpAddr));
         return None;
 
-    def _openTcpSession(self, sIpAddr, uPort = None, fReversedSetup = False, cMsIdleFudge = 0, fTry = False):
+    def _openTcpSession(self, sIpAddr, uPort = None, fReversedSetup = False, cMsIdleFudge = 0):
         """
-        Calls txsclient.[tryOpen|open|]TcpSession and switches our task to reflect the
+        Calls txsclient.[tryOpen|open]TcpSession and switches our task to reflect the
         state of the subtask.
         """
         self.oCv.acquire();
@@ -3589,7 +3589,7 @@ class TxsConnectTask(TdTaskBase):
             reporter.log2('_openTcpSession: sIpAddr=%s, uPort=%d, fReversedSetup=%s, cMsTimeout=%d'
                           % (sIpAddr, uPort if uPort is not None else 0, fReversedSetup, cMsTimeout));
             self.sIpAddr = sIpAddr;
-            fnOpenTcpSession = txsclient.tryOpenTcpSession if fTry else txsclient.openTcpSession;
+            fnOpenTcpSession = txsclient.tryOpenTcpSession if fReversedSetup else txsclient.openTcpSession;
             self.oTxsSession = fnOpenTcpSession(cMsTimeout, sIpAddr, uPort, fReversedSetup,
                                                 cMsIdleFudge, fnProcessEvents = self.fnProcessEvents);
             self.oTxsSession.setTaskOwner(self);
