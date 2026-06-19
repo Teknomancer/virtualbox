@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114453 2026-06-19 09:25:11Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114454 2026-06-19 10:09:43Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -163,6 +163,7 @@ protected:
     /** @name Service extension callback helpers.
      * @{ */
     int i_forwardToChainedSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms);
+    int i_validateSvcExtParms(uint32_t u32Function, void *pvParms, uint32_t cbParms);
     /** @}  */
 
 protected:

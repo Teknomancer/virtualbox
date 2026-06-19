@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114453 2026-06-19 09:25:11Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114454 2026-06-19 10:09:43Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -697,8 +697,15 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
     GuestShCl *pThis = reinterpret_cast<GuestShCl*>(pvExtension);
     AssertPtrReturn(pThis, VERR_INVALID_POINTER);
 
-    PSHCLEXTPARMS pParms = (PSHCLEXTPARMS)pvParms; /* pParms might be NULL, depending on the message. */
-    int vrc = VERR_NOT_SUPPORTED;
+    int vrc = pThis->i_validateSvcExtParms(u32Function, pvParms, cbParms);
+    if (RT_FAILURE(vrc))
+    {
+        LogFlowFuncLeaveRC(vrc);
+        return vrc;
+    }
+
+    PSHCLEXTPARMS pParms = (PSHCLEXTPARMS)pvParms; /* pParms might be NULL for unknown messages. */
+    vrc = VERR_NOT_SUPPORTED;
 
     switch (u32Function)
     {
