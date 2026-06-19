@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114460 2026-06-19 14:01:13Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114461 2026-06-19 14:15:10Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -1516,7 +1516,11 @@ static int vmsvgaReadPort(PPDMDEVINS pDevIns, PVGASTATE pThis, uint32_t idxReg, 
         case SVGA_REG_MOB_MAX_SIZE:
             /* Essentially the max texture size */
             STAM_REL_COUNTER_INC(&pThis->svga.StatRegMobMaxSizeRd);
+#ifdef VBOX_WITH_VMSVGA3D
             *pu32 = SVGA3D_MAX_SURFACE_MEM_SIZE;
+#else
+            *pu32 = _1G / _1K; /* Arbitrary value. */
+#endif
             break;
 
         case SVGA_REG_BLANK_SCREEN_TARGETS:
