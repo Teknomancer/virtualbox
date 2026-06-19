@@ -1,4 +1,4 @@
-/** $Id: clipboard.h 114388 2026-06-16 11:36:25Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard.h 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard - Main header.
  */
@@ -36,29 +36,31 @@
 #include <iprt/thread.h>
 
 /**
- * Callback to notify guest that host has new clipboard data in the specified formats.
+ * Called upon receiving a new clipboard format report from the host.
  *
  * @returns VBox status code.
+ * @param   pCtx            Our shared clipboard context structure.
  * @param   fFormats        The formats available (VBOX_SHCL_FMT_XXX).
  */
-typedef DECLCALLBACKTYPE(int, FNHOSTCLIPREPORTFMTS, (SHCLFORMATS fFormats));
+typedef DECLCALLBACKTYPE(int, FNHOSTCLIPREPORTFMTS, (PSHCLCONTEXT pCtx, SHCLFORMATS fFormats));
 /** Pointer to FNHOSTCLIPREPORTFMTS. */
 typedef FNHOSTCLIPREPORTFMTS *PFNHOSTCLIPREPORTFMTS;
 
 /**
- * Callback to notify guest that host wants to read clipboard data in specified format.
+ * Called upon receiving a read clipboard query from the host.
  *
  * @returns VBox status code.
+ * @param   pCtx            Our shared clipboard context structure.
  * @param   uFmt            The format in which the data should be read (a
  *                          single VBOX_SHCL_FMT_XXX).
  */
-typedef DECLCALLBACKTYPE(int, FNHOSTCLIPREAD, (SHCLFORMAT uFmt));
+typedef DECLCALLBACKTYPE(int, FNHOSTCLIPREAD, (PSHCLCONTEXT pCtx, SHCLFORMAT uFmt));
 /** Pointer to FNHOSTCLIPREAD. */
 typedef FNHOSTCLIPREAD *PFNHOSTCLIPREAD;
 
 
 /**
- * Struct keeping am X11 Shared Clipboard context.
+ * The VBoxClient Shared Clipboard context structure.
  */
 struct SHCLCONTEXT
 {
@@ -74,8 +76,19 @@ struct SHCLCONTEXT
     {
         /** X11 clipboard context. */
         SHCLX11CTX       X11;
-        /** @todo Wayland clipboard context goes here. */
-        /* SHCLWAYLANDCTX Wl; */
+        /** Wayland clipboard context. */
+        struct
+        {
+            /** Protects OtherCache, fOtherFormats and uOtherRevision.  */
+            RTCRITSECT          OtherCritSect;
+            /** Caching the other-side's clipboard data in VBox format. */
+            SHCLCACHE           OtherCache;
+            /** The other side's VBox formats on offer (VBOX_SHCL_FMT_XXX). */
+            SHCLFORMATS         fOtherFormats;
+            /** Revision number of the other-side's data.
+             * This is increased every time the host report new data. */
+            uint64_t volatile   uOtherRevision;
+        } Wl;
     };
 };
 
@@ -83,29 +96,9 @@ struct SHCLCONTEXT
  *  Only one context is supported at a time for now. */
 extern SHCLCONTEXT g_Ctx;
 
-/**
- * Read and process one event from the host clipboard service.
- *
- * @returns VBox status code.
- * @param   pCtx                Host Shared Clipboard service connection context.
- * @param   pfnHGClipReport     A callback to notify guest about new content in host clipboard.
- * @param   pfnGHClipRead       A callback to notify guest when host requests guest clipboard content.
- */
-RTDECL(int) VBClClipboardReadHostEvent(PSHCLCONTEXT pCtx, const PFNHOSTCLIPREPORTFMTS pfnHGClipReport,
-                                              const PFNHOSTCLIPREAD pfnGHClipRead);
+int VBClClipboardReadHostEvent(PSHCLCONTEXT pCtx, PFNHOSTCLIPREPORTFMTS pfnHGClipReport, PFNHOSTCLIPREAD pfnGHClipRead);
+int VBClClipboardReadHostClipboard(PSHCLCONTEXT pCtx, SHCLFORMAT uFmt, void **ppvData, uint32_t *pcbData);
 
-/**
- * Read entire host clipboard buffer in given format.
- *
- * This function will allocate clipboard buffer of necessary size and
- * place host clipboard content into it. Buffer needs to be freed by caller.
- *
- * @returns VBox status code.
- * @param   pCtx            Host Shared Clipboard service connection context.
- * @param   uFmt            Format in which data should be read.
- * @param   ppvData         Newly allocated output buffer (should be freed by caller).
- * @param   pcbData         Output buffer size.
- */
-RTDECL(int) VBClClipboardReadHostClipboard(PVBGLR3SHCLCMDCTX pCtx, SHCLFORMAT uFmt, void **ppvData, uint32_t *pcbData);
+int VBClWaylandClipboardQueryHostData(PSHCLCONTEXT pCtx, const char *pszMimeType, void **ppvOutData, size_t *pcbOutData);
 
 #endif /* !GA_INCLUDED_SRC_x11_VBoxClient_clipboard_h */

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper.h 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.h 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Wayland helpers.
  */
@@ -157,11 +157,11 @@ typedef struct
     DECLCALLBACKMEMBER(int, pfnTerm, (void));
 
     /**
-     * Callback to set host clipboard connection handle.
+     * Callback to set shared clipboard context structure.
      *
-     * @param   pCtx    Host service connection context.
+     * @param   pCtx    The shared clipboard context being used.
      */
-    DECLCALLBACKMEMBER(void, pfnSetClipboardCtx, (PVBGLR3SHCLCMDCTX pCtx));
+    DECLCALLBACKMEMBER(void, pfnSetClipboardCtx, (PSHCLCONTEXT pCtx));
 
     /**
      * Callback to force guest to announce its clipboard content.
@@ -170,10 +170,9 @@ typedef struct
      */
     DECLCALLBACKMEMBER(int, pfnPopup, (void));
 
-    /** A callback to notify guest about new content in host clipboard. */
+    /** Called upon receiving a new clipboard format report from the host. */
     PFNHOSTCLIPREPORTFMTS pfnHGClipReport;
-
-    /** Callback to notify guest that host wants to read clipboard data in specified format. */
+    /** Called upon receiving a read clipboard query from the host. */
     PFNHOSTCLIPREAD pfnGHClipRead;
 
 } VBCLWAYLANDHELPER_CLIPBOARD;

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -195,8 +195,8 @@ static void vbcl_wayland_hlp_edcp_data_control_offer_offer(void *pvUser, struct 
 
     int rc = VBClWaylandSessionJoin(&pCtx->BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
                                     vbcl_wayland_hlp_edcp_gh_add_fmt_cb, &EnmCtx);
-    if (RT_FAILURE(rc))
-        VBClLogError("cannot save formats announced by the guest, rc=%Rrc\n", rc);
+    if (RT_FAILURE(rc) && rc != VERR_NO_DATA)
+        VBClLogError("Cannot save format '%s' announced by the guest: rc=%Rrc\n", pcszMimeType, rc);
 }
 
 /** Wayland Data Control Offer interface callbacks. */
@@ -296,9 +296,9 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_gh_clip_report_cb(void *pvUser)
     {
         g_EdcpCtx.BaseCtx.Session.clip.fFmts.set(fFmts);
 
-        if (RT_VALID_PTR(g_EdcpCtx.BaseCtx.pClipboardCtx))
+        if (RT_VALID_PTR(g_EdcpCtx.BaseCtx.pShClCtx))
         {
-            rc = VbglR3ClipboardReportFormats(g_EdcpCtx.BaseCtx.pClipboardCtx->idClient, fFmts);
+            rc = VbglR3ClipboardReportFormats(g_EdcpCtx.BaseCtx.pShClCtx->CmdCtx.idClient, fFmts);
             if (RT_FAILURE(rc))
                 VBClLogError("cannot report formats to host, rc=%Rrc\n", rc);
         }
@@ -468,7 +468,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join3_cb(void *pvU
     struct vbcl_wl_dcp_write_ctx * const pArgs = (struct vbcl_wl_dcp_write_ctx *)pvUser;
     AssertPtrReturn(pArgs, VERR_INVALID_PARAMETER);
 
-    int rc = vbcl_wayland_xdcp_set_guest_clipboard(pArgs->fd, &g_EdcpCtx.BaseCtx, pArgs->pcszMimeType);
+    int rc = VBClWaylandXdcpSetGuestClipboard(pArgs->fd, &g_EdcpCtx.BaseCtx, pArgs->pcszMimeType);
     g_EdcpCtx.BaseCtx.fIngnoreWlClipIn = false;
     return rc;
 }
@@ -540,25 +540,22 @@ static const struct ext_data_control_source_v1_listener g_data_source_listener =
  * Helper specific code and session callbacks.
  *********************************************************************************************************************************/
 
+/**
+ * Initializes the context.
+ */
+static int vbClWaylandHlpEdcpCtxInit(vbox_wl_edcp_ctx_t *pCtx)
+{
+    pCtx->pDataDevice = NULL;
+    pCtx->pDataControlManager = NULL;
+    return VBClWaylandXdcpCtxInit(&pCtx->BaseCtx);
+}
 
 /**
- * Setup or reset helper context.
- *
- * This function is used on helper init and termination. In case of
- * init, memory is not initialized yet, so it needs to be zeroed.
- * In case of shutdown, memory is already initialized and previously
- * allocated resources must be freed.
- *
- * @param pCtx              Context data.
- * @param fShutdown         A flag to indicate if session resources
- *                          need to be deallocated.
+ * Terminates (uninitalizes) the context.
  */
-static void vbcl_wayland_hlp_edcp_reset_ctx(vbox_wl_edcp_ctx_t *pCtx, bool fShutdown)
+static void vbClWaylandHlpEdcpCtxTerm(vbox_wl_edcp_ctx_t *pCtx)
 {
-    AssertReturnVoid(pCtx);
-
-    vbcl_wayland_xdcp_reset_ctx(&pCtx->BaseCtx, fShutdown);
-
+    VBClWaylandXdcpCtxTerm(&pCtx->BaseCtx);
     pCtx->pDataDevice = NULL;
     pCtx->pDataControlManager = NULL;
 }
@@ -566,7 +563,7 @@ static void vbcl_wayland_hlp_edcp_reset_ctx(vbox_wl_edcp_ctx_t *pCtx, bool fShut
 /**
  * Disconnect from Wayland compositor.
  *
- * Close connection, release resources and reset context data.
+ * Close connection, release resources.
  *
  * @param pCtx              Context data.
  */
@@ -575,21 +572,34 @@ static void vbcl_wayland_hlp_edcp_disconnect(vbox_wl_edcp_ctx_t *pCtx)
     AssertReturnVoid(pCtx);
 
     if (RT_VALID_PTR(pCtx->pDataControlManager))
+    {
         ext_data_control_manager_v1_destroy(pCtx->pDataControlManager);
+        pCtx->pDataControlManager = NULL;
+    }
 
     if (RT_VALID_PTR(pCtx->pDataDevice))
+    {
         ext_data_control_device_v1_destroy(pCtx->pDataDevice);
+        pCtx->pDataDevice = NULL;
+    }
 
     if (RT_VALID_PTR(pCtx->BaseCtx.pSeat))
+    {
         wl_seat_destroy(pCtx->BaseCtx.pSeat);
+        pCtx->BaseCtx.pSeat = NULL;
+    }
 
     if (RT_VALID_PTR(pCtx->BaseCtx.pRegistry))
+    {
         wl_registry_destroy(pCtx->BaseCtx.pRegistry);
+        pCtx->BaseCtx.pRegistry = NULL;
+    }
 
     if (RT_VALID_PTR(pCtx->BaseCtx.pDisplay))
+    {
         wl_display_disconnect(pCtx->BaseCtx.pDisplay);
-
-    vbcl_wayland_hlp_edcp_reset_ctx(pCtx, true);
+        pCtx->BaseCtx.pDisplay = NULL;
+    }
 }
 
 /**
@@ -602,17 +612,13 @@ static void vbcl_wayland_hlp_edcp_disconnect(vbox_wl_edcp_ctx_t *pCtx)
  */
 static bool vbcl_wayland_hlp_edcp_connect(vbox_wl_edcp_ctx_t *pCtx)
 {
-    const char *csWaylandDisplay = RTEnvGet(VBCL_ENV_WAYLAND_DISPLAY);
-    bool fConnected = false;
-
     AssertPtrReturn(pCtx, false);
 
-    if (RT_VALID_PTR(csWaylandDisplay))
-        pCtx->BaseCtx.pDisplay = wl_display_connect(csWaylandDisplay);
+    const char *pszWaylandDisplay = RTEnvGet(VBCL_ENV_WAYLAND_DISPLAY);
+    if (RT_VALID_PTR(pszWaylandDisplay))
+        pCtx->BaseCtx.pDisplay = wl_display_connect(pszWaylandDisplay);
     else
-        VBClLogError("cannot connect to Wayland compositor "
-                     VBCL_ENV_WAYLAND_DISPLAY " environment variable not set\n");
-
+        VBClLogError("cannot connect to Wayland compositor: " VBCL_ENV_WAYLAND_DISPLAY " environment variable not set!\n");
     if (RT_VALID_PTR(pCtx->BaseCtx.pDisplay))
     {
         pCtx->BaseCtx.pRegistry = wl_display_get_registry(pCtx->BaseCtx.pDisplay);
@@ -629,9 +635,9 @@ static bool vbcl_wayland_hlp_edcp_connect(vbox_wl_edcp_ctx_t *pCtx)
                     if (RT_VALID_PTR(pCtx->pDataDevice))
                     {
                         if (RT_VALID_PTR(pCtx->pDataControlManager))
-                            fConnected = true;
-                        else
-                            VBClLogError("cannot get Wayland data control manager interface\n");
+                            return true;
+
+                        VBClLogError("cannot get Wayland data control manager interface\n");
                     }
                     else
                         VBClLogError("cannot get Wayland data device interface\n");
@@ -647,11 +653,8 @@ static bool vbcl_wayland_hlp_edcp_connect(vbox_wl_edcp_ctx_t *pCtx)
     }
     else
         VBClLogError("cannot connect to Wayland compositor\n");
-
-    if (!fConnected)
-        vbcl_wayland_hlp_edcp_disconnect(pCtx);
-
-    return fConnected;
+    vbcl_wayland_hlp_edcp_disconnect(pCtx);
+    return false;
 }
 
 /**
@@ -772,20 +775,21 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_event_loop(RTTHREAD ThreadSelf, v
  */
 static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_probe(void)
 {
-    vbox_wl_edcp_ctx_t probeCtx;
     int fCaps = VBOX_WAYLAND_HELPER_CAP_NONE;
+
     VBGHDISPLAYSERVERTYPE enmDisplayServerType = VBGHDisplayServerTypeDetect();
-
-    vbcl_wayland_hlp_edcp_reset_ctx(&probeCtx, false /* fShutdown */);
-    vbcl_wayland_session_init(&probeCtx.BaseCtx.Session.Base);
-
     if (VBGHDisplayServerTypeIsWaylandAvailable(enmDisplayServerType))
     {
+        vbox_wl_edcp_ctx_t probeCtx;
+        vbClWaylandHlpEdcpCtxInit(&probeCtx);
+
         if (vbcl_wayland_hlp_edcp_connect(&probeCtx))
         {
             fCaps |= VBOX_WAYLAND_HELPER_CAP_CLIPBOARD;
             vbcl_wayland_hlp_edcp_disconnect(&probeCtx);
         }
+
+        vbClWaylandHlpEdcpCtxTerm(&probeCtx);
     }
 
     return fCaps;
@@ -794,23 +798,27 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_probe(void)
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnInit}
  */
-RTDECL(int) vbcl_wayland_hlp_edcp_clip_init(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_init(void)
 {
-    g_EdcpCtx.BaseCtx.hCache = NIL_VBGHMIMECONVCACHE;
-    vbcl_wayland_hlp_edcp_reset_ctx(&g_EdcpCtx, false /* fShutdown */);
-    vbcl_wayland_session_init(&g_EdcpCtx.BaseCtx.Session.Base);
-
-    return vbcl_wayland_thread_start(&g_EdcpCtx.BaseCtx.Thread, vbcl_wayland_hlp_edcp_event_loop, "wl-edcp", &g_EdcpCtx);
+    int rc = vbClWaylandHlpEdcpCtxInit(&g_EdcpCtx);
+    if (RT_SUCCESS(rc))
+    {
+        rc = vbcl_wayland_thread_start(&g_EdcpCtx.BaseCtx.Thread, vbcl_wayland_hlp_edcp_event_loop, "wl-edcp", &g_EdcpCtx);
+        if (RT_FAILURE(rc))
+            vbClWaylandHlpEdcpCtxTerm(&g_EdcpCtx);
+    }
+    return rc;
 }
 
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnTerm}
  */
-RTDECL(int) vbcl_wayland_hlp_edcp_clip_term(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_term(void)
 {
     /* Set termination flag. Wayland event loop should pick it up
        on the next iteration. */
-    g_EdcpCtx.BaseCtx.fShutdown = true;
+    ASMAtomicWriteBool(&g_EdcpCtx.BaseCtx.fShutdown, true);
+    RTThreadPoke(g_EdcpCtx.BaseCtx.Thread);
 
     /* Wait for Wayland event loop thread to shutdown. */
     int rcThread = VINF_SUCCESS;
@@ -820,15 +828,18 @@ RTDECL(int) vbcl_wayland_hlp_edcp_clip_term(void)
     else
         VBClLogError("unable to stop Wayland event thread, rc=%Rrc\n", rc);
 
+    /* Final cleanup, just to be tidy. */
+    if (RT_SUCCESS(rc) || rc == VERR_INVALID_HANDLE)
+        vbClWaylandHlpEdcpCtxTerm(&g_EdcpCtx);
     return rc;
 }
 
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnSetClipboardCtx}
  */
-static DECLCALLBACK(void) vbcl_wayland_hlp_edcp_clip_set_ctx(PVBGLR3SHCLCMDCTX pCtx)
+static DECLCALLBACK(void) vbcl_wayland_hlp_edcp_clip_set_ctx(PSHCLCONTEXT pCtx)
 {
-    g_EdcpCtx.BaseCtx.pClipboardCtx = pCtx;
+    g_EdcpCtx.BaseCtx.pShClCtx = pCtx;
 }
 
 /**
@@ -845,32 +856,30 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_popup(void)
  *
  * This callback (1) sets host clipboard formats list to the session,
  * (2) asks Wayland event thread to advertise these formats to the guest,
- * (3) waits for guest to request clipboard in specific format, (4) read
- * host clipboard in this format, and (5) sets clipboard data to the session,
- * so Wayland events thread can inject it into the guest.
- *
- * This callback should not return until clipboard data is read from
- * the host or error occurred. It must block host events loop until
- * current host event is fully processed.
+ * (3) waits for guest to request clipboard in specific format.
  */
 static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join_cb(void *pvUser)
 {
     AssertPtrReturn(pvUser, VERR_INVALID_PARAMETER);
     SHCLFORMATS const fFmts = *(SHCLFORMATS const *)pvUser;
     VBClLogVerbose(3, "%s: %#x\n", __func__, fFmts);
-    return vbcl_wayland_xdcp_get_host_clipboard(&g_EdcpCtx.BaseCtx, fFmts);
+    return VBClWaylandXdcpReportHostClipboardFormats(&g_EdcpCtx.BaseCtx, fFmts);
 }
 
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnHGClipReport}
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report(SHCLFORMATS fFormats)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report(PSHCLCONTEXT pCtx, SHCLFORMATS fFormats)
 {
+    RT_NOREF(pCtx);
     VBClLogVerbose(3, "%s: %#x\n", __func__, fFormats);
 
     int rc;
     if (fFormats != VBOX_SHCL_FMT_NONE)
     {
+        /** @todo r=bird: Abstract all these three operations into a single
+         *        VBClWaylandSessionReStart/Whatever, reducing code duplication
+         *        optimizing state transitions. */
         rc = vbcl_wayland_session_end(&g_EdcpCtx.BaseCtx.Session.Base, NULL, NULL);
         if (RT_SUCCESS(rc))
         {
@@ -878,7 +887,6 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report(SHCLFORMATS fForma
                                             VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST,
                                             &vbcl_wayland_hlp_edcp_session_start_generic_cb,
                                             &g_EdcpCtx.BaseCtx.Session);
-
             if (RT_SUCCESS(rc))
                 rc = VBClWaylandSessionJoin(&g_EdcpCtx.BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST,
                                             vbcl_wayland_hlp_edcp_clip_hg_report_join_cb, &fFormats);
@@ -888,7 +896,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report(SHCLFORMATS fForma
     }
     else
     {
-        /** @todo r=bird: if the current session is copy-to-copy, end it. Can we tell
+        /** @todo r=bird: if the current session is copy-to-guest, end it. Can we tell
          *        the rest of wayland that we no longer have any clipboard data?  */
         rc = VERR_NO_DATA;
     }
@@ -918,8 +926,9 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_gh_read_join_cb(void *pvUser
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnGHClipRead}
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_gh_read(SHCLFORMAT uFmt)
+static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_gh_read(PSHCLCONTEXT pCtx, SHCLFORMAT uFmt)
 {
+    RT_NOREF(pCtx);
     VBClLogVerbose(3, "%s: uFmt=%#x\n", __func__, uFmt);
     return VBClWaylandSessionJoin(&g_EdcpCtx.BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
                                   vbcl_wayland_hlp_edcp_clip_gh_read_join_cb, &uFmt);

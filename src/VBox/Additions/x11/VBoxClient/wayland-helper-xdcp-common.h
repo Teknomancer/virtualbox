@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114415 2026-06-17 22:28:40Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -106,15 +106,15 @@ typedef struct
          *  on session type. */
         vbcl::Waitable<volatile SHCLFORMATS>    fFmts;
 
-        /** Clipboard format which either host or guest wants to
-         *  obtain depending on session type. */
-        vbcl::Waitable<volatile SHCLFORMAT>     uFmt;
-
-        /** Clipboard buffer which contains requested data. */
-        vbcl::Waitable<volatile uint64_t>       pvDataBuf;
-
-        /** Size of clipboard buffer. */
-        vbcl::Waitable<volatile uint32_t>       cbDataBuf;
+        struct
+        {
+            /** Clipboard format which host want guest wants. */
+            vbcl::Waitable<volatile SHCLFORMAT>     uFmt;
+            /** Clipboard buffer which contains requested data. */
+            vbcl::Waitable<volatile uint64_t>       pvDataBuf;
+            /** Size of clipboard buffer. */
+            vbcl::Waitable<volatile uint32_t>       cbDataBuf;
+        } GhRead;
     } clip;
 } vbox_wl_dcp_session_t;
 
@@ -149,8 +149,9 @@ typedef struct
     *   other Wayland clients. */
     vbcl::Waitable<volatile bool>               fSendToGuest;
 
-    /** Connection handle to the host clipboard service. */
-    PVBGLR3SHCLCMDCTX                           pClipboardCtx;
+    /** Pointer to the shared clipboard context (where this crap actually should've
+     *  been living in the first place).  */
+    PSHCLCONTEXT                                pShClCtx;
 
     /** Wayland compositor connection object. */
     struct wl_display                           *pDisplay;
@@ -213,13 +214,27 @@ RTDECL(void) vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx);
 RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx);
 
 /**
- * Reset context.
+ * Initializes the common context.
  *
- * @param   pCtx                Context data.
- * @param   fShutdown           A flag to indicate if session resources
- *                              need to be deallocated.
+ * @returns VBox status code.
+ * @param   pCtx                Pointer to the uninitialized context.
  */
-RTDECL(void) vbcl_wayland_xdcp_reset_ctx(vbox_wl_xdcp_base_ctx_t *pCtx, bool fShutdown);
+int VBClWaylandXdcpCtxInit(vbox_wl_xdcp_base_ctx_t *pCtx);
+
+/**
+ * Re-Initializes the common context.
+ *
+ * @param   pCtx                Pointer to the context to re-initialize.
+ */
+void VBClWaylandXdcpCtxReInit(vbox_wl_xdcp_base_ctx_t *pCtx);
+
+/**
+ * Terminates (uninitalizes) the common context.
+ *
+ * @returns VBox status code.
+ * @param   pCtx                Pointer to the context to terminate.
+ */
+void VBClWaylandXdcpCtxTerm(vbox_wl_xdcp_base_ctx_t *pCtx);
 
 /**
  * Read clipboard data from Wayland and cache it.
@@ -241,18 +256,16 @@ RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_
  * @param   pCtx                Context data.
  * @param   pcszMimeType        Clipboard data format in string representation.
  */
-RTDECL(int) vbcl_wayland_xdcp_set_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *pcszMimeType);
+int VBClWaylandXdcpSetGuestClipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *pcszMimeType);
 
 /**
- * Read clipboard data from host and cache it.
- *
- * Clipboard data is cached in internal VBox representation format.
+ * Reports the host clipboard data to the guest.
  *
  * @returns IPRT status code.
  * @param   pCtx                Context data.
  * @param   fFmts               List of formats for Wayland to choose from in bitmask representation.
  */
-RTDECL(int) vbcl_wayland_xdcp_get_host_clipboard(vbox_wl_xdcp_base_ctx_t *pCtx, SHCLFORMATS fFmts);
+int VBClWaylandXdcpReportHostClipboardFormats(vbox_wl_xdcp_base_ctx_t *pCtx, SHCLFORMATS fFmts);
 
 /**
  * Write clipboard data to host.
