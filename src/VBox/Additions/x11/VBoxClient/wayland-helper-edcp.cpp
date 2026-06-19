@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114462 2026-06-19 22:26:05Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -298,6 +298,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_gh_clip_report_cb(void *pvUser)
 
         if (RT_VALID_PTR(g_EdcpCtx.BaseCtx.pShClCtx))
         {
+            VBClLogVerbose(2, "%s: fFmts=%#x\n", __func__, fFmts);
             rc = VbglR3ClipboardReportFormats(g_EdcpCtx.BaseCtx.pShClCtx->CmdCtx.idClient, fFmts);
             if (RT_FAILURE(rc))
                 VBClLogError("cannot report formats to host, rc=%Rrc\n", rc);
