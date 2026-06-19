@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA-cmd.cpp 114360 2026-06-15 14:45:49Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA-cmd.cpp 114460 2026-06-19 14:01:13Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device - implementation of VMSVGA commands.
  */
@@ -483,7 +483,7 @@ int vmsvgaR3GboMapPages(PPDMDEVINS pDevIns, PVMSVGAGBO pGbo)
 #ifdef VBOX_WITH_VMSVGA3D
 static int vmsvgaR3GboCreate(PVMSVGAR3STATE pSvgaR3State, SVGAMobFormat ptDepth, PPN64 baseAddress, uint32_t sizeInBytes, PVMSVGAGBO pGbo)
 {
-    ASSERT_GUEST_RETURN(sizeInBytes <= _128M, VERR_INVALID_PARAMETER); /** @todo Less than SVGA_REG_MOB_MAX_SIZE */
+    ASSERT_GUEST_RETURN(sizeInBytes <= SVGA3D_MAX_SURFACE_MEM_SIZE, VERR_INVALID_PARAMETER);
 
     /*
      * The 'baseAddress' is a page number and points to the 'root page' of the GBO.

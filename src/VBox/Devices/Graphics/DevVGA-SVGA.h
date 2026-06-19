@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.h 114073 2026-05-05 09:57:55Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.h 114460 2026-06-19 14:01:13Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device
  */
@@ -198,6 +198,11 @@ struct {
  * @todo Check what the other guys returns for SVGA_REG_CURSOR_MAX_BYTE_SIZE.
  * @todo Does this include the header? */
 #define VMSVGA_CURSOR_MAX_BYTES         (VMSVGA_CURSOR_MAX_DIMENSION * VMSVGA_CURSOR_MAX_DIMENSION * sizeof(uint32_t) * 2)
+
+/** "The maximum amount of guest-backed objects that the device can have resident at a time"
+ * @todo Make configurable.
+ */
+#define VMSVGA_GBOBJECT_MEM_SIZE        _4G
 
 /* u32ActionFlags */
 #define VMSVGA_ACTION_CHANGEMODE_BIT    0
