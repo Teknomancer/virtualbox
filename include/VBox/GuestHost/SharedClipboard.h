@@ -324,7 +324,7 @@ typedef struct SHCLCACHE
     uint32_t        uReserved;
     /** Entries for all formats.
      *  Right now this is static to keep it simple. */
-    SHCLCACHEENTRY  aEntries[VBOX_SHCL_FMT_VALID_MASK + 1];
+    SHCLCACHEENTRY  aEntries[VBOX_SHCL_FMT_LAST_BIT + 1];
 } SHCLCACHE;
 /** Pointer to a Shared Clipboard cache. */
 typedef SHCLCACHE *PSHCLCACHE;
