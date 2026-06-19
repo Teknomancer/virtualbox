@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA3d-internal.h 114303 2026-06-09 15:21:58Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA3d-internal.h 114455 2026-06-19 11:33:52Z vitali.pelenjow@oracle.com $ */
 /** @file
  * DevVMWare - VMWare SVGA device - 3D part, internal header.
  */
@@ -1317,6 +1317,11 @@ typedef struct VMSVGA3DSTATE
     PVMSVGA3DFORMATCONVERTER pConv;
 # endif
 #endif /* VMSVGA3D_OPENGL */
+
+    struct
+    {
+        uint64_t u64TsNsLastStatsDump;
+    } stats;
 } VMSVGA3DSTATE;
 
 #ifdef VMSVGA3D_INCL_STRUCTURE_DESCRIPTORS
