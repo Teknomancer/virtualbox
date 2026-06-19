@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114450 2026-06-19 09:05:04Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114451 2026-06-19 09:08:41Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -120,10 +120,16 @@ protected:
     GuestShCl(Console *pConsole);
     virtual ~GuestShCl(void);
 
+    /** @name Object state helpers.
+     * @{ */
     void uninit(void);
-
     int lock(void);
     int unlock(void);
+    uint64_t i_getHostDataSeq(void);
+    bool i_isHostDataSeqCurrent(uint64_t uSeq);
+    uint64_t i_getGuestDataSeq(void);
+    bool i_isGuestDataSeqCurrent(uint64_t uSeq);
+    /** @}  */
 
 public:
 
@@ -153,10 +159,6 @@ protected:
     /** @name Service extension callback helpers.
      * @{ */
     int i_forwardToChainedSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms);
-    uint64_t i_getHostDataSeq(void);
-    bool i_isHostDataSeqCurrent(uint64_t uSeq);
-    uint64_t i_getGuestDataSeq(void);
-    bool i_isGuestDataSeqCurrent(uint64_t uSeq);
     /** @}  */
 
 protected:
