@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: vboxwrappers.py 114447 2026-06-19 07:51:52Z andreas.loeffler@oracle.com $
+# $Id: vboxwrappers.py 114448 2026-06-19 07:54:27Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 114447 $"
+__version__ = "$Revision: 114448 $"
 
 
 # Standard Python imports.
@@ -3629,8 +3629,7 @@ class TxsConnectTask(TdTaskBase):
             # Reversed setup has to re-open the listening socket for each retry.
             sIpAddr      = self.sNextIpAddr if self.sNextIpAddr is not None else self.sIpAddr;
             cMsIdleFudge = 0 if self.fReversedSetup else 5000;
-            self._openTcpSession(sIpAddr, fReversedSetup = self.fReversedSetup, cMsIdleFudge = cMsIdleFudge,
-                                 fTry = True);
+            self._openTcpSession(sIpAddr, fReversedSetup = self.fReversedSetup, cMsIdleFudge = cMsIdleFudge);
 
         self.oCv.release();
 
