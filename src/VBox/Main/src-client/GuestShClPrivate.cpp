@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114450 2026-06-19 09:05:04Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114452 2026-06-19 09:20:58Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -166,6 +166,53 @@ int GuestShCl::unlock(void)
     return vrc;
 }
 
+/**
+ * Increments the host data sequence counter.
+ *
+ * @returns Incremented host data sequence counter, or 0 if the counter cannot be incremented.
+ */
+uint64_t GuestShCl::i_incHostDataSeq(void)
+{
+    uint64_t uSeq = 0;
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        uSeq = i_incHostDataSeqLocked();
+        unlock();
+    }
+    else
+        AssertMsgFailed(("Incrementing host data sequence counter failed with %Rrc\n", vrc));
+    return uSeq;
+}
+
+/**
+ * Increments the host data sequence counter while the caller owns the object lock.
+ *
+ * @returns Incremented host data sequence counter.
+ */
+uint64_t GuestShCl::i_incHostDataSeqLocked(void)
+{
+    return ++m_uHostDataSeq;
+}
+
+/**
+ * Increments the guest data sequence counter.
+ *
+ * @returns Incremented guest data sequence counter, or 0 if the counter cannot be incremented.
+ */
+uint64_t GuestShCl::i_incGuestDataSeq(void)
+{
+    uint64_t uSeq = 0;
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        uSeq = ++m_uGuestDataSeq;
+        unlock();
+    }
+    else
+        AssertMsgFailed(("Incrementing guest data sequence counter failed with %Rrc\n", vrc));
+    return uSeq;
+}
 
 /**
  * Gets the current host data sequence counter.
@@ -387,7 +434,7 @@ int GuestShCl::reportFormatsToGuest(SHCLFORMATS fFormats)
     if (RT_FAILURE(vrc))
         return vrc;
 
-    ++m_uHostDataSeq;
+    i_incHostDataSeqLocked();
 
     PSHCLCLIENT pClient = m_pClient;
     if (pClient)
@@ -413,13 +460,7 @@ int GuestShCl::reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, S
 
     uint64_t uSeq = 0;
     if (enmSource == SHCLSOURCE_LOCAL)
-    {
-        int vrc2 = lock();
-        if (RT_FAILURE(vrc2))
-            return vrc2;
-        uSeq = ++m_uHostDataSeq;
-        unlock();
-    }
+        uSeq = i_incHostDataSeq();
 
     ClipboardSource_T const enmClipboardSource = enmSource == SHCLSOURCE_REMOTE
                                                ? ClipboardSource_Remote : ClipboardSource_Host;

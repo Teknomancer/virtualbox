@@ -1,4 +1,4 @@
-/* $Id: GuestShClSvcExt.cpp 114450 2026-06-19 09:05:04Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClSvcExt.cpp 114452 2026-06-19 09:20:58Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard service extension handling for Main.
  */
@@ -87,14 +87,7 @@ int GuestShCl::i_handleSvcExtReportFormatsToHost(PSHCLEXTPARMS pParms, void *pvP
     PSHCLCLIENT pClient = pParms->u.ReportFormats.pClient;
     SHCLFORMATS fFormats = pParms->u.ReportFormats.uFormats;
 
-    int vrc2 = lock();
-    if (RT_SUCCESS(vrc2))
-    {
-        ++m_uGuestDataSeq;
-        unlock();
-    }
-    else
-        AssertMsgFailed(("Updating guest clipboard data sequence counter failed with %Rrc\n", vrc2));
+    i_incGuestDataSeq();
 
     AssertPtr(m_pConsole->i_getClipboard());
     if (m_pConsole->i_getClipboard())
