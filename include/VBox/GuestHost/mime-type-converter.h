@@ -1,4 +1,4 @@
-/* $Id: mime-type-converter.h 114387 2026-06-16 11:36:17Z knut.osmundsen@oracle.com $ */
+/* $Id: mime-type-converter.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * MIME type converter for Shared Clipboard and Drag-and-Drop code.
  */
@@ -88,11 +88,15 @@ VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormats(SHCLFORMATS fVBoxFmts, PFNVBG
  * Find VBox format for the given MIME type.
  *
  * @returns VBox format. VBOX_SHCL_FMT_NONE if no translation found.
- * @param   pcszMimeType        MIME type to convert.
- * @param   pfFlagsAndPriority  The priority and flags (VBGH_MIME_CONV_F_XXX).
- *                              Optional.
+ * @param   pcszMimeType            MIME type to convert.
+ * @param   pfFlagsAndPriority      The priority and flags (VBGH_MIME_CONV_F_XXX).
+ *                                  Optional.
+ * @param   ppszPersistentMimeType  Where to return a persisten, readonly, MIME
+ *                                  type string upon a successful mapping.
+ *                                  Optional.
  */
-VBGH_DECL(SHCLFORMAT) VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *pfFlagsAndPriority);
+VBGH_DECL(SHCLFORMAT) VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *pfFlagsAndPriority,
+                                                      char const **ppszPersistentMimeType);
 
 /**
  * Converts from VirtualBox to X11/Wayland clipboard data format.
@@ -121,6 +125,7 @@ VBGH_DECL(int) VbghMimeConvFromVBox(const char *pcszMimeType, void *pvBufIn, int
 VBGH_DECL(int) VbghMimeConvToVBox(const char *pcszMimeType, void *pvBufIn, int cbBufIn, void **ppvBufOut, size_t *pcbBufOut);
 
 
+#if 0 /* unused */
 /** MIME type cache handle.   */
 typedef struct VBGHMIMECONVCACHEINT *VBGHMIMECONVCACHE;
 /** Pointe rto a MIME type cache handle. */
@@ -192,6 +197,7 @@ VBGH_DECL(int) VbghMimeConvCacheGetByMime(VBGHMIMECONVCACHE hCache, const char *
  */
 VBGH_DECL(int) VbghMimeConvCacheGetByVBoxFormat(VBGHMIMECONVCACHE hCache, const SHCLFORMAT uFmtVBox,
                                                 void **ppvBufOut, size_t *pcbBufOut);
+#endif
 
 #endif /* !VBOX_INCLUDED_GuestHost_mime_type_converter_h */
 

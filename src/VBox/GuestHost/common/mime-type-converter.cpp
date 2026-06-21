@@ -393,18 +393,23 @@ VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormats(SHCLFORMATS fVBoxFmts, PFNVBG
             pfnCallback(g_aConverterFormats[i].pcszMimeType, g_aConverterFormats[i].fFlagsAndPriority, pvUser);
 }
 
-VBGH_DECL(SHCLFORMAT) VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *pfFlagsAndPriority)
+VBGH_DECL(SHCLFORMAT) VbghMimeConvGetVBoxFormatByMime(const char *pcszMimeType, uint32_t *pfFlagsAndPriority,
+                                                      const char **ppszPersistentMimeType)
 {
     for (unsigned i = 0; i < RT_ELEMENTS(g_aConverterFormats); i++)
         if (RTStrNCmp(g_aConverterFormats[i].pcszMimeType, pcszMimeType, VBOX_WAYLAND_MIME_TYPE_NAME_MAX) == 0)
         {
             if (pfFlagsAndPriority)
                 *pfFlagsAndPriority = g_aConverterFormats[i].fFlagsAndPriority;
+            if (ppszPersistentMimeType)
+                *ppszPersistentMimeType = g_aConverterFormats[i].pcszMimeType; /* Kind of ASSUMES exact match! */
             return g_aConverterFormats[i].uFmtVBox;
         }
 
     if (pfFlagsAndPriority)
         *pfFlagsAndPriority = 0;
+    if (ppszPersistentMimeType)
+        *ppszPersistentMimeType = NULL;
     return VBOX_SHCL_FMT_NONE;
 }
 
@@ -430,6 +435,7 @@ VBGH_DECL(int) VbghMimeConvToVBox(const char *pcszMimeType, void *pvBufIn, int c
 /*********************************************************************************************************************************
 *   Cached Conversion                                                                                                            *
 *********************************************************************************************************************************/
+#if 0 /* unused */
 
 /** Mime-type cache instance. */
 typedef struct VBGHMIMECONVCACHEINT
@@ -632,3 +638,5 @@ VBGH_DECL(int) VbghMimeConvCacheGetByVBoxFormat(VBGHMIMECONVCACHE hCache, const 
 
     return rc;
 }
+
+#endif /* unused */

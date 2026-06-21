@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -66,18 +66,6 @@
     }
 
 /**
- * MIME type list entry.
- */
-typedef struct
-{
-    /** IPRT list node. */
-    RTLISTNODE  Node;
-    /** Data MIME type in string representation. */
-    RT_FLEXIBLE_ARRAY_EXTENSION
-    char        szMimeType[RT_FLEXIBLE_ARRAY];
-} vbox_wl_dcp_mime_t;
-
-/**
  * DCP session data.
  *
  * A structure which accumulates all the necessary data required to
@@ -105,16 +93,6 @@ typedef struct
          *  are being advertised either by host or guest depending
          *  on session type. */
         vbcl::Waitable<volatile SHCLFORMATS>    fFmts;
-
-        struct
-        {
-            /** Clipboard format which host want guest wants. */
-            vbcl::Waitable<volatile SHCLFORMAT>     uFmt;
-            /** Clipboard buffer which contains requested data. */
-            vbcl::Waitable<volatile uint64_t>       pvDataBuf;
-            /** Size of clipboard buffer. */
-            vbcl::Waitable<volatile uint32_t>       cbDataBuf;
-        } GhRead;
     } clip;
 } vbox_wl_dcp_session_t;
 
@@ -132,9 +110,6 @@ typedef struct
 
     /** Communication session between host event loop and Wayland. */
     vbox_wl_dcp_session_t                       Session;
-
-    /** MIME types data cache. */
-    VBGHMIMECONVCACHE                           hCache;
 
     /** When set, incoming clipboard announcements will be ignored.
      *
@@ -203,17 +178,6 @@ RTDECL(int) vbcl_wayland_xdcp_next_event(vbox_wl_xdcp_base_ctx_t *pCtx);
 RTDECL(void) vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx);
 
 /**
- * Collect clipboard format advertised by Wayland.
- *
- * This callback adds MIME type just advertised by Wayland into a list
- * of MIME types which in turn later will be advertised to the host.
- *
- * @returns IPRT status code.
- * @param   pEnmCtx             Format enumeration conext data.
- */
-RTDECL(int) vbcl_wayland_xdcp_add_fmt(struct vbcl_wl_dcp_enumerate_ctx *pEnmCtx);
-
-/**
  * Initializes the common context.
  *
  * @returns VBox status code.
@@ -236,27 +200,27 @@ void VBClWaylandXdcpCtxReInit(vbox_wl_xdcp_base_ctx_t *pCtx);
  */
 void VBClWaylandXdcpCtxTerm(vbox_wl_xdcp_base_ctx_t *pCtx);
 
-/**
- * Read clipboard data from Wayland and cache it.
- *
- * Clipboard data is cached in internal VBox representation format.
- *
- * @returns IPRT status code.
- * @param   fd                  File descriptor provided by Wayland to read data from.
- * @param   pCtx                Context data.
- * @param   pcszMimeType        Clipboard data format in string representation.
- */
-RTDECL(int) vbcl_wayland_xdcp_get_guest_clipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *pcszMimeType);
-
-/**
- * Write clipboard data to Wayland.
- *
- * @returns IPRT status code.
- * @param   fd                  File descriptor provided by Wayland to write data to.
- * @param   pCtx                Context data.
- * @param   pcszMimeType        Clipboard data format in string representation.
- */
 int VBClWaylandXdcpSetGuestClipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, const char *pcszMimeType);
+
+/** Parameters for vbclWaylandHlpEdcpGhClipFillCacheAndReport.   */
+typedef struct VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T
+{
+    /** The VBoxClient shared clipboard context. */
+    PSHCLCONTEXT                        pShClCtx;
+    /** The revision this report is for.   */
+    uint64_t                            uRevision;
+    /** For some wl_display_flush call. */
+    struct wl_display                  *pDisplay;
+    /** struct zwlr_data_control_offer_v1 or ext_data_control_offer_v1 pointer
+     *  used by pfnOfferReceive. */
+    void                               *pvOffer;
+    /** zwlr_data_control_offer_v1_receive / ext_data_control_offer_v1_receive
+     *  wrapper. */
+    DECLCALLBACKMEMBER(void, pfnOfferReceive,(struct VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T *pArgs,
+                                              const char *pszMimeType, int fdWrite));
+} VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T;
+DECLCALLBACK(int) VBClWaylandXdcpFillOurCacheFromOfferAndReport(void *pvUser);
+
 
 /**
  * Reports the host clipboard data to the guest.
@@ -267,15 +231,6 @@ int VBClWaylandXdcpSetGuestClipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, cons
  */
 int VBClWaylandXdcpReportHostClipboardFormats(vbox_wl_xdcp_base_ctx_t *pCtx, SHCLFORMATS fFmts);
 
-/**
- * Write clipboard data to host.
- *
- * @returns IPRT status code.
- * @param   pCtx                Context data.
- * @param   uFmt                Clipboard data format.
- */
-
-RTDECL(int) vbcl_wayland_xdcp_set_host_clipboard(vbox_wl_xdcp_base_ctx_t *pCtx, SHCLFORMAT uFmt);
 
 #endif /* !GA_INCLUDED_SRC_x11_VBoxClient_wayland_helper_xdcp_common_h */
 

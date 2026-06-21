@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -30,8 +30,9 @@
 
 #include <errno.h>
 
-#include <iprt/env.h>
 #include <iprt/assert.h>
+#include <iprt/env.h>
+#include <iprt/semaphore.h>
 #include <iprt/string.h>
 #include <iprt/thread.h>
 
@@ -154,24 +155,6 @@ static const struct wl_registry_listener g_vbcl_wayland_hlp_registry_cb =
 *********************************************************************************************************************************/
 
 /**
- * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Collect clipboard format advertised by guest.}
- *
- * This callback must be executed in context of Wayland event thread
- * in order to be able to access Wayland clipboard content.
- *
- * This callback adds MIME type just advertised by Wayland into a list
- * of MIME types which in turn later will be advertised to the host.
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_gh_add_fmt_cb(void *pvUser)
-{
-    struct vbcl_wl_dcp_enumerate_ctx * const pEnmCtx = (struct vbcl_wl_dcp_enumerate_ctx *)pvUser;
-    AssertPtrReturn(pEnmCtx, VERR_INVALID_PARAMETER);
-    VBClLogVerbose(3, "vbcl_wayland_hlp_edcp_gh_add_fmt_cb: %s\n", pEnmCtx->pcszMimeType);
-    return vbcl_wayland_xdcp_add_fmt(pEnmCtx);
-}
-
-/**
  * Wayland callback: Data Control Offer advertise.
  *
  * Triggered when other Wayland client advertises new clipboard content.
@@ -183,20 +166,11 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_gh_add_fmt_cb(void *pvUser)
 static void vbcl_wayland_hlp_dcp_data_control_offer_offer(void *pvUser, struct zwlr_data_control_offer_v1 *pOffer,
                                                           const char *pcszMimeType)
 {
-    vbox_wl_dcp_ctx_t *pCtx = (vbox_wl_dcp_ctx_t *)pvUser;
     VBClLogVerbose(3, "%s: %s\n", __func__, pcszMimeType);
+    SHCLWLCBCTXSLOT const * const pCbCtxSlot = (SHCLWLCBCTXSLOT const *)pvUser;
+    AssertPtrReturnVoid(pCbCtxSlot);
+    VBClWaylandClipboardOurAddMimeType(pCbCtxSlot->pCtx, pCbCtxSlot->uRevision, pcszMimeType, __func__);
     RT_NOREF(pOffer);
-
-    AssertPtrReturnVoid(pcszMimeType);
-
-    struct vbcl_wl_dcp_enumerate_ctx EnmCtx;
-    EnmCtx.pcszMimeType = pcszMimeType;
-    EnmCtx.pSession = &pCtx->BaseCtx.Session;
-
-    int rc = VBClWaylandSessionJoin(&pCtx->BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
-                                    vbcl_wayland_hlp_dcp_gh_add_fmt_cb, &EnmCtx);
-    if (RT_FAILURE(rc) && rc != VERR_NO_DATA)
-        VBClLogError("Cannot save format '%s' announced by the guest: rc=%Rrc\n", pcszMimeType, rc);
 }
 
 /** Wayland Data Control Offer interface callbacks. */
@@ -210,111 +184,12 @@ static const struct zwlr_data_control_offer_v1_listener g_data_control_offer_lis
  * Wayland Data Control Device callbacks.
  *********************************************************************************************************************************/
 
-
-/**
- * Read clipboard buffer from Wayland in specified format.
- *
- * @returns IPRT status code.
- * @param   pCtx            DCP context data.
- * @param   pOffer          Data offer object.
- * @param   pszMimeType     Requested MIME type in string representation.
- */
-static int vbcl_wayland_hlp_dcp_receive_offer(
-    vbox_wl_dcp_ctx_t *pCtx, zwlr_data_control_offer_v1 *pOffer, char *pszMimeType)
+/** Callback for use with VBClWaylandXdcpFillOurCacheFromOfferAndReport. */
+static DECLCALLBACK(void)
+vbclWaylandHlpDcpOfferV1ReceiveWrapper(VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T *pArgs,
+                                       const char *pszMimeType, int fdWrite)
 {
-    int rc = VERR_PIPE_NOT_CONNECTED;
-    int aFds[2];
-
-    AssertPtrReturn(pOffer, VERR_INVALID_PARAMETER);
-    AssertPtrReturn(pszMimeType, VERR_INVALID_PARAMETER);
-
-    if (pipe(aFds) == 0)
-    {
-        zwlr_data_control_offer_v1_receive(pOffer, pszMimeType, aFds[1]);
-
-        close(aFds[1]);
-        rc = vbcl_wayland_xdcp_get_guest_clipboard(aFds[0], &pCtx->BaseCtx, pszMimeType);
-        close(aFds[0]);
-    }
-    else
-        VBClLogError("cannot read MIME type '%s' from Wayland, rc=%Rrc\n", pszMimeType, rc);
-
-    return rc;
-}
-
-/**
- * Convert list of MIME types to mask of VBox formats.
- *
- * @returns VBox formats bitmask.
- * @param   pListHead   List of MIME types in string representation.
- * @param   pOffer      Wayland offer.
- */
-static SHCLFORMATS vbcl_wayland_hlp_dcp_match_formats(PRTLISTANCHOR pListHead, struct zwlr_data_control_offer_v1 *pOffer)
-{
-    SHCLFORMATS fFmts = VBOX_SHCL_FMT_NONE;
-
-    AssertPtrReturn(pListHead, VBOX_SHCL_FMT_NONE);
-    AssertPtrReturn(pOffer, VBOX_SHCL_FMT_NONE);
-
-    if (!RTListIsEmpty(pListHead))
-    {
-        vbox_wl_dcp_mime_t *pEntry;
-        RTListForEach(pListHead, pEntry, vbox_wl_dcp_mime_t, Node)
-        {
-            VBClLogVerbose(5, "Wayland last offer contains data in format: %s\n", pEntry->szMimeType);
-
-            fFmts |= VbghMimeConvGetVBoxFormatByMime(pEntry->szMimeType, NULL /*pfFlagsAndPriority*/);
-
-            /*int rc =*/ vbcl_wayland_hlp_dcp_receive_offer(&g_DcpCtx, pOffer, pEntry->szMimeType);
-        }
-    }
-
-    return fFmts;
-}
-
-/**
- * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Advertise clipboard to the host.}
- *
- * This callback must be executed in context of Wayland event thread
- * in order to be able to access Wayland clipboard content.
- *
- * This callback (1) coverts Wayland clipboard formats into VBox
- * representation, (2) sets formats to the session, (3) waits for
- * host to request clipboard data in certain format, and (4)
- * receives Wayland clipboard in requested format.
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_gh_clip_report_cb(void *pvUser)
-{
-    struct zwlr_data_control_offer_v1 *pOffer = (struct zwlr_data_control_offer_v1 *)pvUser;
-    AssertPtrReturn(pOffer, VERR_INVALID_PARAMETER);
-    VBCL_LOG_CALLBACK;
-
-    int rc;
-    SHCLFORMATS fFmts = vbcl_wayland_hlp_dcp_match_formats(&g_DcpCtx.BaseCtx.Session.clip.mimeTypesList, pOffer);
-    if (fFmts != VBOX_SHCL_FMT_NONE)
-    {
-        g_DcpCtx.BaseCtx.Session.clip.fFmts.set(fFmts);
-
-        if (RT_VALID_PTR(g_DcpCtx.BaseCtx.pShClCtx))
-        {
-            rc = VbglR3ClipboardReportFormats(g_DcpCtx.BaseCtx.pShClCtx->CmdCtx.idClient, fFmts);
-            if (RT_FAILURE(rc))
-                VBClLogError("cannot report formats to host, rc=%Rrc\n", rc);
-        }
-        else
-        {
-            VBClLogVerbose(2, "cannot announce to guest, no host service connection yet\n");
-            rc = VERR_TRY_AGAIN;
-        }
-    }
-    else
-        rc = VERR_NO_DATA;
-
-    zwlr_data_control_offer_v1_destroy(pOffer);
-
-    VBClLogVerbose(5, "announcing fFmts=0x%x to host, rc=%Rrc\n", fFmts, rc);
-    return rc;
+    zwlr_data_control_offer_v1_receive((struct zwlr_data_control_offer_v1 *)pArgs->pvOffer, pszMimeType, fdWrite);
 }
 
 /**
@@ -331,48 +206,72 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_gh_clip_report_cb(void *pvUser)
 static void vbcl_wayland_hlp_dcp_data_device_data_offer(
     void *pvUser, struct zwlr_data_control_device_v1 *pDevice, struct zwlr_data_control_offer_v1 *pOffer)
 {
-    int rc;
-    vbox_wl_dcp_ctx_t *pCtx = (vbox_wl_dcp_ctx_t *)pvUser;
-    RT_NOREF(pDevice);
-
+    /*
+     * Validate input a little.
+     */
     VBCL_LOG_CALLBACK;
-
+    vbox_wl_dcp_ctx_t * const pCtx = (vbox_wl_dcp_ctx_t *)pvUser;
     AssertPtrReturnVoid(pCtx);
+    PSHCLCONTEXT const pShClCtx = pCtx->BaseCtx.pShClCtx;
+    RT_NOREF(pDevice);
     AssertPtrReturnVoid(pOffer);
 
+    /*
+     * Fend off stuff
+     */
     if (pCtx->BaseCtx.fIngnoreWlClipIn)
-    {
         VBClLogVerbose(5, "ignoring Wayland clipboard data offer, we advertising new clipboard ourselves\n");
-        return;
-    }
-
-    rc = vbcl_wayland_session_end(&pCtx->BaseCtx.Session.Base, NULL, NULL);
-    if (RT_SUCCESS(rc))
+    else if (!pShClCtx)
+        VBClLogVerbose(5, "ignoring Wayland clipboard data offer - no shared clipboard context (pShClCtx)!\n");
+    else
     {
-        rc = vbcl_wayland_session_start(&pCtx->BaseCtx.Session.Base,
-                                        VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
-                                        &vbcl_wayland_hlp_dcp_session_start_generic_cb,
-                                        &pCtx->BaseCtx.Session);
+        int rc = vbcl_wayland_session_end(&pCtx->BaseCtx.Session.Base, NULL, NULL);
         if (RT_SUCCESS(rc))
         {
-            rc = VbghMimeConvCacheClear(pCtx->BaseCtx.hCache);
-            if (RT_FAILURE(rc))
-                VBClLogVerbose(5, "unable to clear clipboard cache, rc=%Rrc", rc);
+            rc = vbcl_wayland_session_start(&pCtx->BaseCtx.Session.Base,
+                                            VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
+                                            &vbcl_wayland_hlp_dcp_session_start_generic_cb,
+                                            &pCtx->BaseCtx.Session);
+            if (RT_SUCCESS(rc))
+            {
+                /*
+                 * Reset the common VBoxClient clipboard state.
+                 */
+                SHCLWLCBCTXSLOT *pCbCtxSlot;
+                uint64_t const uRevision = VBClWaylandClipboardResetOurState(pShClCtx, __func__, &pCbCtxSlot);
 
-            zwlr_data_control_offer_v1_add_listener(pOffer, &g_data_control_offer_listener, pvUser);
+                /*
+                 * Register listener on the offer and get all the mime types.
+                 */
+                zwlr_data_control_offer_v1_add_listener(pOffer, &g_data_control_offer_listener, pCbCtxSlot);
 
-            /* Receive all the advertised mime types. */
-            wl_display_roundtrip(pCtx->BaseCtx.pDisplay);
+                /* Receive all the advertised mime types. */
+                wl_display_roundtrip(pCtx->BaseCtx.pDisplay);
 
-            /* Try to send an announcement to the host. */
-            VBClWaylandSessionJoin(&pCtx->BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
-                                   vbcl_wayland_hlp_dcp_gh_clip_report_cb, pOffer);
+                /* Fill the cache with data and announce it to the host. */
+                VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T Args =
+                { pShClCtx, uRevision, pCtx->BaseCtx.pDisplay, pOffer, vbclWaylandHlpDcpOfferV1ReceiveWrapper };
+                VBClWaylandSessionJoin(&pCtx->BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
+                                       VBClWaylandXdcpFillOurCacheFromOfferAndReport, &Args);
+
+                /*
+                 * ??
+                 */
+                /** @todo Moved this from the vbclWaylandHlpXdcpGhClipFillCacheAndReport
+                 *        callback, as I cannot see how calling here or there makes much of a
+                 *        difference.
+                 *
+                 *        However, that said, why aren't we calling at the very very end of this
+                 *        function for all cases. What's the difference when fIngnoreWlClipIn is
+                 *        true, pShClCtx isn't set or vbcl_wayland_session_end/start fails?? */
+                zwlr_data_control_offer_v1_destroy(pOffer);
+            }
+            else
+                VBClLogError("unable to start session, rc=%Rrc\n", rc);
         }
         else
-            VBClLogError("unable to start session, rc=%Rrc\n", rc);
+            VBClLogError("unable to start session, previous session is still running, rc=%Rrc\n", rc);
     }
-    else
-        VBClLogError("unable to start session, previous session is still running, rc=%Rrc\n", rc);
 }
 
 /**
@@ -412,7 +311,7 @@ static void vbcl_wayland_hlp_dcp_data_device_finished(
     AssertPtrReturnVoid(pDevice);
 
     zwlr_data_control_device_v1_destroy(pDevice);
-    pCtx->pDataDevice = NULL;
+    pCtx->pDataDevice = NULL; /** @todo r=bird: Why do we do this? I don't think this has anything to do with pDevice... */
 }
 
 /**
@@ -671,8 +570,8 @@ static DECLCALLBACK(void)
 vbcl_wayland_hlp_dcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPriority, void *pvUser)
 {
     zwlr_data_control_source_v1 *pDataSource = (zwlr_data_control_source_v1 *)pvUser;
+    VBClLogVerbose(4, "%s: %s prio %#x\n", __func__, pcszMimeType, fFlagsAndPriority);
     zwlr_data_control_source_v1_offer(pDataSource, pcszMimeType);
-    RT_NOREF(fFlagsAndPriority);
 }
 
 /**
@@ -858,12 +757,6 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_popup(void)
  * This callback (1) sets host clipboard formats list to the session,
  * (2) asks Wayland event thread to advertise these formats to the guest,
  * (3) waits for guest to request clipboard in specific format, (4) read
- * host clipboard in this format, and (5) sets clipboard data to the session,
- * so Wayland events thread can inject it into the guest.
- *
- * This callback should not return until clipboard data is read from
- * the host or error occurred. It must block host events loop until
- * current host event is fully processed.
  */
 static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report_join_cb(void *pvUser)
 {
@@ -884,6 +777,9 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report(PSHCLCONTEXT pCtx, 
     int rc;
     if (fFormats != VBOX_SHCL_FMT_NONE)
     {
+        /** @todo r=bird: Abstract all these three operations into a single
+         *        VBClWaylandSessionReStart/Whatever, reducing code duplication
+         *        optimizing state transitions. */
         rc = vbcl_wayland_session_end(&g_DcpCtx.BaseCtx.Session.Base, NULL, NULL);
         if (RT_SUCCESS(rc))
         {
@@ -908,37 +804,6 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report(PSHCLCONTEXT pCtx, 
     return rc;
 }
 
-/**
- * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
- *      Session callback: Copy clipboard to the host.}
- *
- * This callback sets clipboard format to the session as requested
- * by host, waits for guest clipboard data in requested format and
- * sends data to the host.
- *
- * This callback should not return until clipboard data is sent to
- * the host or error occurred. It must block host events loop until
- * current host event is fully processed.
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_gh_read_join_cb(void *pvUser)
-{
-    AssertPtr(pvUser);
-    SHCLFORMAT const uFmt = *(SHCLFORMAT *)pvUser;
-    VBClLogVerbose(3, "%s: %#x\n", __func__, uFmt);
-    return vbcl_wayland_xdcp_set_host_clipboard(&g_DcpCtx.BaseCtx, uFmt);
-}
-
-/**
- * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnGHClipRead}
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_gh_read(PSHCLCONTEXT pCtx, SHCLFORMAT uFmt)
-{
-    RT_NOREF(pCtx);
-    VBClLogVerbose(3, "%s: uFmt=%#x\n", __func__, uFmt);
-    return VBClWaylandSessionJoin(&g_DcpCtx.BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
-                                  vbcl_wayland_hlp_dcp_clip_gh_read_join_cb, &uFmt);
-}
-
 /** Legacy data control protocol helper callbacks. */
 const VBCLWAYLANDHELPER g_WaylandHelperDcp =
 {
@@ -951,7 +816,7 @@ const VBCLWAYLANDHELPER g_WaylandHelperDcp =
         /* .pfnSetClipboardCtx = */ vbcl_wayland_hlp_dcp_clip_set_ctx,
         /* .pfnPopup           = */ vbcl_wayland_hlp_dcp_clip_popup,
         /* .pfnHGClipReport    = */ vbcl_wayland_hlp_dcp_clip_hg_report,
-        /* .pfnGHClipRead      = */ vbcl_wayland_hlp_dcp_clip_gh_read,
+        /* .pfnGHClipRead      = */ NULL,
     },
     /* .dnd      = */
     {

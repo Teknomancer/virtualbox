@@ -1,4 +1,4 @@
-/* $Id: wayland-helper.h 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Wayland helpers.
  */
@@ -172,7 +172,8 @@ typedef struct
 
     /** Called upon receiving a new clipboard format report from the host. */
     PFNHOSTCLIPREPORTFMTS pfnHGClipReport;
-    /** Called upon receiving a read clipboard query from the host. */
+    /** Called upon receiving a read clipboard query from the host.
+     * @deprecated Only used by Gtk now. */
     PFNHOSTCLIPREAD pfnGHClipRead;
 
 } VBCLWAYLANDHELPER_CLIPBOARD;
