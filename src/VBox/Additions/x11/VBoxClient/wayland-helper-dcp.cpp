@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114477 2026-06-22 11:30:42Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114478 2026-06-22 11:48:44Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -599,7 +599,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report_join2_cb(void *pvUs
     VBClLogVerbose(3, "%s: fFmts=%#x\n", __func__, fFmts);
     if (fFmts != g_DcpCtx.BaseCtx.Session.clip.fFmts.defaults())
     {
-        zwlr_data_control_source_v1 *pDataSource
+        struct zwlr_data_control_source_v1 *pDataSource
             = zwlr_data_control_manager_v1_create_data_source(g_DcpCtx.pDataControlManager);
         if (RT_VALID_PTR(pDataSource))
         {
@@ -697,7 +697,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_probe(void)
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnInit}
  */
-RTDECL(int) vbcl_wayland_hlp_dcp_clip_init(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_init(void)
 {
     int rc = vbClWaylandHlpDcpCtxInit(&g_DcpCtx);
     if (RT_SUCCESS(rc))
@@ -712,7 +712,7 @@ RTDECL(int) vbcl_wayland_hlp_dcp_clip_init(void)
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnTerm}
  */
-RTDECL(int) vbcl_wayland_hlp_dcp_clip_term(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_term(void)
 {
     /* Set termination flag. Wayland event loop should pick it up
        on the next iteration. */
@@ -786,7 +786,6 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_dcp_clip_hg_report(PSHCLCONTEXT pCtx, 
                                             VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST,
                                             &vbcl_wayland_hlp_dcp_session_start_generic_cb,
                                             &g_DcpCtx.BaseCtx.Session);
-
             if (RT_SUCCESS(rc))
                 rc = VBClWaylandSessionJoin(&g_DcpCtx.BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST,
                                             vbcl_wayland_hlp_dcp_clip_hg_report_join_cb, &fFormats);

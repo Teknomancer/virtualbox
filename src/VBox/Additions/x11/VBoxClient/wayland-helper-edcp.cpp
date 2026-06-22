@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114477 2026-06-22 11:30:42Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114478 2026-06-22 11:48:44Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -529,7 +529,8 @@ static bool vbcl_wayland_hlp_edcp_connect(vbox_wl_edcp_ctx_t *pCtx)
             {
                 if (RT_VALID_PTR(pCtx->BaseCtx.pSeat))
                 {
-                    pCtx->pDataDevice = ext_data_control_manager_v1_get_data_device(pCtx->pDataControlManager, pCtx->BaseCtx.pSeat);
+                    pCtx->pDataDevice = ext_data_control_manager_v1_get_data_device(pCtx->pDataControlManager,
+                                                                                    pCtx->BaseCtx.pSeat);
                     if (RT_VALID_PTR(pCtx->pDataDevice))
                     {
                         if (RT_VALID_PTR(pCtx->pDataControlManager))
@@ -568,7 +569,7 @@ static DECLCALLBACK(void)
 vbcl_wayland_hlp_edcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPriority, void *pvUser)
 {
     ext_data_control_source_v1 *pDataSource = (ext_data_control_source_v1 *)pvUser;
-    VBClLogVerbose(4, "vbcl_wayland_hlp_edcp_send_offers: %s prio %#x\n", pcszMimeType, fFlagsAndPriority);
+    VBClLogVerbose(4, "%s: %s prio %#x\n", __func__, pcszMimeType, fFlagsAndPriority);
     ext_data_control_source_v1_offer(pDataSource, pcszMimeType);
 }
 
