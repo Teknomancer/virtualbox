@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: vbox.py 114432 2026-06-18 10:11:13Z andreas.loeffler@oracle.com $
+# $Id: vbox.py 114494 2026-06-22 19:27:51Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 114432 $"
+__version__ = "$Revision: 114494 $"
 
 # pylint: disable=unnecessary-semicolon
 
@@ -2346,7 +2346,10 @@ class TestDriver(base.TestDriver):                                              
         reporter.log("  TeleporterPort:     %s" % (oVM.teleporterPort,));
         reporter.log("  TeleporterAddress:  %s" % (oVM.teleporterAddress,));
         reporter.log("  TeleporterPassword: %s" % (oVM.teleporterPassword,));
-        reporter.log("  Clipboard mode:     %s" % (oVM.clipboardMode,));
+        if hasattr(oVM, 'clipboard'):
+            reporter.log("  Clipboard mode:     %s" % (oVM.clipboard.mode,));
+        else:
+            reporter.log("  Clipboard mode:     %s" % (oVM.clipboardMode,));
         if self.fpApiVer >= 5.0:
             reporter.log("  Drag and drop mode: %s" % (oVM.dnDMode,));
         elif self.fpApiVer >= 4.3:
