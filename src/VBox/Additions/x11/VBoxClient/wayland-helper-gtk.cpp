@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114458 2026-06-19 12:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114495 2026-06-22 21:47:36Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -280,16 +280,13 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker_join_cb(
     vbox_wl_gtk_ctx_t *pCtx = (vbox_wl_gtk_ctx_t *)pvUser;
     AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
 
-    const vbcl::ipc::flow_t *pFlow;
-
-    int rc = VINF_SUCCESS;
-
     VBCL_LOG_CALLBACK;
 
     /* Make sure valid session is in progress. */
     AssertReturn(pCtx->Session.uSessionId > 0, VERR_INVALID_PARAMETER);
 
     /* Select corresponding IPC flow depending on session type. */
+    const vbcl::ipc::flow_t *pFlow;
     if      (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
         pFlow = vbcl::ipc::data::HGCopyFlow;
     else if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST)
@@ -297,16 +294,11 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker_join_cb(
     else if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST)
         pFlow = vbcl::ipc::data::GHCopyFlow;
     else
-    {
-        pFlow = NULL;
-        rc = VERR_INVALID_PARAMETER;
-    }
+        AssertFailedReturn(VERR_INVALID_PARAMETER);
+    AssertPtr(pFlow);
 
     /* Proceed with selected flow. */
-    if (RT_VALID_PTR(pFlow))
-        rc = pCtx->Session.oDataIpc->flow(pFlow, pCtx->Session.hIpcSession);
-
-    return rc;
+    return pCtx->Session.oDataIpc->flow(pFlow, pCtx->Session.hIpcSession);
 }
 
 /**

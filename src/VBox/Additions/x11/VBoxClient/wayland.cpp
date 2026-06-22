@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114476 2026-06-22 11:29:33Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114495 2026-06-22 21:47:36Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -570,7 +570,7 @@ static DECLCALLBACK(int) vbclWaylandInit(void)
     {
         if (RT_VALID_PTR(g_apWaylandHelpers[idxHelper]->pfnProbe))
         {
-            VBClLogInfo("probing Wayland helper '%s'\n", g_apWaylandHelpers[idxHelper]->pszName);
+            VBClLogInfo("Probing Wayland helper '%s' ...\n", g_apWaylandHelpers[idxHelper]->pszName);
 
             int fCaps = g_apWaylandHelpers[idxHelper]->pfnProbe();
 
