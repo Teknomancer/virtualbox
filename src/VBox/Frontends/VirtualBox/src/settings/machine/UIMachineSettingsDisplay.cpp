@@ -1,4 +1,4 @@
-/* $Id: UIMachineSettingsDisplay.cpp 113597 2026-03-26 16:19:13Z sergey.dubov@oracle.com $ */
+/* $Id: UIMachineSettingsDisplay.cpp 114487 2026-06-22 16:17:27Z serkan.bayraktar@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIMachineSettingsDisplay class implementation.
  */
@@ -84,6 +84,7 @@ struct UIDataSettingsMachineDisplay
         , m_iRecordingVideoFrameHeight(0)
         , m_iRecordingVideoFrameRate(0)
         , m_iRecordingVideoBitRate(0)
+        , m_recordingScalingMode(KRecordingVideoScalingMode_Max)
         , m_strAudioProfile(QString())
     {}
 
@@ -110,6 +111,7 @@ struct UIDataSettingsMachineDisplay
                && (m_iRecordingVideoFrameHeight == other.m_iRecordingVideoFrameHeight)
                && (m_iRecordingVideoFrameRate == other.m_iRecordingVideoFrameRate)
                && (m_iRecordingVideoBitRate == other.m_iRecordingVideoBitRate)
+               && (m_recordingScalingMode == other.m_recordingScalingMode)
                && (m_vecRecordingScreens == other.m_vecRecordingScreens)
                && (m_strRecordingFeatures == other.m_strRecordingFeatures)
                && (m_strAudioProfile == other.m_strAudioProfile)
@@ -162,6 +164,8 @@ struct UIDataSettingsMachineDisplay
     int                         m_iRecordingVideoFrameRate;
     /** Holds the recording bit rate. */
     int                         m_iRecordingVideoBitRate;
+    /** Holds the recording scaling mode rate. */
+    KRecordingVideoScalingMode  m_recordingScalingMode;
     /** Holds which of the guest screens should be recorded. */
     QVector<bool>               m_vecRecordingScreens;
     /** Holds the recording features. */
@@ -312,6 +316,7 @@ void UIMachineSettingsDisplay::loadToCacheFrom(QVariant &data)
         oldDisplayData.m_iRecordingVideoFrameRate = comRecordingScreen0Settings.GetVideoFPS();
         oldDisplayData.m_iRecordingVideoBitRate = comRecordingScreen0Settings.GetVideoRate();
         oldDisplayData.m_strRecordingFeatures = comRecordingScreen0Settings.GetFeatures();
+        oldDisplayData.m_recordingScalingMode = comRecordingScreen0Settings.GetVideoScalingMode();
         const ULONG uHz = comRecordingScreen0Settings.GetAudioHz();
         const ULONG uChannels = comRecordingScreen0Settings.GetAudioChannels();
         if (uHz == 8000 && uChannels == 1)
@@ -394,6 +399,7 @@ void UIMachineSettingsDisplay::getFromCache()
         m_pEditorRecordingSettings->setBitrate(oldDisplayData.m_iRecordingVideoBitRate);
         m_pEditorRecordingSettings->setScreens(oldDisplayData.m_vecRecordingScreens);
         m_pEditorRecordingSettings->setAudioProfile(oldDisplayData.m_strAudioProfile);
+        m_pEditorRecordingSettings->setScalingMode(oldDisplayData.m_recordingScalingMode);
 
         /* Load old 'Recording' features: */
         UISettingsDefs::RecordingMode enmMode;
@@ -459,6 +465,7 @@ void UIMachineSettingsDisplay::putToCache()
         newDisplayData.m_iRecordingVideoFrameHeight = m_pEditorRecordingSettings->frameHeight();
         newDisplayData.m_iRecordingVideoFrameRate = m_pEditorRecordingSettings->frameRate();
         newDisplayData.m_iRecordingVideoBitRate = m_pEditorRecordingSettings->bitrate();
+        newDisplayData.m_recordingScalingMode = m_pEditorRecordingSettings->scalingMode();
         newDisplayData.m_vecRecordingScreens = m_pEditorRecordingSettings->screens();
         newDisplayData.m_strAudioProfile = m_pEditorRecordingSettings->audioProfile();
 
@@ -1168,6 +1175,12 @@ bool UIMachineSettingsDisplay::saveRecordingData()
             if (fSuccess && newDisplayData.m_iRecordingVideoBitRate != oldDisplayData.m_iRecordingVideoBitRate)
             {
                 comRecordingScreenSettings.SetVideoRate(newDisplayData.m_iRecordingVideoBitRate);
+                fSuccess = comRecordingScreenSettings.isOk();
+            }
+            /* Save recording scaling mode: */
+            if (fSuccess && newDisplayData.m_recordingScalingMode != oldDisplayData.m_recordingScalingMode)
+            {
+                comRecordingScreenSettings.SetVideoScalingMode(newDisplayData.m_recordingScalingMode);
                 fSuccess = comRecordingScreenSettings.isOk();
             }
             /* Save capture features: */

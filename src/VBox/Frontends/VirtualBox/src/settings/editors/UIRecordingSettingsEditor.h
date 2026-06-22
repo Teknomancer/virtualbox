@@ -1,4 +1,4 @@
-/* $Id: UIRecordingSettingsEditor.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: UIRecordingSettingsEditor.h 114487 2026-06-22 16:17:27Z serkan.bayraktar@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIRecordingSettingsEditor class declaration.
  */
@@ -34,6 +34,7 @@
 /* GUI includes: */
 #include "UIEditor.h"
 #include "UISettingsDefs.h"
+#include "KRecordingVideoScalingMode.h"
 
 /* Forward declarations: */
 class QCheckBox;
@@ -46,6 +47,7 @@ class UIRecordingScreenSelectorEditor;
 class UIRecordingVideoBitrateEditor;
 class UIRecordingVideoFrameRateEditor;
 class UIRecordingVideoFrameSizeEditor;
+class UIRecordingScalingModeEditor;
 
 /** UIEditor sub-class used as a recording settings editor. */
 class SHARED_LIBRARY_STUFF UIRecordingSettingsEditor : public UIEditor
@@ -97,6 +99,11 @@ public:
     void setBitrate(int iBitrate);
     /** Returns bitrate. */
     int bitrate() const;
+
+    /** Defines @a enmMode. */
+    void setScalingMode(KRecordingVideoScalingMode enmMode);
+    /** Returns scaling mode. */
+    KRecordingVideoScalingMode scalingMode() const;
 
     /** Defines audio @a strProfile. */
     void setAudioProfile(const QString &strProfile);
@@ -166,6 +173,8 @@ private:
         UIRecordingFilePathEditor       *m_pEditorFilePath;
         /** Holds the frame size editor instance. */
         UIRecordingVideoFrameSizeEditor *m_pEditorFrameSize;
+        /** Holds the scaling mode editor instance. */
+        UIRecordingScalingModeEditor *m_pEditorScalingMode;
         /** Holds the frame rate editor instance. */
         UIRecordingVideoFrameRateEditor *m_pEditorFrameRate;
         /** Holds the bitrate editor instance. */

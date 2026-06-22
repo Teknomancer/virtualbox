@@ -1,4 +1,4 @@
-/* $Id: UIConverterBackendCOM.cpp 114003 2026-04-24 06:30:09Z aleksey.ilyushin@oracle.com $ */
+/* $Id: UIConverterBackendCOM.cpp 114487 2026-06-22 16:17:27Z serkan.bayraktar@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIConverterBackendCOM implementation.
  */
@@ -64,6 +64,7 @@
 #include "KStorageBus.h"
 #include "KStorageControllerType.h"
 #include "KTpmType.h"
+#include "KRecordingVideoScalingMode.h"
 #include "KUSBControllerType.h"
 #include "KUSBDeviceFilterAction.h"
 #include "KUSBDeviceState.h"
@@ -905,4 +906,41 @@ template<> SHARED_LIBRARY_STUFF KMetricType UIConverter::fromInternalString<KMet
     if (strMetricType.compare("NetworksBytesOut", Qt::CaseInsensitive) == 0)
         return KMetricType_NetworksBytesOut;
     AssertMsgFailedReturn(("No value for '%s'", strMetricType.toUtf8().constData()), KMetricType_Invalid);
+}
+
+/* QString <= KRecordingVideoScalingMode: */
+template<> SHARED_LIBRARY_STUFF QString UIConverter::toString(const KRecordingVideoScalingMode &enmMode) const
+{
+    switch (enmMode)
+    {
+        case KRecordingVideoScalingMode_None:
+            return QApplication::translate("UICommon", "None", "RecordingVideoScalingMode");
+        case KRecordingVideoScalingMode_NearestNeighbor:
+            return QApplication::translate("UICommon", "Nearest Neighbor", "RecordingVideoScalingMode");
+        case KRecordingVideoScalingMode_Bilinear:
+            return QApplication::translate("UICommon", "Bilinear", "RecordingVideoScalingMode");
+        case KRecordingVideoScalingMode_Bicubic:
+            return QApplication::translate("UICommon", "Bicubic", "RecordingVideoScalingMode");
+        default:
+            AssertMsgFailed(("No text for %d", enmMode));
+            break;
+    }
+    return QString();
+}
+
+/* KRecordingVideoScalingMode <= QString: */
+template<> SHARED_LIBRARY_STUFF KRecordingVideoScalingMode UIConverter::fromString<KRecordingVideoScalingMode>(const QString &strMode) const
+{
+    QHash<QString, KRecordingVideoScalingMode> list;
+    list.insert(QApplication::translate("UICommon", "None", "RecordingVideoScalingMode"),
+                KRecordingVideoScalingMode_None);
+    list.insert(QApplication::translate("UICommon", "Nearest Neighbor", "RecordingVideoScalingMode"),
+                KRecordingVideoScalingMode_NearestNeighbor);
+    list.insert(QApplication::translate("UICommon", "Bilinear", "RecordingVideoScalingMode"),
+                KRecordingVideoScalingMode_Bilinear);
+    list.insert(QApplication::translate("UICommon", "Bicubic", "RecordingVideoScalingMode"),
+                KRecordingVideoScalingMode_Bicubic);
+    if (!list.contains(strMode))
+        AssertMsgFailed(("No value for '%s'", strMode.toUtf8().constData()));
+    return list.value(strMode, KRecordingVideoScalingMode_None);
 }

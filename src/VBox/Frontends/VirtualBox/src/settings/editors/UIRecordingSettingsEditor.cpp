@@ -1,4 +1,4 @@
-/* $Id: UIRecordingSettingsEditor.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: UIRecordingSettingsEditor.cpp 114487 2026-06-22 16:17:27Z serkan.bayraktar@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIRecordingSettingsEditor class implementation.
  */
@@ -35,6 +35,7 @@
 #include "UIRecordingSettingsEditor.h"
 #include "UIRecordingFilePathEditor.h"
 #include "UIRecordingModeEditor.h"
+#include "UIRecordingScalingModeEditor.h"
 #include "UIRecordingVideoBitrateEditor.h"
 #include "UIRecordingVideoFrameRateEditor.h"
 #include "UIRecordingVideoFrameSizeEditor.h"
@@ -49,6 +50,7 @@ UIRecordingSettingsEditor::UIRecordingSettingsEditor(QWidget *pParent /* = 0 */)
     , m_pEditorMode(0)
     , m_pEditorFilePath(0)
     , m_pEditorFrameSize(0)
+    , m_pEditorScalingMode(0)
     , m_pEditorFrameRate(0)
     , m_pEditorBitrate(0)
     , m_pEditorAudioProfile(0)
@@ -163,6 +165,18 @@ void UIRecordingSettingsEditor::setBitrate(int iBitrate)
 int UIRecordingSettingsEditor::bitrate() const
 {
     return m_pEditorBitrate ? m_pEditorBitrate->bitrate() : 0;
+}
+
+KRecordingVideoScalingMode UIRecordingSettingsEditor::scalingMode() const
+{
+    return m_pEditorScalingMode ? m_pEditorScalingMode->mode() : KRecordingVideoScalingMode_Max;
+}
+
+void UIRecordingSettingsEditor::setScalingMode(KRecordingVideoScalingMode enmMode)
+{
+    if (!m_pEditorScalingMode)
+        return;
+    m_pEditorScalingMode->setMode(enmMode);
 }
 
 void UIRecordingSettingsEditor::setAudioProfile(const QString &strProfile)
@@ -299,6 +313,13 @@ void UIRecordingSettingsEditor::prepareWidgets()
                     addEditor(m_pEditorFrameSize);
                     m_pLayoutSettings->addWidget(m_pEditorFrameSize, ++iLayoutSettingsRow, 0);
                 }
+                /* Prepare scaling mode editor: */
+                m_pEditorScalingMode = new UIRecordingScalingModeEditor(pWidgetSettings);
+                if (m_pEditorScalingMode)
+                {
+                    addEditor(m_pEditorScalingMode);
+                    m_pLayoutSettings->addWidget(m_pEditorScalingMode, ++iLayoutSettingsRow, 0);
+                }
                 /* Prepare recording frame rate editor: */
                 m_pEditorFrameRate = new UIRecordingVideoFrameRateEditor(pWidgetSettings);
                 if (m_pEditorFrameRate)
@@ -366,6 +387,7 @@ void UIRecordingSettingsEditor::updateWidgetAvailability()
     m_pEditorFrameSize->setEnabled(fFeatureEnabled && m_fOptionsAvailable && fRecordVideo);
     m_pEditorFrameRate->setEnabled(fFeatureEnabled && m_fOptionsAvailable && fRecordVideo);
     m_pEditorBitrate->setEnabled(fFeatureEnabled && m_fOptionsAvailable && fRecordVideo);
+    m_pEditorScalingMode->setEnabled(fFeatureEnabled && m_fOptionsAvailable && fRecordVideo);
     m_pEditorAudioProfile->setEnabled(fFeatureEnabled && m_fOptionsAvailable && fRecordAudio);
     m_pEditorScreenSelector->setEnabled(fFeatureEnabled && m_fOptionsAvailable && fRecordVideo);
 }
@@ -381,6 +403,8 @@ void UIRecordingSettingsEditor::updateMinimumLayoutHint()
         iMinimumLayoutHint = qMax(iMinimumLayoutHint, m_pEditorFilePath->minimumLabelHorizontalHint());
     if (m_pEditorFrameSize && !m_pEditorFrameSize->isHidden())
         iMinimumLayoutHint = qMax(iMinimumLayoutHint, m_pEditorFrameSize->minimumLabelHorizontalHint());
+    if (m_pEditorScalingMode && !m_pEditorScalingMode->isHidden())
+        iMinimumLayoutHint = qMax(iMinimumLayoutHint, m_pEditorScalingMode->minimumLabelHorizontalHint());
     if (m_pEditorFrameRate && !m_pEditorFrameRate->isHidden())
         iMinimumLayoutHint = qMax(iMinimumLayoutHint, m_pEditorFrameRate->minimumLabelHorizontalHint());
     if (m_pEditorBitrate && !m_pEditorBitrate->isHidden())
@@ -397,6 +421,8 @@ void UIRecordingSettingsEditor::updateMinimumLayoutHint()
         m_pEditorFrameRate->setMinimumLayoutIndent(iMinimumLayoutHint);
     if (m_pEditorFrameSize)
         m_pEditorFrameSize->setMinimumLayoutIndent(iMinimumLayoutHint);
+    if (m_pEditorScalingMode)
+        m_pEditorScalingMode->setMinimumLayoutIndent(iMinimumLayoutHint);
     if (m_pEditorBitrate)
         m_pEditorBitrate->setMinimumLayoutIndent(iMinimumLayoutHint);
     if (m_pEditorAudioProfile)
