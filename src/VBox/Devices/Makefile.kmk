@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114473 2026-06-22 10:28:13Z aleksey.ilyushin@oracle.com $
+# $Id: Makefile.kmk 114488 2026-06-22 16:24:15Z aleksey.ilyushin@oracle.com $
 ## @file
 # Top-level sub-makefile for the devices, drivers and services.
 #
@@ -1413,15 +1413,28 @@ if !defined(VBOX_ONLY_EXTPACKS) && "$(intersects $(KBUILD_TARGET_ARCH),$(VBOX_SU
   	Network/DevE1000Rss.cpp
  endif
 
- # if defined(VBOX_WITH_CLOUD_NET) && defined(VBOX_WITH_LIBSSH) && defined(VBOX_WITH_TESTCASES)
- ifdef DISABLED_TEMPORARILY_TO_FIX_BUILD_ERRORS
+ if defined(VBOX_WITH_CLOUD_NET) && defined(VBOX_WITH_LIBSSH) && defined(VBOX_WITH_TESTCASES)
   PROGRAMS += tstVBoxLibssh
-  tstVBoxLibssh_TEMPLATE    = VBoxR3TstExe
-  tstVBoxLibssh_SDKS       += VBoxLibSsh
-  tstVBoxLibssh_LIBS       += $(PATH_STAGE_LIB)/VBoxLibSsh$(VBOX_SUFF_LIB)
+  # This is an executable, but we use VBoxR3TstDll for -fPIC needed by lazy load
+  tstVBoxLibssh_TEMPLATE    = VBoxR3TstDll
+  tstVBoxLibssh_INST        = $(INST_BIN)
+  tstVBoxLibssh_SDKS       += VBoxLibSsh VBoxZlib
   tstVBoxLibssh_DEFS        = LIBSSH_UNIT_TEST
   tstVBoxLibssh_SOURCES     = \
   	Network/testcase/tstVBoxLibssh.cpp
+
+  # We never link against VBoxLibSsh, we load it dynamically
+  tstVBoxLibssh_SOURCES    += \
+  	$(tstVBoxLibssh_0_OUTDIR)/VBoxLibSshLazyLoad.asm
+  tstVBoxLibssh_CLEAN      += $(tstVBoxLibssh_0_OUTDIR)/VBoxLibSshLazyLoad.asm
+  $$(tstVBoxLibssh_0_OUTDIR)/VBoxLibSshLazyLoad.asm: $(PATH_SUB_CURRENT)/Network/VBoxLibSsh.def $(VBOX_DEF_2_LAZY_LOAD) | $$(dir $$@)
+	$(call MSG_TOOL,VBoxDef2LazyLoad,tstVBoxLibssh,$(filter %.def, $^),$@)
+	$(QUIET)$(RM) -f -- "$@"
+  ifeq ($(KBUILD_TARGET),win)
+	$(VBOX_DEF_2_LAZY_LOAD) --explicit-load-function --library VBoxLibSsh --output "$@" $(filter %.def, $^)
+  else
+	$(VBOX_DEF_2_LAZY_LOAD) --system --explicit-load-function --library VBoxLibSsh --output "$@" $(filter %.def, $^)
+  endif
  endif
 
  #

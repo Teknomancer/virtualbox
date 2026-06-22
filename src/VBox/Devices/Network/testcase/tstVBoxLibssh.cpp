@@ -1,4 +1,4 @@
-/* $Id: tstVBoxLibssh.cpp 114465 2026-06-22 08:05:52Z aleksey.ilyushin@oracle.com $ */
+/* $Id: tstVBoxLibssh.cpp 114488 2026-06-22 16:24:15Z aleksey.ilyushin@oracle.com $ */
 /** @file
  * tstVBoxLibssh - Testcase for the libssh. Requires sshd with keys configured on some host.
  */
@@ -55,7 +55,6 @@ DECLINLINE(int) WSAGetLastError() { return errno; }
 #define _WINSOCK2API_
 #include <libssh/libssh.h>
 
-static RTTEST g_hTest;
 static char g_szHost[64] { 0 };
 static char g_szUser[64] { 0 };
 static char g_szKeyFile[RTPATH_MAX] { 0 };
@@ -71,7 +70,7 @@ static int runSessionAndExec(void)
     ssh_key key = NULL;
     ssh_channel channel = NULL;
 
-    RTTestDisableAssertions(g_hTest);
+    RTTestIDisableAssertions();
 
     do
     {
@@ -267,16 +266,16 @@ static int runSessionAndExec(void)
 
     ssh_finalize();
 
-    RTTestRestoreAssertions(g_hTest);
+    RTTestIRestoreAssertions();
     RTTestISubDone();
     return rc;
 }
 
-static RTEXITCODE printHelp(RTTEST hTest, int argc, char **argv)
+static RTEXITCODE printHelp(int argc, char **argv)
 {
     RT_NOREF(argc);
 
-    RTTestPrintf(hTest, RTTESTLVL_ALWAYS,
+    RTTestIPrintf(RTTESTLVL_ALWAYS,
                  "Usage: %s --host <host> --user <user> --key <private-key-file>"
                  " <command> <expected-substring>\n", argv[0]);
 
@@ -285,11 +284,12 @@ static RTEXITCODE printHelp(RTTEST hTest, int argc, char **argv)
 
 int main(int argc, char **argv)
 {
-    RTEXITCODE rcExit = RTTestInitAndCreate("tstVBoxLibssh", &g_hTest);
+    RTTEST hTest;
+    RTEXITCODE rcExit = RTTestInitAndCreate("tstVBoxLibssh", &hTest);
     if (rcExit != RTEXITCODE_SUCCESS)
         return rcExit;
 
-    RTTestBanner(g_hTest);
+    RTTestBanner(hTest);
 
     RTGETOPTSTATE               GetState;
     RTGETOPTUNION               ValueUnion;
@@ -321,16 +321,16 @@ int main(int argc, char **argv)
                 break;
 
             case 'h':
-                return printHelp(g_hTest, argc, argv);
+                return printHelp(argc, argv);
 
             default:
                 RTGetOptPrintError(ch, &ValueUnion);
-                return RTTestSkipAndDestroy(g_hTest, "Invalid arguments.\n");
+                return RTTestSkipAndDestroy(hTest, "Invalid arguments.\n");
         }
     }
 
     if (ch != VINF_GETOPT_NOT_OPTION)
-        return RTTestSummaryAndDestroy(g_hTest);
+        return RTTestSummaryAndDestroy(hTest);
 
     int iArg = 0;
     char **papszArgs = RTGetOptNonOptionArrayPtr(&GetState);
@@ -339,12 +339,11 @@ int main(int argc, char **argv)
     if (papszArgs[iArg])
         RTStrCopy(g_szExpected, sizeof(g_szExpected), papszArgs[iArg++]);
     if (iArg != 2)
-        return RTTestSummaryAndDestroy(g_hTest);
+        return RTTestSummaryAndDestroy(hTest);
 
-    RTTestSub(g_hTest, "Session and exec");
     rc = runSessionAndExec();
     if (RT_FAILURE(rc))
         RTTestIFailed("runSessionAndExec failed with %Rrc", rc);
 
-    return RTTestSummaryAndDestroy(g_hTest);
+    return RTTestSummaryAndDestroy(hTest);
 }
