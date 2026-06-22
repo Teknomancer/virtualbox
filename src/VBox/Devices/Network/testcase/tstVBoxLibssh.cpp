@@ -1,4 +1,4 @@
-/* $Id: tstVBoxLibssh.cpp 114488 2026-06-22 16:24:15Z aleksey.ilyushin@oracle.com $ */
+/* $Id: tstVBoxLibssh.cpp 114489 2026-06-22 16:31:04Z aleksey.ilyushin@oracle.com $ */
 /** @file
  * tstVBoxLibssh - Testcase for the libssh. Requires sshd with keys configured on some host.
  */
@@ -49,7 +49,6 @@ typedef int socklen_t;
 # define closesocket close
 # define INVALID_SOCKET -1
 # define SOCKET_ERROR   -1
-DECLINLINE(int) WSAGetLastError() { return errno; }
 #endif
 
 #define _WINSOCK2API_
