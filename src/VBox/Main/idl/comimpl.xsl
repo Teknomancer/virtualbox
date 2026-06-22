@@ -130,12 +130,19 @@
   <xsl:choose>
     <xsl:when test="$safearray='yes'">
       <xsl:variable name="elemtype">
-        <xsl:call-template name="typeIdl2Back">
-          <xsl:with-param name="type" select="$type" />
-          <xsl:with-param name="safearray" select="''" />
-          <xsl:with-param name="dir" select="'in'" />
-          <xsl:with-param name="utf8str" select="$utf8str" />
-        </xsl:call-template>
+        <xsl:choose>
+          <xsl:when test="count(key('G_keyInterfacesByName', $type)) > 0">
+            <xsl:value-of select="concat($type,' *')"/>
+          </xsl:when>
+          <xsl:otherwise>
+            <xsl:call-template name="typeIdl2Back">
+              <xsl:with-param name="type" select="$type" />
+              <xsl:with-param name="safearray" select="''" />
+              <xsl:with-param name="dir" select="'in'" />
+              <xsl:with-param name="utf8str" select="$utf8str" />
+            </xsl:call-template>
+          </xsl:otherwise>
+        </xsl:choose>
       </xsl:variable>
       <xsl:choose>
         <xsl:when test="$param and ($dir='in')">
@@ -143,6 +150,9 @@
         </xsl:when>
         <xsl:when test="$param and ($dir='out')">
           <xsl:value-of select="concat('ComSafeArrayOut(',$elemtype,', ', $param, ')')"/>
+        </xsl:when>
+        <xsl:when test="count(key('G_keyInterfacesByName', $type)) > 0">
+          <xsl:value-of select="concat('com::SafeIfaceArray&lt;',$type,'&gt;')"/>
         </xsl:when>
         <xsl:otherwise>
           <xsl:value-of select="concat('com::SafeArray&lt;',$elemtype,'&gt;')"/>
@@ -269,16 +279,29 @@
 
   <xsl:choose>
     <xsl:when test="$safearray='yes'">
-      <xsl:variable name="elemtype">
-        <xsl:call-template name="typeIdl2Back">
-          <xsl:with-param name="type" select="$type" />
-          <xsl:with-param name="safearray" select="''" />
-          <xsl:with-param name="dir" select="'in'" />
-        </xsl:call-template>
-      </xsl:variable>
-      <xsl:text>        SafeArray&lt;</xsl:text><xsl:value-of select="$elemtype"/>
-      <xsl:text>&gt; aArr(ComSafeArrayInArg(</xsl:text><xsl:value-of select="$param"/><xsl:text>));&#10;</xsl:text>
-      <xsl:text>        return </xsl:text><xsl:value-of select="$member"/><xsl:text>.initFrom(aArr);&#10;</xsl:text>
+      <xsl:choose>
+        <xsl:when test="count(key('G_keyInterfacesByName', $type)) > 0">
+          <xsl:text>        SafeIfaceArray&lt;</xsl:text><xsl:value-of select="$type"/>
+          <xsl:text>&gt; aArr(ComSafeArrayInArg(</xsl:text><xsl:value-of select="$param"/><xsl:text>));&#10;</xsl:text>
+          <xsl:text>        if (!</xsl:text><xsl:value-of select="$member"/><xsl:text>.reset(aArr.size()))&#10;</xsl:text>
+          <xsl:text>            return E_OUTOFMEMORY;&#10;</xsl:text>
+          <xsl:text>        for (size_t i = 0; i &lt; aArr.size(); ++i)&#10;</xsl:text>
+          <xsl:text>            </xsl:text><xsl:value-of select="$member"/><xsl:text>.setElement(i, aArr[i]);&#10;</xsl:text>
+          <xsl:text>        return S_OK;&#10;</xsl:text>
+        </xsl:when>
+        <xsl:otherwise>
+          <xsl:variable name="elemtype">
+            <xsl:call-template name="typeIdl2Back">
+              <xsl:with-param name="type" select="$type" />
+              <xsl:with-param name="safearray" select="''" />
+              <xsl:with-param name="dir" select="'in'" />
+            </xsl:call-template>
+          </xsl:variable>
+          <xsl:text>        SafeArray&lt;</xsl:text><xsl:value-of select="$elemtype"/>
+          <xsl:text>&gt; aArr(ComSafeArrayInArg(</xsl:text><xsl:value-of select="$param"/><xsl:text>));&#10;</xsl:text>
+          <xsl:text>        return </xsl:text><xsl:value-of select="$member"/><xsl:text>.initFrom(aArr);&#10;</xsl:text>
+        </xsl:otherwise>
+      </xsl:choose>
     </xsl:when>
     <xsl:when test="($type='wstring') or ($type='uuid')">
       <xsl:text>        return </xsl:text><xsl:value-of select="$member"/><xsl:text>.assignEx(</xsl:text>
@@ -300,19 +323,32 @@
   <xsl:param name="safearray"/>
   <xsl:choose>
     <xsl:when test="$safearray='yes'">
-      <xsl:variable name="elemtype">
-        <xsl:call-template name="typeIdl2Back">
-             <xsl:with-param name="type" select="$type" />
-             <xsl:with-param name="safearray" select="''" />
-             <xsl:with-param name="dir" select="'in'" />
-        </xsl:call-template>
-      </xsl:variable>
+      <xsl:choose>
+        <xsl:when test="count(key('G_keyInterfacesByName', $type)) > 0">
+          <xsl:text>        SafeIfaceArray&lt;</xsl:text><xsl:value-of select="$type"/><xsl:text>&gt; result;&#10;</xsl:text>
+          <xsl:text>        if (!result.reset(</xsl:text><xsl:value-of select="$member"/><xsl:text>.size()))&#10;</xsl:text>
+          <xsl:text>            return E_OUTOFMEMORY;&#10;</xsl:text>
+          <xsl:text>        for (size_t i = 0; i &lt; </xsl:text><xsl:value-of select="$member"/><xsl:text>.size(); ++i)&#10;</xsl:text>
+          <xsl:text>            result.setElement(i, </xsl:text><xsl:value-of select="$member"/><xsl:text>[i]);&#10;</xsl:text>
+          <xsl:text>        result.detachTo(ComSafeArrayOutArg(</xsl:text><xsl:value-of select="$param"/><xsl:text>));&#10;</xsl:text>
+          <xsl:text>        return S_OK;&#10;</xsl:text>
+        </xsl:when>
+        <xsl:otherwise>
+          <xsl:variable name="elemtype">
+            <xsl:call-template name="typeIdl2Back">
+                 <xsl:with-param name="type" select="$type" />
+                 <xsl:with-param name="safearray" select="''" />
+                 <xsl:with-param name="dir" select="'in'" />
+            </xsl:call-template>
+          </xsl:variable>
 <!-- @todo String arrays probably needs work, I doubt we're generating sensible code for them at the moment. -->
-      <xsl:text>        SafeArray&lt;</xsl:text><xsl:value-of select="$elemtype"/><xsl:text>&gt; result;&#10;</xsl:text>
-      <xsl:text>        HRESULT hrc = </xsl:text><xsl:value-of select="$member"/><xsl:text>.cloneTo(result);&#10;</xsl:text>
-      <xsl:text>        if (SUCCEEDED(hrc))&#10;</xsl:text>
-      <xsl:text>            result.detachTo(ComSafeArrayOutArg(</xsl:text><xsl:value-of select="$param"/><xsl:text>));&#10;</xsl:text>
-      <xsl:text>        return hrc;&#10;</xsl:text>
+          <xsl:text>        SafeArray&lt;</xsl:text><xsl:value-of select="$elemtype"/><xsl:text>&gt; result;&#10;</xsl:text>
+          <xsl:text>        HRESULT hrc = </xsl:text><xsl:value-of select="$member"/><xsl:text>.cloneTo(result);&#10;</xsl:text>
+          <xsl:text>        if (SUCCEEDED(hrc))&#10;</xsl:text>
+          <xsl:text>            result.detachTo(ComSafeArrayOutArg(</xsl:text><xsl:value-of select="$param"/><xsl:text>));&#10;</xsl:text>
+          <xsl:text>        return hrc;&#10;</xsl:text>
+        </xsl:otherwise>
+      </xsl:choose>
     </xsl:when>
     <xsl:otherwise>
       <xsl:choose>
