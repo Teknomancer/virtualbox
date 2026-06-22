@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114493 2026-06-22 19:16:15Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -544,6 +544,7 @@ HRESULT Clipboard::createFormat(const com::Utf8Str &aMimeType,
                                 ComPtr<IClipboardFormat> &aFormat)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aMimeType, aFormat);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -577,6 +578,7 @@ HRESULT Clipboard::createItem(ClipboardSource_T aSource,
                               ComPtr<IClipboardItem> &aItem)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aSource, aFormat, aBuffer, aItem);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -623,6 +625,7 @@ HRESULT Clipboard::createItem(ClipboardSource_T aSource,
 HRESULT Clipboard::getFileList(std::vector<com::Utf8Str> &aFileList)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aFileList);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -645,6 +648,7 @@ HRESULT Clipboard::getFileList(std::vector<com::Utf8Str> &aFileList)
 HRESULT Clipboard::setFileList(const std::vector<com::Utf8Str> &aFileList)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aFileList);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -667,6 +671,7 @@ HRESULT Clipboard::setFileList(const std::vector<com::Utf8Str> &aFileList)
 HRESULT Clipboard::getTransfers(ComPtr<IClipboardTransferManager> &aTransfers)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aTransfers);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -690,6 +695,7 @@ HRESULT Clipboard::getTransfers(ComPtr<IClipboardTransferManager> &aTransfers)
 HRESULT Clipboard::getEventSource(ComPtr<IEventSource> &aEventSource)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aEventSource);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -716,6 +722,7 @@ HRESULT Clipboard::getEventSource(ComPtr<IEventSource> &aEventSource)
 HRESULT Clipboard::readData(ClipboardAction_T aAction, ComPtr<IClipboardItem> &aItem)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aAction, aItem);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -790,6 +797,7 @@ HRESULT Clipboard::readData(ClipboardAction_T aAction, ComPtr<IClipboardItem> &a
 HRESULT Clipboard::readFormats(std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aFormats);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -852,6 +860,7 @@ HRESULT Clipboard::writeData(ClipboardAction_T aAction,
                              ComPtr<IClipboardItem> &aWrittenItem)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aAction, aItem, aWrittenItem);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -981,6 +990,7 @@ HRESULT Clipboard::readDataRaw(ClipboardAction_T aAction,
                                std::vector<BYTE> &aBuffer)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aAction, aSource, aMimeType, aBuffer);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -1058,6 +1068,7 @@ HRESULT Clipboard::writeDataRaw(ClipboardAction_T aAction,
                                 std::vector<BYTE> &aWrittenBuffer)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aAction, aSource, aMimeType, aBuffer, aWrittenSource, aWrittenMimeType, aWrittenBuffer);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -1137,6 +1148,7 @@ HRESULT Clipboard::writeDataRaw(ClipboardAction_T aAction,
 HRESULT Clipboard::writeFormats(const std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aFormats);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -1238,6 +1250,7 @@ HRESULT Clipboard::isFormatAvailable(ClipboardSource_T aSource,
                                      BOOL *aAvailable)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aSource, aFormat, aAvailable);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
@@ -1308,6 +1321,7 @@ HRESULT Clipboard::getSupportedFormats(ClipboardSource_T aSource,
                                        std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aSource, aFormats);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
