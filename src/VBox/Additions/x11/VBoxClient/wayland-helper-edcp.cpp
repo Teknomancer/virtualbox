@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114477 2026-06-22 11:30:42Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -103,26 +103,24 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_session_start_generic_cb(
  * @param pvUser            Context data.
  * @param pRegistry         Wayland Registry object.
  * @param uName             Numeric name of the global object.
- * @param sIface            Name of interface implemented by the object.
+ * @param pszIface          Name of interface implemented by the object.
  * @param uVersion          Interface version.
  */
 static void vbcl_wayland_hlp_edcp_registry_global_handler(
-    void *pvUser, struct wl_registry *pRegistry, uint32_t uName, const char *sIface, uint32_t uVersion)
+    void *pvUser, struct wl_registry *pRegistry, uint32_t uName, const char *pszIface, uint32_t uVersion)
 {
-    vbox_wl_edcp_ctx_t *pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
-
-    RT_NOREF(pRegistry);
-    RT_NOREF(uVersion);
-
+    vbox_wl_edcp_ctx_t * const pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
     AssertPtrReturnVoid(pCtx);
-    AssertPtrReturnVoid(sIface);
+    AssertPtrReturnVoid(pszIface);
+    VBClLogVerbose(6, "Wayland interface %s (%u) v%u\n", pszIface, uName, uVersion);
 
-    /* Wrappers around 'if' statement. */
-    /** @todo r=bird: Unreadable! */
-         VBCL_WAYLAND_REGISTRY_ADD_MATCH(pRegistry, sIface, uName, wl_seat_interface,                      pCtx->BaseCtx.pSeat,        struct wl_seat *,                      VBCL_WAYLAND_SEAT_VERSION_MIN)
-    else VBCL_WAYLAND_REGISTRY_ADD_MATCH(pRegistry, sIface, uName, ext_data_control_manager_v1_interface,  pCtx->pDataControlManager,  struct ext_data_control_manager_v1 *,  VBCL_WAYLAND_ZWLR_DATA_CONTROL_MANAGER_VERSION_MIN)
-    else
-        VBClLogVerbose(5, "ignoring Wayland interface %s\n", sIface);
+    /* Call wl_registry_bind & return if matching anything we're interested in. */
+    VBCL_WAYLAND_REGISTRY_MATCH_AND_BIND_AND_RET(pRegistry, pszIface, uName,    wl_seat_interface,
+                                                 pCtx->BaseCtx.pSeat,           struct wl_seat *,
+                                                 VBCL_WAYLAND_SEAT_VERSION_MIN);
+    VBCL_WAYLAND_REGISTRY_MATCH_AND_BIND_AND_RET(pRegistry, pszIface, uName,    ext_data_control_manager_v1_interface,
+                                                 pCtx->pDataControlManager,     struct ext_data_control_manager_v1 *,
+                                                 VBCL_WAYLAND_ZWLR_DATA_CONTROL_MANAGER_VERSION_MIN);
 }
 
 /**
@@ -257,7 +255,7 @@ static void vbcl_wayland_hlp_edcp_data_device_data_offer(
                 /*
                  * ??
                  */
-                /** @todo Moved this from the vbclWaylandHlpEdcpOfferV1ReceiveWrapper
+                /** @todo Moved this from the vbclWaylandHlpXdcpGhClipFillCacheAndReport
                  *        callback, as I cannot see how calling here or there makes much of a
                  *        difference.
                  *
@@ -310,8 +308,9 @@ static void vbcl_wayland_hlp_edcp_data_device_finished(
     AssertPtrReturnVoid(pCtx);
     AssertPtrReturnVoid(pDevice);
 
+    Assert(pDevice == pCtx->pDataDevice);
     ext_data_control_device_v1_destroy(pDevice);
-    pCtx->pDataDevice = NULL; /** @todo r=bird: Why do we do this? I don't think this has anything to do with pDevice... */
+    pCtx->pDataDevice = NULL;
 }
 
 /**

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114477 2026-06-22 11:30:42Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -52,18 +52,25 @@
 #define VBCL_WAYLAND_SEAT_VERSION_MIN                       (5)
 #define VBCL_WAYLAND_ZWLR_DATA_CONTROL_MANAGER_VERSION_MIN  (1)
 
-/* A helper for matching interface and bind to it in registry callback.*/
-#define VBCL_WAYLAND_REGISTRY_ADD_MATCH(_pRegistry, _sIfaceName, _uIface, _iface_to_bind_to, _ctx_member, _ctx_member_type, _uVersion) \
-    if (RTStrNCmp(_sIfaceName, _iface_to_bind_to.name, VBCL_WAYLAND_INTERFACE_NAME_MAX) == 0) \
-    { \
-        if (! _ctx_member) \
+/**
+ * A helper for the registry callback for binding and returning if the current
+ * entry matches.
+ */
+#define VBCL_WAYLAND_REGISTRY_MATCH_AND_BIND_AND_RET(a_pRegistry, a_pszIfaceName, a_uIfaceName, a_IfaceToBindTo, \
+                                                     a_CtxMember, a_CtxMemberType, a_uVersion) do { \
+        if (RTStrNCmp(a_pszIfaceName, a_IfaceToBindTo.name, VBCL_WAYLAND_INTERFACE_NAME_MAX) == 0) \
         { \
-            _ctx_member = \
-                (_ctx_member_type)wl_registry_bind(_pRegistry, _uIface, &_iface_to_bind_to, _uVersion); \
-            VBClLogVerbose(4, "binding to Wayland interface '%s' (%u) v%u\n", _iface_to_bind_to.name, _uIface, wl_proxy_get_version((struct wl_proxy *) _ctx_member)); \
+            if (!(a_CtxMember)) \
+            { \
+                a_CtxMember = (a_CtxMemberType)wl_registry_bind(a_pRegistry, a_uIfaceName, &a_IfaceToBindTo, a_uVersion); \
+                VBClLogVerbose(4, "binding to Wayland interface '%s' (%u) v%u -> %p\n", a_IfaceToBindTo.name, a_uIfaceName, \
+                               wl_proxy_get_version((struct wl_proxy *)(a_CtxMember)), (a_CtxMember)); \
+            } \
+            AssertPtr(a_CtxMember); \
+            return; \
         } \
-        AssertPtrReturnVoid(_ctx_member); \
-    }
+    } while (0)
+
 
 /**
  * DCP session data.
