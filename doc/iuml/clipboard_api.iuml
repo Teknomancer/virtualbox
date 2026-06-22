@@ -1,4 +1,4 @@
-' $Id: clipboard_api.iuml 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $
+' $Id: clipboard_api.iuml 114483 2026-06-22 13:41:46Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - VirtualBox Clipboard API - Draft
 '
@@ -137,7 +137,23 @@ end note
 abstract class IClipboardFormatChangedEvent
 {
     +source : ClipboardSource
+    +formats : SafeArray<IClipboardFormat>
 }
+
+abstract class IClipboardDataRequestedEvent
+{
+    +requestId : ULONG
+    +action : ClipboardAction
+    +source : ClipboardSource
+    +format : IClipboardFormat
+}
+
+note left of IClipboardDataRequestedEvent
+  Waitable event emitted when clipboard data
+  is requested for an advertised format.
+  Providers supply data and mark the event
+  processed before the request completes.
+end note
 
 abstract class IClipboardDataChangedEvent
 {
@@ -168,6 +184,7 @@ IEvent <|-- IClipboardEvent
 IEvent <|-- IClipboardModeChangedEvent
 IEvent <|-- IClipboardSourceChangedEvent
 IClipboardEvent <|-- IClipboardFormatChangedEvent
+IClipboardEvent <|-- IClipboardDataRequestedEvent
 IClipboardEvent <|-- IClipboardDataChangedEvent
 IClipboardEvent <|-- IClipboardErrorEvent
 IEvent <|-- IClipboardTransferEvent
