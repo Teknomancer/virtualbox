@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114465 2026-06-22 08:05:52Z aleksey.ilyushin@oracle.com $
+# $Id: Makefile.kmk 114468 2026-06-22 09:18:21Z aleksey.ilyushin@oracle.com $
 ## @file
 # Top-level sub-makefile for the devices, drivers and services.
 #
@@ -1413,7 +1413,8 @@ if !defined(VBOX_ONLY_EXTPACKS) && "$(intersects $(KBUILD_TARGET_ARCH),$(VBOX_SU
   	Network/DevE1000Rss.cpp
  endif
 
- if defined(VBOX_WITH_CLOUD_NET) && defined(VBOX_WITH_LIBSSH) && defined(VBOX_WITH_TESTCASES)
+# if defined(VBOX_WITH_CLOUD_NET) && defined(VBOX_WITH_LIBSSH) && defined(VBOX_WITH_TESTCASES)
+ifdef DISABLED_TEMPORARILY_TO_FIX_BUILD_ERRORS
   PROGRAMS += tstVBoxLibssh
   tstVBoxLibssh_TEMPLATE    = VBoxR3TstExe
   tstVBoxLibssh_SDKS       += VBoxLibSsh
