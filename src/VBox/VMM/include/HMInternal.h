@@ -1,4 +1,4 @@
-/* $Id: HMInternal.h 114185 2026-05-26 16:27:11Z knut.osmundsen@oracle.com $ */
+/* $Id: HMInternal.h 114490 2026-06-22 17:29:00Z knut.osmundsen@oracle.com $ */
 /** @file
  * HM - Internal header file.
  */
@@ -509,8 +509,9 @@ typedef struct HMR0PERVM
     bool                        fNestedPaging;
     /** Set if we can support 64-bit guests or not. */
     bool                        fAllow64BitGuests;
-    bool                        afAlignment1[1];
 
+    /** Set if SUPR0EnableHwvirtForVm has been called */
+    bool                        fSupR0EnableForVmCalled;
     /** State variable for SUPR0EnableHwvirtForVm. */
     R0PTRTYPE(void *)           pvSupR0EnableState;
 
