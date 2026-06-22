@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114482 2026-06-22 13:36:27Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -39,7 +39,7 @@
 
 #include <VBox/err.h>
 #include <VBox/HostServices/VBoxClipboardSvc.h>
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
 # include <VBox/HostServices/VBoxSharedClipboardSvc.h>
 #endif
 #include <VBox/GuestHost/clipboard-helper.h>
@@ -3568,6 +3568,7 @@ int ShClTransferConvertFileCreateFlags(uint32_t fShClFlags, uint64_t *pfOpen)
     return VINF_SUCCESS;
 }
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
 /**
  * Reads a root list header from the guest, asynchronous version.
  *
@@ -4527,6 +4528,8 @@ void ShClSvcTransferDestroy(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
     LogFlowFuncLeave();
 }
 
+#endif /* VBOX_WITH_SHARED_CLIPBOARD_HOST */
+
 /**
  * Initializes a clipboard transfer.
  *
@@ -4585,6 +4588,7 @@ int ShClTransferInit(PSHCLTRANSFER pTransfer)
     return rc;
 }
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
 /**
  * Initializes a (created) transfer on the host.
  *
@@ -4634,3 +4638,5 @@ int ShClSvcTransferInit(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
     LogFlowFuncLeaveRC(rc);
     return rc;
 }
+
+#endif /* VBOX_WITH_SHARED_CLIPBOARD_HOST */
