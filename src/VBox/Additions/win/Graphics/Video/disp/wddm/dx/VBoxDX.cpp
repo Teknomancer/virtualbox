@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.cpp 114359 2026-06-15 14:38:33Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxDX.cpp 114471 2026-06-22 09:59:52Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VirtualBox D3D user mode driver.
  */
@@ -544,9 +544,58 @@ static void dxTransientHeapOnFlush(VBOXDXTRANSIENTHEAP *pHeap)
 }
 
 
+/* Commands which are appended at the end of each command buffer. */
+#pragma pack(1)
+typedef struct VBOXDXCMDBUFSUFFIX
+{
+    struct
+    {
+        SVGA3dCmdHeader header;
+        SVGA3dCmdDXMobFence64 cmd;
+    } mobFence;
+} VBOXDXCMDBUFSUFFIX;
+#pragma pack()
+
+#define VBOXDX_CMD_BUF_SUFFIX_ALLOCATION_COUNT 1
+#define VBOXDX_CMD_BUF_SUFFIX_PATCH_COUNT 1
+
+
+static void vboxdxCommandBufferFinalize(PVBOXDX_DEVICE pDevice)
+{
+    LogFlowFunc(("CONTEXTMONITORING: pDevice %p, with fence %RX64\n", pDevice, pDevice->ContextMonitoring.CurrentFenceValue));
+
+    /* Append a MOB_FENCE command at the end of the command buffer. */
+    VBOXDXCMDBUFSUFFIX *s = (VBOXDXCMDBUFSUFFIX *)((uint8_t *)pDevice->pCommandBuffer + pDevice->cbCommandBuffer);
+    s->mobFence.header.id     = SVGA_3D_CMD_DX_MOB_FENCE_64;
+    s->mobFence.header.size   = sizeof(SVGA3dCmdDXMobFence64);
+    s->mobFence.cmd.value     = pDevice->ContextMonitoring.CurrentFenceValue;
+    s->mobFence.cmd.mobId     = SVGA3D_INVALID_ID;
+    s->mobFence.cmd.mobOffset = pDevice->ContextMonitoring.queryContextMonitoring.offQuery;
+
+    vboxDXStorePatchLocation(pDevice, &s->mobFence.cmd.mobId,
+                             pDevice->ContextMonitoring.queryContextMonitoring.pCOAllocation,
+                             s->mobFence.cmd.mobOffset, true);
+
+    Assert(pDevice->cbCommandReserved == 0);
+    pDevice->cbCommandBuffer += sizeof(*s);
+    pDevice->cbCommandReserved = 0;
+
+    /* Remember the fence value for resoures involved in this submission. */
+    for (unsigned i = 0; i < pDevice->cAllocations; ++i)
+    {
+        PVBOXDXKMRESOURCE pKMResource = pDevice->apKMResourceList[i];
+        pKMResource->LastReferencedFenceValue = pDevice->ContextMonitoring.CurrentFenceValue;
+    }
+
+    ++pDevice->ContextMonitoring.CurrentFenceValue;
+}
+
+
 static HRESULT vboxDXDeviceRender(PVBOXDX_DEVICE pDevice)
 {
     LogFlowFunc(("pDevice %p, cbCommandBuffer %d\n", pDevice, pDevice->cbCommandBuffer));
+
+    vboxdxCommandBufferFinalize(pDevice);
 
     D3DDDICB_RENDER ddiRender;
     RT_ZERO(ddiRender);
@@ -561,11 +610,11 @@ static HRESULT vboxDXDeviceRender(PVBOXDX_DEVICE pDevice)
     AssertReturn(SUCCEEDED(hr), hr);
 
     pDevice->pCommandBuffer        = ddiRender.pNewCommandBuffer;
-    pDevice->CommandBufferSize     = ddiRender.NewCommandBufferSize;
+    pDevice->CommandBufferSize     = ddiRender.NewCommandBufferSize - sizeof(VBOXDXCMDBUFSUFFIX);
     pDevice->pAllocationList       = ddiRender.pNewAllocationList;
-    pDevice->AllocationListSize    = ddiRender.NewAllocationListSize;
+    pDevice->AllocationListSize    = ddiRender.NewAllocationListSize - VBOXDX_CMD_BUF_SUFFIX_ALLOCATION_COUNT;
     pDevice->pPatchLocationList    = ddiRender.pNewPatchLocationList;
-    pDevice->PatchLocationListSize = ddiRender.NewPatchLocationListSize;
+    pDevice->PatchLocationListSize = ddiRender.NewPatchLocationListSize - VBOXDX_CMD_BUF_SUFFIX_PATCH_COUNT;
 
     Assert(pDevice->cbCommandReserved == 0);
     pDevice->cbCommandBuffer = 0;
@@ -646,6 +695,8 @@ void vboxDXStorePatchLocation(PVBOXDX_DEVICE pDevice, void *pvPatch, PVBOXDXKMRE
         pAllocationEntry->hAllocation = hAllocation;
         pAllocationEntry->Value = 0;
         pAllocationEntry->WriteOperation = fWriteOperation;
+
+        pDevice->apKMResourceList[idxAllocation] = pKMResource;
     }
 
     D3DDDI_PATCHLOCATIONLIST *pPatchLocation = &pDevice->pPatchLocationList[pDevice->cPatchLocations];
@@ -2516,10 +2567,10 @@ static bool isBeginDisabled(D3D10DDI_QUERY q)
 #endif
 
 
-void vboxDXCreateQuery(PVBOXDX_DEVICE pDevice, PVBOXDXQUERY pQuery, D3D10DDI_QUERY Query, UINT MiscFlags)
+static HRESULT vboxdxCreateQueryInternal(PVBOXDX_DEVICE pDevice, PVBOXDXQUERY pQuery, D3D10DDI_QUERY Query, UINT MiscFlags)
 {
     VMSVGAQUERYINFO const *pQueryInfo = getQueryInfo(Query);
-    AssertReturnVoidStmt(pQueryInfo, vboxDXDeviceSetError(pDevice, E_INVALIDARG));
+    AssertReturn(pQueryInfo, E_INVALIDARG);
 
     pQuery->Query = Query;
     pQuery->svga.queryType = pQueryInfo->queryTypeSvga;
@@ -2531,7 +2582,7 @@ void vboxDXCreateQuery(PVBOXDX_DEVICE pDevice, PVBOXDXQUERY pQuery, D3D10DDI_QUE
     pQuery->EndRenderCbSequence = 0;
 
     int rc = RTHandleTableAlloc(pDevice->hHTQuery, pQuery, &pQuery->uQueryId);
-    AssertRCReturnVoidStmt(rc, vboxDXDeviceSetError(pDevice, E_OUTOFMEMORY));
+    AssertRCReturn(rc, E_OUTOFMEMORY);
 
     /* Allocate mob space for this query. */
     pQuery->pCOAllocation = NULL;
@@ -2550,12 +2601,10 @@ void vboxDXCreateQuery(PVBOXDX_DEVICE pDevice, PVBOXDXQUERY pQuery, D3D10DDI_QUE
     {
         /* Create a new allocation.  */
         if (!vboxDXCreateCOAllocation(pDevice, &pDevice->listCOAQuery, &pQuery->pCOAllocation, 4 * _1K, /*fMap=*/ true))
-            AssertFailedReturnVoidStmt(RTHandleTableFree(pDevice->hHTQuery, pQuery->uQueryId);
-                                       vboxDXDeviceSetError(pDevice, E_OUTOFMEMORY));
+            AssertFailedReturnStmt(RTHandleTableFree(pDevice->hHTQuery, pQuery->uQueryId), E_OUTOFMEMORY);
 
         if (!vboxDXCOABlockAlloc(pQuery->pCOAllocation, cbAlloc, &pQuery->offQuery))
-            AssertFailedReturnVoidStmt(RTHandleTableFree(pDevice->hHTQuery, pQuery->uQueryId);
-                                       vboxDXDeviceSetError(pDevice, E_OUTOFMEMORY));
+            AssertFailedReturnStmt(RTHandleTableFree(pDevice->hHTQuery, pQuery->uQueryId), E_OUTOFMEMORY);
     }
 
     RTListAppend(&pDevice->listQueries, &pQuery->nodeQuery);
@@ -2574,6 +2623,16 @@ void vboxDXCreateQuery(PVBOXDX_DEVICE pDevice, PVBOXDXQUERY pQuery, D3D10DDI_QUE
         uint64_t *pu64Value = (uint64_t *)(pQuery->pCOAllocation->co.pu8COMapped + pQuery->offQuery);
         *pu64Value = 0;
     }
+
+    return S_OK;
+}
+
+
+void vboxDXCreateQuery(PVBOXDX_DEVICE pDevice, PVBOXDXQUERY pQuery, D3D10DDI_QUERY Query, UINT MiscFlags)
+{
+    HRESULT hr = vboxdxCreateQueryInternal(pDevice, pQuery, Query, MiscFlags);
+    if (hr != S_OK)
+        vboxDXDeviceSetError(pDevice, hr);
 }
 
 
@@ -4128,10 +4187,10 @@ HRESULT vboxDXRotateResourceIdentities(PVBOXDX_DEVICE pDevice, UINT cResources, 
     }
 
     /* Rotate allocation handles. The function would be that simple if resources would not have views. */
-    D3DKMT_HANDLE const hAllocation = papResources[0]->pKMResource->hAllocation;
+    PVBOXDXKMRESOURCE pKMResource = papResources[0]->pKMResource;
     for (unsigned i = 0; i < cResources - 1; ++i)
-        papResources[i]->pKMResource->hAllocation = papResources[i + 1]->pKMResource->hAllocation;
-    papResources[cResources - 1]->pKMResource->hAllocation = hAllocation;
+        papResources[i]->pKMResource = papResources[i + 1]->pKMResource;
+    papResources[cResources - 1]->pKMResource = pKMResource;
 
     /* Recreate views for the new hAllocations. */
     for (unsigned i = 0; i < cResources; ++i)
@@ -4448,9 +4507,15 @@ static void dxDeallocateStagingResources(PVBOXDX_DEVICE pDevice)
 
 static void dxDestroyDeferredResources(PVBOXDX_DEVICE pDevice)
 {
+    uint64_t const u64LastCompletedFenceValue = ASMAtomicReadU64(pDevice->ContextMonitoring.pLastCompletedFenceValue);
+
     PVBOXDXKMRESOURCE pKMResource, pNext;
     RTListForEachSafe(&pDevice->listDestroyedResources, pKMResource, pNext, VBOXDXKMRESOURCE, nodeResource)
     {
+        /* Check if the resource is still in use. */
+        if (pKMResource->LastReferencedFenceValue > u64LastCompletedFenceValue)
+            continue;
+
         RTListNodeRemove(&pKMResource->nodeResource);
         vboxDXDeallocateKMResource(pDevice, pKMResource);
     }
@@ -4507,11 +4572,11 @@ static HRESULT vboxDXCreateKernelContextForDevice(PVBOXDX_DEVICE pDevice)
     {
         pDevice->hContext              = ddiCreateContext.hContext;
         pDevice->pCommandBuffer        = ddiCreateContext.pCommandBuffer;
-        pDevice->CommandBufferSize     = ddiCreateContext.CommandBufferSize;
+        pDevice->CommandBufferSize     = ddiCreateContext.CommandBufferSize - sizeof(VBOXDXCMDBUFSUFFIX);
         pDevice->pAllocationList       = ddiCreateContext.pAllocationList;
-        pDevice->AllocationListSize    = ddiCreateContext.AllocationListSize;
+        pDevice->AllocationListSize    = ddiCreateContext.AllocationListSize - VBOXDX_CMD_BUF_SUFFIX_ALLOCATION_COUNT;
         pDevice->pPatchLocationList    = ddiCreateContext.pPatchLocationList;
-        pDevice->PatchLocationListSize = ddiCreateContext.PatchLocationListSize;
+        pDevice->PatchLocationListSize = ddiCreateContext.PatchLocationListSize - VBOXDX_CMD_BUF_SUFFIX_PATCH_COUNT;
 
         pDevice->cbCommandBuffer   = 0;
         pDevice->cbCommandReserved = 0;
@@ -4729,6 +4794,15 @@ static int vboxDXDeviceCreateObjects(PVBOXDX_DEVICE pDevice)
     rc = dxTransientHeapInit(pDevice, &pDevice->transientHeap);
     AssertRCReturn(rc, rc);
 
+    /* Fence for context monitoring. */
+    hr = vboxdxCreateQueryInternal(pDevice, &pDevice->ContextMonitoring.queryContextMonitoring, D3D10DDI_QUERY_EVENT, 0);
+    AssertReturn(SUCCEEDED(hr), VERR_NO_MEMORY);
+    pDevice->ContextMonitoring.pLastCompletedFenceValue =
+        (uint64_t *)(  pDevice->ContextMonitoring.queryContextMonitoring.pCOAllocation->co.pu8COMapped
+                     + pDevice->ContextMonitoring.queryContextMonitoring.offQuery);
+    *pDevice->ContextMonitoring.pLastCompletedFenceValue = 0;
+    pDevice->ContextMonitoring.CurrentFenceValue = 1;
+
     return VINF_SUCCESS;
 }
 
@@ -4902,6 +4976,9 @@ void vboxDXDestroyDevice(PVBOXDX_DEVICE pDevice)
     }
 
     dxDestroyDeferredResources(pDevice);
+
+    if (pDevice->ContextMonitoring.queryContextMonitoring.pCOAllocation)
+        vboxDXDestroyQuery(pDevice, &pDevice->ContextMonitoring.queryContextMonitoring);
 
     PVBOXDXSHADER pShader, pNextShader;
     RTListForEachSafe(&pDevice->listShaders, pShader, pNextShader, VBOXDXSHADER, node)

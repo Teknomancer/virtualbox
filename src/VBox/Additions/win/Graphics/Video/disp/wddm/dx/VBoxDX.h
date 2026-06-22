@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxDX.h 114471 2026-06-22 09:59:52Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VBoxVideo Display D3D User mode dll
  */
@@ -164,6 +164,8 @@ typedef struct VBOXDXKMRESOURCE
             RTLISTNODE             nodeAllocationsChain;    /* Shaders allocations are chained (VBOXDX_DEVICE::listShadersAllocations). */
         } shaders;
     };
+
+    UINT64                         LastReferencedFenceValue; /* ContextMonitoring fence of the last command buffer which has used the resource. */
 } VBOXDXKMRESOURCE, *PVBOXDXKMRESOURCE;
 
 typedef struct VBOXDXSHADER
@@ -646,6 +648,9 @@ typedef struct VBOXDXUPLOAD
 } VBOXDXUPLOAD;
 
 
+#define VBOXDX_MAX_KMRESOURCES_PER_SUBMISSION 512 /* Arbitrary */
+
+
 typedef struct VBOXDX_DEVICE
 {
     /* DX runtime data. */
@@ -670,12 +675,22 @@ typedef struct VBOXDX_DEVICE
     D3DDDI_PATCHLOCATIONLIST  *pPatchLocationList;
     UINT                      PatchLocationListSize;
 
+    PVBOXDXKMRESOURCE         apKMResourceList[VBOXDX_MAX_KMRESOURCES_PER_SUBMISSION];
+
     UINT                      cbCommandBuffer;               /* Size of commands in the buffer */
     UINT                      cbCommandReserved;             /* Size of the current command. */
     UINT                      cAllocations;                  /* Number of allocation in pAllocationList. */
     UINT                      cPatchLocations;               /* Number of patch locations. */
 
     uint32_t                  RenderCbSequence;              /* Increases with each RenderCb call. */
+
+    /* Tracks completion of submitted buffers. */
+    struct
+    {
+        VBOXDXQUERY           queryContextMonitoring;        /* A placeholder query for a MOB_FENCE after each command buffer. */
+        UINT64 volatile      *pLastCompletedFenceValue;      /* Fence of the last completed buffer. Updated by the virtual GPU. */
+        UINT64                CurrentFenceValue;             /* Fence for the next buffer to be submitted. */
+    } ContextMonitoring;
 
     /* Handle tables for various objects. */
     RTHANDLETABLE hHTBlendState;
