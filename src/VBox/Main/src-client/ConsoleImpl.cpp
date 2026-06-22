@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114439 2026-06-18 16:11:06Z klaus.espenlaub@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -2206,8 +2206,12 @@ HRESULT Console::getClipboard(ComPtr<IClipboard> &aClipboard)
  */
 bool Console::i_useHostClipboard()
 {
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
     AssertReturn(mClipboard, true);
     return mClipboard->i_useHostClipboard();
+#else
+    return false;
+#endif
 }
 
 
@@ -5917,8 +5921,10 @@ HRESULT Console::i_onClipboardError(const Utf8Str &aId, const Utf8Str &aErrMsg, 
     {
         alock.release();
         ::FireClipboardErrorEvent(mEventSource, aId, NULL /* aItem */, FALSE /* aVeto */, aErrMsg, aRc);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
         if (mClipboard.isNotNull())
             mClipboard->i_fireClipboardError(aId, aErrMsg, aRc);
+#endif
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));
@@ -5959,9 +5965,15 @@ HRESULT Console::i_onClipboardModeChange(ClipboardMode_T aClipboardMode)
             hrc = i_setInvalidMachineStateError();
         else if (fChangeMode)
         {
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
             int vrc = mClipboard->i_changeMode(aClipboardMode);
+#else
+            int vrc = VERR_NOT_IMPLEMENTED;
+#endif
             if (RT_FAILURE(vrc))
-                hrc = E_FAIL; /** @todo r=andy Set error info here! */
+                hrc = setErrorBoth(VBOX_E_IPRT_ERROR, vrc,
+                                   tr("Changing the Shared Clipboard mode failed with %Rrc"),
+                                   vrc);
         }
         ptrVM.release();
     }
@@ -5970,8 +5982,10 @@ HRESULT Console::i_onClipboardModeChange(ClipboardMode_T aClipboardMode)
     if (SUCCEEDED(hrc))
     {
         ::FireClipboardModeChangedEvent(mEventSource, aClipboardMode);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
         if (mClipboard.isNotNull())
             mClipboard->i_fireClipboardModeChanged(aClipboardMode);
+#endif
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));
@@ -6012,9 +6026,15 @@ HRESULT Console::i_onClipboardFileTransferModeChange(bool aEnabled)
             hrc = i_setInvalidMachineStateError();
         else if (fChangeMode)
         {
+#if defined(VBOX_WITH_SHARED_CLIPBOARD) && defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
             int vrc = mClipboard->i_changeFileTransferMode(aEnabled);
+#else
+            int vrc = VERR_NOT_IMPLEMENTED;
+#endif
             if (RT_FAILURE(vrc))
-                hrc = E_FAIL; /** @todo r=andy Set error info here! */
+                hrc = setErrorBoth(VBOX_E_IPRT_ERROR, vrc,
+                                   tr("Changing the Shared Clipboard file transfer mode failed with %Rrc"),
+                                   vrc);
         }
         ptrVM.release();
     }
@@ -6023,8 +6043,10 @@ HRESULT Console::i_onClipboardFileTransferModeChange(bool aEnabled)
     if (SUCCEEDED(hrc))
     {
         ::FireClipboardFileTransferModeChangedEvent(mEventSource, aEnabled ? TRUE : FALSE);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
         if (mClipboard.isNotNull())
             mClipboard->i_fireClipboardFileTransferModeChanged(aEnabled);
+#endif
     }
 
     LogFlowThisFunc(("Leaving hrc=%#x\n", hrc));

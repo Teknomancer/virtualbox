@@ -1,4 +1,4 @@
-/* $Id: SessionImpl.cpp 114439 2026-06-18 16:11:06Z klaus.espenlaub@oracle.com $ */
+/* $Id: SessionImpl.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Client Session COM Class implementation in VBoxC.
  */
@@ -918,7 +918,7 @@ HRESULT Session::clipboardReadData(ClipboardAction_T aAction,
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
     AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
-#ifndef VBOX_COM_INPROC_API_CLIENT
+#if !defined(VBOX_COM_INPROC_API_CLIENT) && defined(VBOX_WITH_SHARED_CLIPBOARD)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
@@ -942,7 +942,7 @@ HRESULT Session::clipboardReadFormats(std::vector<Utf8Str> &aFormats)
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
     AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
-#ifndef VBOX_COM_INPROC_API_CLIENT
+#if !defined(VBOX_COM_INPROC_API_CLIENT) && defined(VBOX_WITH_SHARED_CLIPBOARD)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
@@ -978,7 +978,7 @@ HRESULT Session::clipboardWriteData(ClipboardAction_T aAction,
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
     AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
-#ifndef VBOX_COM_INPROC_API_CLIENT
+#if !defined(VBOX_COM_INPROC_API_CLIENT) && defined(VBOX_WITH_SHARED_CLIPBOARD)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
@@ -1003,7 +1003,7 @@ HRESULT Session::clipboardWriteFormats(const std::vector<Utf8Str> &aFormats)
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
     AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
-#ifndef VBOX_COM_INPROC_API_CLIENT
+#if !defined(VBOX_COM_INPROC_API_CLIENT) && defined(VBOX_WITH_SHARED_CLIPBOARD)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
@@ -1026,7 +1026,7 @@ HRESULT Session::clipboardReset()
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
     AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
-#ifndef VBOX_COM_INPROC_API_CLIENT
+#if !defined(VBOX_COM_INPROC_API_CLIENT) && defined(VBOX_WITH_SHARED_CLIPBOARD)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
@@ -1049,7 +1049,9 @@ HRESULT Session::clipboardTransferCancel(ULONG aTransferId)
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     AssertReturn(mState == SessionState_Locked, VBOX_E_INVALID_VM_STATE);
     AssertReturn(mType == SessionType_WriteLock, VBOX_E_INVALID_OBJECT_STATE);
-#ifndef VBOX_COM_INPROC_API_CLIENT
+#if    !defined(VBOX_COM_INPROC_API_CLIENT) \
+    && defined(VBOX_WITH_SHARED_CLIPBOARD) \
+    && defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);

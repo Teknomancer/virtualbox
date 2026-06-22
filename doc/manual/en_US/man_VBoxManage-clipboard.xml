@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-clipboard" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-06-15 20:31:38 +0200 (Mon, 15 Jun 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-22 10:18:18 +0200 (Mon, 22 Jun 2026) $</pubdate>
     <title>VBoxManage clipboard</title>
   </refentryinfo>
 
@@ -284,13 +284,14 @@ $ VBoxManage clipboard "Ubuntu VM" paste --wait=10000 &gt; foo.txt</screen>
           <listitem><para>
               Specifies a comma-separated list of events to listen for.  Valid
               values are <literal>source</literal>, <literal>format</literal>,
-              <literal>data</literal>, <literal>transfer</literal>,
-              <literal>error</literal>, <literal>mode</literal>, and
-              <literal>file-transfer-mode</literal>.  The
-              <literal>source-changed</literal>, <literal>format-changed</literal>,
-              and <literal>data-changed</literal> aliases are also accepted for
-              the corresponding changed events.  The default is
-              <literal>source,format,data,transfer,error,mode,file-transfer-mode</literal>.
+              <literal>data</literal>, <literal>data-requested</literal>,
+              <literal>transfer</literal>, <literal>error</literal>,
+              <literal>mode</literal>, and <literal>file-transfer-mode</literal>.
+              The <literal>source-changed</literal>, <literal>format-changed</literal>,
+              <literal>data-changed</literal>, and <literal>request</literal>
+              aliases are also accepted for the corresponding events.  The
+              default is
+              <literal>source,format,data,data-requested,transfer,error,mode,file-transfer-mode</literal>.
             </para></listitem>
         </varlistentry>
         <varlistentry>

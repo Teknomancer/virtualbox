@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114462 2026-06-19 22:26:05Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-common.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -41,9 +41,7 @@
 #include <VBox/log.h>
 #include <VBox/GuestHost/clipboard-helper.h>
 #include <VBox/HostServices/VBoxClipboardSvc.h>
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
 #include <VBox/HostServices/VBoxSharedClipboardSvc.h>
-#endif
 
 
 /*********************************************************************************************************************************
@@ -1083,7 +1081,6 @@ VBGH_DECL(int) ShClCacheSetMultiple(PSHCLCACHE pCache, SHCLFORMATS uFmts, const 
     return rc;
 }
 
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
 /**
  * Handles clipboard formats.
  *
@@ -1365,4 +1362,3 @@ void ShClSvcClientMsgAdd(PSHCLCLIENT pClient, PSHCLCLIENTMSG pMsg, bool fAppend)
     else
         RTListPrepend(&pClient->MsgQueue, &pMsg->ListEntry);
 }
-#endif /* VBOX_WITH_SHARED_CLIPBOARD_HOST */

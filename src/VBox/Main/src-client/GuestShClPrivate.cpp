@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114454 2026-06-19 10:09:43Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -28,14 +28,11 @@
 #define LOG_GROUP LOG_GROUP_SHARED_CLIPBOARD
 #include "LoggingNew.h"
 
-#include "GuestImpl.h"
-#include "AutoCaller.h"
-
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-# include "ConsoleImpl.h"
 # include "ClipboardImpl.h"
-# include "ProgressImpl.h"
+# include "ConsoleImpl.h"
 # include "GuestShClPrivate.h"
+# include "ProgressImpl.h"
 
 # include <iprt/mem.h>
 # include <iprt/semaphore.h>
@@ -44,7 +41,6 @@
 
 # include <VMMDev.h>
 # include <VBox/VMMDevCoreTypes.h>
-
 
 # include <VBox/GuestHost/SharedClipboard.h>
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
@@ -88,7 +84,7 @@ GuestShCl* GuestShCl::s_pInstance = NULL;
  * @returns Shared Clipboard format bit, or VBOX_SHCL_FMT_NONE.
  * @param   fFormats        Shared Clipboard format mask.
  */
-static SHCLFORMAT shClMainPickHostDataFormat(SHCLFORMATS fFormats)
+static SHCLFORMAT ShClMainPickHostDataFormat(SHCLFORMATS fFormats)
 {
     if (fFormats & VBOX_SHCL_FMT_UNICODETEXT)
         return VBOX_SHCL_FMT_UNICODETEXT;
@@ -102,6 +98,7 @@ static SHCLFORMAT shClMainPickHostDataFormat(SHCLFORMATS fFormats)
 #endif
     return VBOX_SHCL_FMT_NONE;
 }
+
 
 GuestShCl::GuestShCl(Console *pConsole)
     : m_pConsole(pConsole)
@@ -505,7 +502,7 @@ int GuestShCl::reportHostDataAsync(SHCLFORMATS fFormats, SHCLSOURCE enmSource, u
 {
     if (enmSource != SHCLSOURCE_LOCAL)
         return VINF_SUCCESS;
-    if (shClMainPickHostDataFormat(fFormats) == VBOX_SHCL_FMT_NONE)
+    if (ShClMainPickHostDataFormat(fFormats) == VBOX_SHCL_FMT_NONE)
         return VINF_SUCCESS;
 
     PSHCLMAINHOSTDATAREPORTTASK pTask = (PSHCLMAINHOSTDATAREPORTTASK)RTMemAllocZ(sizeof(*pTask));
@@ -538,7 +535,7 @@ int GuestShCl::reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64
     if (enmSource != SHCLSOURCE_LOCAL)
         return VINF_SUCCESS;
 
-    SHCLFORMAT const uFormat = shClMainPickHostDataFormat(fFormats);
+    SHCLFORMAT const uFormat = ShClMainPickHostDataFormat(fFormats);
     if (uFormat == VBOX_SHCL_FMT_NONE)
         return VINF_SUCCESS;
 

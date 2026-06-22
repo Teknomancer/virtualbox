@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -29,17 +29,6 @@
 /*********************************************************************************************************************************
 *   Header Files                                                                                                                 *
 *********************************************************************************************************************************/
-#include "ClipboardSettingsImpl.h"
-#include "ClipboardFormatImpl.h"
-#include "ClipboardItemImpl.h"
-#include "ClipboardTransferImpl.h"
-#include "ClipboardTransferManagerImpl.h"
-#include "ClipboardImpl.h"
-#include "ConsoleClipboardFormats.h"
-#include "ConsoleImpl.h"
-#include "MachineImpl.h"
-#include "VMMDev.h"
-
 #include <VBox/com/array.h>
 #include <VBox/com/com.h>
 #include <VBox/com/ErrorInfo.h>
@@ -47,15 +36,18 @@
 #include <VBox/com/VirtualBox.h>
 #include <VBox/log.h>
 
-#include <iprt/env.h>
 #include <iprt/log.h>
 #include <iprt/message.h>
 #include <iprt/string.h>
 #include <iprt/test.h>
 #include <iprt/thread.h>
+#include <iprt/utf16.h>
 #include <iprt/uuid.h>
 
 #include <string.h>
+#include <vector>
+
+using namespace com;
 
 
 /*********************************************************************************************************************************
@@ -66,172 +58,47 @@ static PRTLOGGER    g_pLogger;
 
 
 /*********************************************************************************************************************************
-*   Testcase Stubs                                                                                                               *
-*********************************************************************************************************************************/
-/**
- * Testcase stub for Machine::i_addStateDependency.
- *
- * @returns COM status code.
- * @param   aDepType        State dependency type.
- * @param   aState          Where to return the machine state.
- * @param   aRegistered     Where to return the registration state.
- */
-HRESULT Machine::i_addStateDependency(StateDependency aDepType, MachineState_T *aState, BOOL *aRegistered)
-{
-    RT_NOREF(aDepType, aState, aRegistered);
-    AssertFailed();
-    return E_FAIL;
-}
-
-
-/**
- * Testcase stub for Machine::i_releaseStateDependency.
- */
-void Machine::i_releaseStateDependency()
-{
-    AssertFailed();
-}
-
-
-/**
- * Testcase stub for Console::i_addVMCaller.
- *
- * @returns COM status code.
- * @param   fQuiet          Whether to suppress error reporting.
- * @param   fAllowNullVM    Whether a NULL VM is allowed.
- */
-HRESULT Console::i_addVMCaller(bool fQuiet, bool fAllowNullVM)
-{
-    RT_NOREF(fQuiet, fAllowNullVM);
-    return E_FAIL;
-}
-
-
-/**
- * Testcase stub for Console::i_releaseVMCaller.
- */
-void Console::i_releaseVMCaller()
-{
-    AssertFailed();
-}
-
-
-/**
- * Testcase stub for Console::i_safeVMPtrRetainer.
- *
- * @returns COM status code.
- * @param   ppUVM           Where to return the VM handle.
- * @param   ppVMM           Where to return the VMM vtable.
- * @param   fQuiet          Whether to suppress error reporting.
- */
-HRESULT Console::i_safeVMPtrRetainer(PUVM *ppUVM, PCVMMR3VTABLE *ppVMM, bool fQuiet) RT_NOEXCEPT
-{
-    RT_NOREF(fQuiet);
-    *ppUVM = NULL;
-    *ppVMM = NULL;
-    return E_FAIL;
-}
-
-
-/**
- * Testcase stub for Console::i_safeVMPtrReleaser.
- *
- * @param   ppUVM           VM handle pointer to release.
- */
-void Console::i_safeVMPtrReleaser(PUVM *ppUVM)
-{
-    RT_NOREF(ppUVM);
-    AssertFailed();
-}
-
-
-/**
- * Testcase stub for Console::i_setInvalidMachineStateError.
- *
- * @returns COM status code.
- */
-HRESULT Console::i_setInvalidMachineStateError()
-{
-    return VBOX_E_INVALID_VM_STATE;
-}
-
-
-/**
- * Testcase stub for VMMDev::hgcmHostCall.
- *
- * @returns VBox status code.
- * @param   pszServiceName  HGCM service name.
- * @param   u32Function     HGCM function number.
- * @param   cParms          Number of HGCM parameters.
- * @param   paParms         HGCM parameters.
- */
-int VMMDev::hgcmHostCall(const char *pszServiceName, uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM paParms)
-{
-    RT_NOREF(pszServiceName, u32Function, cParms, paParms);
-    AssertFailed();
-    return VERR_NOT_IMPLEMENTED;
-}
-
-
-/*********************************************************************************************************************************
 *   Internal Functions                                                                                                           *
 *********************************************************************************************************************************/
 /**
- * Creates a clipboard format object for tests.
+ * Creates a clipboard format object through the public Main API.
  *
  * @returns COM status code.
+ * @param   pClipboard      Clipboard API object to use.
  * @param   pszMimeType     MIME type for the format object.
  * @param   ptrFormat       Where to return the created format object.
  */
-static HRESULT tstCreateFormat(const char *pszMimeType, ComPtr<IClipboardFormat> &ptrFormat)
+static HRESULT tstCreateFormat(IClipboard *pClipboard, const char *pszMimeType, ComPtr<IClipboardFormat> &ptrFormat)
 {
-    ComObjPtr<ClipboardFormat> ptrFormatObj;
-    HRESULT hrc = ptrFormatObj.createObject();
-    if (FAILED(hrc))
-        return hrc;
-    hrc = ptrFormatObj->init(pszMimeType);
-    if (FAILED(hrc))
-        return hrc;
-    return ptrFormatObj.queryInterfaceTo(ptrFormat.asOutParam());
+    AssertPtrReturn(pClipboard, E_POINTER);
+    return pClipboard->CreateFormat(Bstr(pszMimeType).raw(), ptrFormat.asOutParam());
 }
 
 
 /**
- * Creates a clipboard item object for tests.
+ * Creates a clipboard item object through the public Main API.
  *
  * @returns COM status code.
+ * @param   pClipboard      Clipboard API object to use.
  * @param   enmSource       Clipboard source.
  * @param   ptrFormat       Clipboard format object.
  * @param   abData          Payload bytes.
  * @param   ptrItem         Where to return the created item object.
  */
-static HRESULT tstCreateItem(ClipboardSource_T enmSource, const ComPtr<IClipboardFormat> &ptrFormat,
+static HRESULT tstCreateItem(IClipboard *pClipboard, ClipboardSource_T enmSource, const ComPtr<IClipboardFormat> &ptrFormat,
                              const std::vector<BYTE> &abData, ComPtr<IClipboardItem> &ptrItem)
 {
-    ComObjPtr<ClipboardItem> ptrItemObj;
-    HRESULT hrc = ptrItemObj.createObject();
-    if (FAILED(hrc))
-        return hrc;
-    hrc = ptrItemObj->init(0 /* aId */, enmSource, ptrFormat, abData);
-    if (FAILED(hrc))
-        return hrc;
-    return ptrItemObj.queryInterfaceTo(ptrItem.asOutParam());
-}
+    AssertPtrReturn(pClipboard, E_POINTER);
 
+    SafeArray<BYTE> aBuffer;
+    if (!abData.empty())
+    {
+        HRESULT hrc = aBuffer.initFrom(&abData[0], abData.size());
+        if (FAILED(hrc))
+            return hrc;
+    }
 
-/**
- * Checks whether a MIME type is present in a vector.
- *
- * @returns true if the MIME type is present, false otherwise.
- * @param   aFormats        MIME format vector to search.
- * @param   pszMimeType     MIME type to find.
- */
-static bool tstFormatVectorContains(const std::vector<com::Utf8Str> &aFormats, const char *pszMimeType)
-{
-    for (std::vector<com::Utf8Str>::const_iterator it = aFormats.begin(); it != aFormats.end(); ++it)
-        if (!RTStrCmp(it->c_str(), pszMimeType))
-            return true;
-    return false;
+    return pClipboard->CreateItem(enmSource, ptrFormat, ComSafeArrayAsInParam(aBuffer), ptrItem.asOutParam());
 }
 
 
@@ -242,7 +109,7 @@ static bool tstFormatVectorContains(const std::vector<com::Utf8Str> &aFormats, c
  * @param   aBuffer         Buffer to check.
  * @param   abExpected      Expected payload bytes.
  */
-static bool tstByteArrayEquals(const com::SafeArray<BYTE> &aBuffer, const std::vector<BYTE> &abExpected)
+static bool tstByteArrayEquals(const SafeArray<BYTE> &aBuffer, const std::vector<BYTE> &abExpected)
 {
     if (aBuffer.size() != abExpected.size())
         return false;
@@ -263,7 +130,7 @@ static void tstInitLogging(void)
 #endif
     static const char * const s_apszLogGroups[] = VBOX_LOGGROUP_NAMES;
     int vrc = RTLogCreate(&g_pLogger, fFlags, "all.e.l.f", "TST_CLIPBOARD_LOG",
-                      RT_ELEMENTS(s_apszLogGroups), s_apszLogGroups, RTLOGDEST_STDOUT, NULL);
+                          RT_ELEMENTS(s_apszLogGroups), s_apszLogGroups, RTLOGDEST_STDOUT, NULL);
     if (RT_SUCCESS(vrc))
     {
         vrc = RTLogGroupSettings(g_pLogger, "main.e.l+shared_clipboard.e.l.l2.f");
@@ -282,7 +149,7 @@ static void tstInitLogging(void)
  * @param   pszWhat         Operation that failed.
  * @param   errorInfo       Error information to log.
  */
-static void tstLogErrorInfo(RTTEST hTest, const char *pszWhat, const com::ErrorInfo &errorInfo)
+static void tstLogErrorInfo(RTTEST hTest, const char *pszWhat, const ErrorInfo &errorInfo)
 {
     if (!errorInfo.isBasicAvailable())
     {
@@ -328,119 +195,105 @@ static HRESULT tstWaitMachineUnlocked(RTTEST hTest, IMachine *pMachine)
 
 
 /**
- * Tests clipboard settings objects.
+ * Tests clipboard object factory methods and the returned public objects.
  *
  * @param   hTest           Test handle.
+ * @param   pClipboard      Clipboard API object to use.
  */
-static void tstClipboardSettings(RTTEST hTest)
+static void tstClipboardPublicObjects(RTTEST hTest, IClipboard *pClipboard)
 {
-    RTTestSub(hTest, "Settings");
-
-    ComObjPtr<ClipboardSettings> ptrClipboardObj;
-    HRESULT hrc = ptrClipboardObj.createObject();
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("createObject failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrClipboardObj->init();
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("init failed, hrc=%Rhrc\n", hrc));
-
-    ComPtr<IClipboardSettings> ptrClipboard;
-    hrc = ptrClipboardObj.queryInterfaceTo(ptrClipboard.asOutParam());
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("queryInterfaceTo failed, hrc=%Rhrc\n", hrc));
-
-    ClipboardMode_T enmMode = ClipboardMode_Bidirectional;
-    hrc = ptrClipboard->COMGETTER(Mode)(&enmMode);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Mode) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(enmMode == ClipboardMode_Disabled);
-
-    hrc = ptrClipboard->COMSETTER(Mode)(ClipboardMode_Bidirectional);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(Mode) failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrClipboard->COMGETTER(Mode)(&enmMode);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Mode) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(enmMode == ClipboardMode_Bidirectional);
-
-    BOOL fFileTransfersEnabled = TRUE;
-    hrc = ptrClipboard->COMGETTER(FileTransfersEnabled)(&fFileTransfersEnabled);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(FileTransfersEnabled) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(!fFileTransfersEnabled);
-
-    hrc = ptrClipboard->COMSETTER(FileTransfersEnabled)(TRUE);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(FileTransfersEnabled) failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrClipboard->COMGETTER(FileTransfersEnabled)(&fFileTransfersEnabled);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(FileTransfersEnabled) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(fFileTransfersEnabled);
-}
-
-
-/**
- * Tests clipboard format objects.
- *
- * @param   hTest           Test handle.
- */
-static void tstClipboardFormat(RTTEST hTest)
-{
-    RTTestSub(hTest, "Format object");
+    RTTestSub(hTest, "Clipboard public objects");
 
     ComPtr<IClipboardFormat> ptrFormat;
-    HRESULT hrc = tstCreateFormat("text/plain;charset=utf-8", ptrFormat);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("tstCreateFormat failed, hrc=%Rhrc\n", hrc));
+    HRESULT hrc = tstCreateFormat(pClipboard, "text/plain;charset=utf-8", ptrFormat);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("CreateFormat failed, hrc=%Rhrc\n", hrc));
 
-    com::Bstr bstrMimeType;
+    Bstr bstrMimeType;
     hrc = ptrFormat->COMGETTER(MimeType)(bstrMimeType.asOutParam());
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(MimeType) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(!RTStrCmp(com::Utf8Str(bstrMimeType).c_str(), "text/plain;charset=utf-8"));
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardFormat::COMGETTER(MimeType) failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrMimeType).c_str(), "text/plain;charset=utf-8"));
 
     hrc = ptrFormat->COMSETTER(MimeType)(Bstr("text/html").raw());
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(MimeType) failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardFormat::COMSETTER(MimeType) failed, hrc=%Rhrc\n", hrc));
     bstrMimeType.setNull();
     hrc = ptrFormat->COMGETTER(MimeType)(bstrMimeType.asOutParam());
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(MimeType) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(!RTStrCmp(com::Utf8Str(bstrMimeType).c_str(), "text/html"));
-}
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardFormat::COMGETTER(MimeType) after set failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrMimeType).c_str(), "text/html"));
 
+    ComPtr<IClipboardFormat> ptrTextFormat;
+    hrc = tstCreateFormat(pClipboard, "text/plain;charset=utf-8", ptrTextFormat);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("CreateFormat(text) failed, hrc=%Rhrc\n", hrc));
 
-/**
- * Tests console clipboard format conversion helpers.
- *
- * @param   hTest           Test handle.
- */
-static void tstConsoleClipboardFormats(RTTEST hTest)
-{
-    RTTestSub(hTest, "Clipboard formats");
+    static const char s_szText[] = "Hello from the Main clipboard testcase";
+    std::vector<BYTE> abText(sizeof(s_szText));
+    memcpy(&abText[0], s_szText, sizeof(s_szText));
 
-    RTTESTI_CHECK(consoleClipboardMimeTypeToFormat(com::Utf8Str("text/plain")) == VBOX_SHCL_FMT_UNICODETEXT);
-    RTTESTI_CHECK(consoleClipboardMimeTypeToFormat(com::Utf8Str("text/plain;charset=UTF-8")) == VBOX_SHCL_FMT_UNICODETEXT);
-    RTTESTI_CHECK(consoleClipboardMimeTypeToFormat(com::Utf8Str("text/html;charset=utf-8")) == VBOX_SHCL_FMT_HTML);
-    RTTESTI_CHECK(consoleClipboardMimeTypeToFormat(com::Utf8Str("image/x-bmp")) == VBOX_SHCL_FMT_BITMAP);
-    RTTESTI_CHECK(consoleClipboardMimeTypeToFormat(com::Utf8Str("application/octet-stream")) == VBOX_SHCL_FMT_NONE);
+    ComPtr<IClipboardItem> ptrItem;
+    hrc = tstCreateItem(pClipboard, ClipboardSource_Host, ptrTextFormat, abText, ptrItem);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("CreateItem failed, hrc=%Rhrc\n", hrc));
 
-    RTTESTI_CHECK(!RTStrCmp(consoleClipboardFormatToMimeType(VBOX_SHCL_FMT_UNICODETEXT), "text/plain;charset=utf-8"));
-    RTTESTI_CHECK(!RTStrCmp(consoleClipboardFormatToMimeType(VBOX_SHCL_FMT_HTML), "text/html"));
-    RTTESTI_CHECK(!RTStrCmp(consoleClipboardFormatToMimeType(VBOX_SHCL_FMT_BITMAP), "image/bmp"));
-    RTTESTI_CHECK(consoleClipboardFormatToMimeType(VBOX_SHCL_FMT_VALID_MASK + 1) == NULL);
+    ClipboardSource_T enmSource = ClipboardSource_Guest;
+    hrc = ptrItem->COMGETTER(Source)(&enmSource);
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Source) failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(enmSource == ClipboardSource_Host);
 
-    std::vector<com::Utf8Str> aFormats;
-    aFormats.push_back(com::Utf8Str("text/plain"));
-    aFormats.push_back(com::Utf8Str("text/html"));
-    aFormats.push_back(com::Utf8Str("image/bmp"));
+    ComPtr<IClipboardFormat> ptrItemFormat;
+    hrc = ptrItem->COMGETTER(Format)(ptrItemFormat.asOutParam());
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Format) failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(!ptrItemFormat.isNull());
+    if (ptrItemFormat.isNotNull())
+    {
+        Bstr bstrItemMimeType;
+        hrc = ptrItemFormat->COMGETTER(MimeType)(bstrItemMimeType.asOutParam());
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::Format::COMGETTER(MimeType) failed, hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrItemMimeType).c_str(), "text/plain;charset=utf-8"));
+    }
 
-    SHCLFORMATS fFormats = VBOX_SHCL_FMT_NONE;
-    HRESULT hrc = consoleClipboardMimeTypesToFormats(aFormats, &fFormats);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("consoleClipboardMimeTypesToFormats failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(fFormats == (VBOX_SHCL_FMT_UNICODETEXT | VBOX_SHCL_FMT_HTML | VBOX_SHCL_FMT_BITMAP));
+    SafeArray<BYTE> aReadText;
+    hrc = ptrItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(aReadText));
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Buffer) failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK_MSG(tstByteArrayEquals(aReadText, abText),
+                      ("IClipboardItem::COMGETTER(Buffer) returned %zu bytes, expected %zu\n", aReadText.size(), abText.size()));
 
-    aFormats.push_back(com::Utf8Str("application/x-unsupported"));
-    hrc = consoleClipboardMimeTypesToFormats(aFormats, &fFormats);
-    RTTESTI_CHECK(hrc == E_INVALIDARG);
+    ULONG cbItem = 0;
+    hrc = ptrItem->COMGETTER(Size)(&cbItem);
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Size) failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(cbItem == sizeof(s_szText));
 
-    consoleClipboardFormatsToMimeTypes(VBOX_SHCL_FMT_UNICODETEXT | VBOX_SHCL_FMT_HTML | VBOX_SHCL_FMT_BITMAP, aFormats);
-    RTTESTI_CHECK(aFormats.size() == 3);
-    RTTESTI_CHECK(tstFormatVectorContains(aFormats, "text/plain;charset=utf-8"));
-    RTTESTI_CHECK(tstFormatVectorContains(aFormats, "text/html"));
-    RTTESTI_CHECK(tstFormatVectorContains(aFormats, "image/bmp"));
+    ComPtr<IClipboardFormat> ptrHtmlFormat;
+    hrc = tstCreateFormat(pClipboard, "text/html", ptrHtmlFormat);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("CreateFormat(html) failed, hrc=%Rhrc\n", hrc));
+    hrc = ptrItem->COMSETTER(Format)(ptrHtmlFormat);
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMSETTER(Format) failed, hrc=%Rhrc\n", hrc));
+    ptrItemFormat.setNull();
+    hrc = ptrItem->COMGETTER(Format)(ptrItemFormat.asOutParam());
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Format) after set failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(!ptrItemFormat.isNull());
+    if (ptrItemFormat.isNotNull())
+    {
+        Bstr bstrItemMimeType;
+        hrc = ptrItemFormat->COMGETTER(MimeType)(bstrItemMimeType.asOutParam());
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::Format::COMGETTER(MimeType) after set failed, hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrItemMimeType).c_str(), "text/html"));
+    }
 
-#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-    RTTESTI_CHECK(consoleClipboardMimeTypeToFormat(com::Utf8Str("text/uri-list")) == VBOX_SHCL_FMT_URI_LIST);
-    RTTESTI_CHECK(!RTStrCmp(consoleClipboardFormatToMimeType(VBOX_SHCL_FMT_URI_LIST), "text/uri-list"));
-#endif
+    static const char s_szHtml[] = "<p>Hello from the Main clipboard testcase</p>";
+    SafeArray<BYTE> aHtml;
+    hrc = aHtml.initFrom(reinterpret_cast<const BYTE *>(s_szHtml), sizeof(s_szHtml));
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("SafeArray initFrom failed, hrc=%Rhrc\n", hrc));
+    hrc = ptrItem->COMSETTER(Buffer)(ComSafeArrayAsInParam(aHtml));
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMSETTER(Buffer) failed, hrc=%Rhrc\n", hrc));
+
+    SafeArray<BYTE> aReadHtml;
+    hrc = ptrItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(aReadHtml));
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Buffer) after set failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(aReadHtml.size() == sizeof(s_szHtml));
+    if (aReadHtml.size() == sizeof(s_szHtml))
+        RTTESTI_CHECK(!memcmp(aReadHtml.raw(), s_szHtml, sizeof(s_szHtml)));
+
+    hrc = ptrItem->COMGETTER(Size)(&cbItem);
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardItem::COMGETTER(Size) after set failed, hrc=%Rhrc\n", hrc));
+    RTTESTI_CHECK(cbItem == sizeof(s_szHtml));
 }
 
 
@@ -449,19 +302,22 @@ static void tstConsoleClipboardFormats(RTTEST hTest)
  *
  * @param   hTest           Test handle.
  */
-static void tstConsoleClipboardPublicApi(RTTEST hTest)
+static void tstClipboardPublicApi(RTTEST hTest)
 {
     RTTestSub(hTest, "Clipboard public API");
 
     HRESULT hrc = S_OK;
     bool fMachineRegistered = false;
     bool fMachineLocked = false;
+    bool fListenerRegistered = false;
     ComPtr<IVirtualBoxClient> ptrVirtualBoxClient;
     ComPtr<IVirtualBox> ptrVirtualBox;
     ComPtr<ISession> ptrSession;
     ComPtr<IMachine> ptrMachine;
     ComPtr<IConsole> ptrConsole;
     ComPtr<IClipboard> ptrClipboard;
+    ComPtr<IEventSource> ptrEventSource;
+    ComPtr<IEventListener> ptrListener;
 
     do
     {
@@ -483,7 +339,7 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         char szMachineName[64];
         RTStrPrintf(szMachineName, sizeof(szMachineName), "tstClipboard-%RTuuid", &uuid);
 
-        com::SafeArray<BSTR> aGroups;
+        SafeArray<BSTR> aGroups;
         hrc = ptrVirtualBox->CreateMachine(NULL,                          /* Settings file */
                                            Bstr(szMachineName).raw(),      /* Name */
                                            enmPlatformArch,
@@ -499,6 +355,17 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         ComPtr<IClipboardSettings> ptrClipboardSettings;
         hrc = ptrMachine->COMGETTER(Clipboard)(ptrClipboardSettings.asOutParam());
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(IMachine::Clipboard) failed, hrc=%Rhrc\n", hrc));
+
+        ClipboardMode_T enmInitialMode = ClipboardMode_Bidirectional;
+        hrc = ptrClipboardSettings->COMGETTER(Mode)(&enmInitialMode);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(IClipboardSettings::Mode) failed, hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK(enmInitialMode == ClipboardMode_Disabled);
+
+        BOOL fFileTransfersEnabled = TRUE;
+        hrc = ptrClipboardSettings->COMGETTER(FileTransfersEnabled)(&fFileTransfersEnabled);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(IClipboardSettings::FileTransfersEnabled) failed, hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK(!fFileTransfersEnabled);
+
         hrc = ptrClipboardSettings->COMSETTER(Mode)(ClipboardMode_Bidirectional);
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMSETTER(Mode) failed, hrc=%Rhrc\n", hrc));
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
@@ -518,7 +385,7 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
                                           ComSafeArrayNullInParam(), ptrLaunchProgress.asOutParam());
         if (FAILED(hrc))
         {
-            tstLogErrorInfo(hTest, "LaunchVMProcess", com::ErrorInfo(ptrMachine, COM_IIDOF(IMachine)));
+            tstLogErrorInfo(hTest, "LaunchVMProcess", ErrorInfo(ptrMachine, COM_IIDOF(IMachine)));
             RTTestSkipped(hTest, "LaunchVMProcess failed, hrc=%Rhrc", hrc);
             break;
         }
@@ -530,7 +397,7 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(ResultCode) failed, hrc=%Rhrc\n", hrc));
         if (FAILED((HRESULT)lrcLaunchResult))
         {
-            tstLogErrorInfo(hTest, "LaunchVMProcess progress", com::ProgressErrorInfo(ptrLaunchProgress));
+            tstLogErrorInfo(hTest, "LaunchVMProcess progress", ProgressErrorInfo(ptrLaunchProgress));
             RTTestSkipped(hTest, "LaunchVMProcess result code is %Rhrc", lrcLaunchResult);
             break;
         }
@@ -548,6 +415,9 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
 
         hrc = ptrConsole->COMGETTER(Clipboard)(ptrClipboard.asOutParam());
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(Clipboard) failed, hrc=%Rhrc\n", hrc));
+
+        tstClipboardPublicObjects(hTest, ptrClipboard);
+        RTTestSub(hTest, "Clipboard public API operations");
 
         BOOL fUseHostClipboardInitial = FALSE;
         hrc = ptrClipboard->COMGETTER(UseHostClipboard)(&fUseHostClipboardInitial);
@@ -570,12 +440,12 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         hrc = ptrClipboard->COMSETTER(UseHostClipboard)(TRUE);
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(UseHostClipboard) enabling failed, hrc=%Rhrc\n", hrc));
 
-        com::SafeArray<BSTR> aFileList;
+        SafeArray<BSTR> aFileList;
         hrc = ptrClipboard->COMGETTER(FileList)(ComSafeArrayAsOutParam(aFileList));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(FileList) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(aFileList.size() == 0);
 
-        com::SafeArray<IN_BSTR> aNewFileList;
+        SafeArray<IN_BSTR> aNewFileList;
         RTTESTI_CHECK(aNewFileList.push_back(Bstr("/tmp/tstClipboard-1").raw()));
         RTTESTI_CHECK(aNewFileList.push_back(Bstr("/tmp/tstClipboard-2").raw()));
         hrc = ptrClipboard->COMSETTER(FileList)(ComSafeArrayAsInParam(aNewFileList));
@@ -595,22 +465,21 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Transfers) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(!ptrTransfers.isNull());
 
-        ComPtr<IEventSource> ptrEventSource;
         hrc = ptrClipboard->COMGETTER(EventSource)(ptrEventSource.asOutParam());
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(EventSource) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(!ptrEventSource.isNull());
 
-        ComPtr<IEventListener> ptrListener;
         hrc = ptrEventSource->CreateListener(ptrListener.asOutParam());
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("CreateListener failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(!ptrListener.isNull());
-        com::SafeArray<VBoxEventType_T> aEventTypes;
+        SafeArray<VBoxEventType_T> aEventTypes;
         aEventTypes.push_back(VBoxEventType_OnClipboardModeChanged);
         aEventTypes.push_back(VBoxEventType_OnClipboardSourceChanged);
         aEventTypes.push_back(VBoxEventType_OnClipboardFormatChanged);
         aEventTypes.push_back(VBoxEventType_OnClipboardDataChanged);
         hrc = ptrEventSource->RegisterListener(ptrListener, ComSafeArrayAsInParam(aEventTypes), FALSE /* aActive */);
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("RegisterListener failed, hrc=%Rhrc\n", hrc));
+        fListenerRegistered = SUCCEEDED(hrc);
 
         hrc = ptrClipboardSettings->COMSETTER(Mode)(ClipboardMode_HostToGuest);
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(Mode) live change failed, hrc=%Rhrc\n", hrc));
@@ -643,21 +512,21 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
             }
         }
 
-        com::SafeIfaceArray<IClipboardFormat> aReadFormats;
+        SafeIfaceArray<IClipboardFormat> aReadFormats;
         hrc = ptrClipboard->ReadFormats(ComSafeArrayAsOutParam(aReadFormats));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("ReadFormats failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(aReadFormats.size() == 0);
 
         ComPtr<IClipboardFormat> ptrTextFormat;
-        hrc = tstCreateFormat("text/plain;charset=utf-8", ptrTextFormat);
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("tstCreateFormat failed, hrc=%Rhrc\n", hrc));
+        hrc = tstCreateFormat(ptrClipboard, "text/plain;charset=utf-8", ptrTextFormat);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateFormat(text) failed, hrc=%Rhrc\n", hrc));
 
         BOOL fAvailable = TRUE;
         hrc = ptrClipboard->IsFormatAvailable(ClipboardSource_Host, ptrTextFormat, &fAvailable);
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IsFormatAvailable failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(!fAvailable);
 
-        com::SafeIfaceArray<IClipboardFormat> aSupportedFormats;
+        SafeIfaceArray<IClipboardFormat> aSupportedFormats;
         hrc = ptrClipboard->GetSupportedFormats(ClipboardSource_Host, ComSafeArrayAsOutParam(aSupportedFormats));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("GetSupportedFormats failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(aSupportedFormats.size() == 0);
@@ -668,30 +537,31 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
 
         std::vector<BYTE> abBuffer;
         ComPtr<IClipboardItem> ptrEmptyItem;
-        hrc = tstCreateItem(ClipboardSource_Host, ptrTextFormat, abBuffer, ptrEmptyItem);
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("tstCreateItem(empty) failed, hrc=%Rhrc\n", hrc));
+        hrc = tstCreateItem(ptrClipboard, ClipboardSource_Host, ptrTextFormat, abBuffer, ptrEmptyItem);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateItem(empty) failed, hrc=%Rhrc\n", hrc));
         ComPtr<IClipboardItem> ptrWrittenItem;
         hrc = ptrClipboard->WriteData(ClipboardAction_Copy, ptrEmptyItem, ptrWrittenItem.asOutParam());
-        RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("WriteData with empty buffer returned hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK_MSG(hrc == VBOX_E_SHCL_NO_DATA, ("WriteData with empty buffer returned hrc=%Rhrc\n", hrc));
 
         ComPtr<IClipboardFormat> ptrUnsupportedFormat;
-        hrc = tstCreateFormat("application/x-unsupported", ptrUnsupportedFormat);
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("tstCreateFormat(unsupported) failed, hrc=%Rhrc\n", hrc));
+        hrc = tstCreateFormat(ptrClipboard, "application/x-unsupported", ptrUnsupportedFormat);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateFormat(unsupported) failed, hrc=%Rhrc\n", hrc));
         abBuffer.push_back('x');
         ComPtr<IClipboardItem> ptrUnsupportedItem;
-        hrc = tstCreateItem(ClipboardSource_Host, ptrUnsupportedFormat, abBuffer, ptrUnsupportedItem);
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("tstCreateItem(unsupported) failed, hrc=%Rhrc\n", hrc));
+        hrc = tstCreateItem(ptrClipboard, ClipboardSource_Host, ptrUnsupportedFormat, abBuffer, ptrUnsupportedItem);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateItem(unsupported) failed, hrc=%Rhrc\n", hrc));
         ptrWrittenItem.setNull();
         hrc = ptrClipboard->WriteData(ClipboardAction_Copy, ptrUnsupportedItem, ptrWrittenItem.asOutParam());
-        RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("WriteData with unsupported MIME type returned hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK_MSG(hrc == VBOX_E_SHCL_FORMAT_NOT_SUPPORTED,
+                          ("WriteData with unsupported MIME type returned hrc=%Rhrc\n", hrc));
 
         static const char s_szRoundTripText[] = "tstClipboard host to guest round-trip data";
         std::vector<BYTE> abRoundTripBuffer(sizeof(s_szRoundTripText));
         memcpy(&abRoundTripBuffer[0], s_szRoundTripText, sizeof(s_szRoundTripText));
 
         ComPtr<IClipboardItem> ptrTextItem;
-        hrc = tstCreateItem(ClipboardSource_Host, ptrTextFormat, abRoundTripBuffer, ptrTextItem);
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("tstCreateItem(text) failed, hrc=%Rhrc\n", hrc));
+        hrc = tstCreateItem(ptrClipboard, ClipboardSource_Host, ptrTextFormat, abRoundTripBuffer, ptrTextItem);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateItem(text) failed, hrc=%Rhrc\n", hrc));
         ptrWrittenItem.setNull();
         hrc = ptrClipboard->WriteData(ClipboardAction_Copy, ptrTextItem, ptrWrittenItem.asOutParam());
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("WriteData failed, hrc=%Rhrc\n", hrc));
@@ -715,9 +585,36 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
             RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Type)[%zu] failed, hrc=%Rhrc\n", i, hrc));
             RTTESTI_CHECK_MSG(enmType == s_aExpectedEvents[i],
                               ("GetEvent[%zu] returned type %d, expected %d\n", i, enmType, s_aExpectedEvents[i]));
+            if (enmType == VBoxEventType_OnClipboardFormatChanged)
+            {
+                ComPtr<IClipboardFormatChangedEvent> ptrFormatEvent = ptrEvent;
+                RTTESTI_CHECK(!ptrFormatEvent.isNull());
+                if (ptrFormatEvent.isNotNull())
+                {
+                    ClipboardSource_T enmSource = ClipboardSource_Custom;
+                    hrc = ptrFormatEvent->COMGETTER(ClipboardSource)(&enmSource);
+                    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(ClipboardSource)(format event) failed, hrc=%Rhrc\n", hrc));
+                    RTTESTI_CHECK_MSG(enmSource == ClipboardSource_Host,
+                                      ("Format event source %d, expected %d\n", enmSource, ClipboardSource_Host));
+
+                    SafeIfaceArray<IClipboardFormat> aEventFormats;
+                    hrc = ptrFormatEvent->COMGETTER(Formats)(ComSafeArrayAsOutParam(aEventFormats));
+                    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Formats)(format event) failed, hrc=%Rhrc\n", hrc));
+                    RTTESTI_CHECK_MSG(aEventFormats.size() == 1,
+                                      ("Format event returned %zu formats, expected 1\n", aEventFormats.size()));
+                    if (aEventFormats.size() == 1)
+                    {
+                        Bstr bstrEventMimeType;
+                        hrc = aEventFormats[0]->COMGETTER(MimeType)(bstrEventMimeType.asOutParam());
+                        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(MimeType)(format event) failed, hrc=%Rhrc\n", hrc));
+                        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrEventMimeType).c_str(), "text/plain;charset=utf-8"));
+                    }
+                }
+            }
         }
         if (ptrListener.isNotNull())
             ptrEventSource->UnregisterListener(ptrListener);
+        fListenerRegistered = false;
         ptrListener.setNull();
 
         aReadFormats.setNull();
@@ -736,26 +633,30 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         RTTESTI_CHECK(aSupportedFormats.size() == 1);
 
         ClipboardSource_T enmGuestReadSource = ClipboardSource_Custom;
-        com::Bstr bstrGuestReadMimeType;
-        com::SafeArray<BYTE> aGuestReadBuffer;
+        Bstr bstrGuestReadMimeType;
+        SafeArray<BYTE> aGuestReadBuffer;
         hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, &enmGuestReadSource, bstrGuestReadMimeType.asOutParam(),
                                        ComSafeArrayAsOutParam(aGuestReadBuffer));
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("ReadDataRaw(host -> guest) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(enmGuestReadSource == ClipboardSource_Host);
-        RTTESTI_CHECK(!RTStrCmp(com::Utf8Str(bstrGuestReadMimeType).c_str(), "text/plain;charset=utf-8"));
+        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrGuestReadMimeType).c_str(), "text/plain;charset=utf-8"));
         RTTESTI_CHECK_MSG(tstByteArrayEquals(aGuestReadBuffer, abRoundTripBuffer),
                           ("ReadDataRaw(host -> guest) returned %zu bytes, expected %zu\n",
                            aGuestReadBuffer.size(), abRoundTripBuffer.size()));
 
+        hrc = ptrClipboardSettings->COMSETTER(Mode)(ClipboardMode_Bidirectional);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc),
+                                ("COMSETTER(Mode) bidirectional before guest write failed, hrc=%Rhrc\n", hrc));
+
         ClipboardSource_T enmWrittenSource = ClipboardSource_Custom;
-        com::Bstr bstrWrittenMimeType;
-        com::SafeArray<BYTE> aWrittenBuffer;
+        Bstr bstrWrittenMimeType;
+        SafeArray<BYTE> aWrittenBuffer;
         hrc = ptrClipboard->WriteDataRaw(ClipboardAction_Copy, ClipboardSource_Guest, bstrGuestReadMimeType.raw(),
                                         ComSafeArrayAsInParam(aGuestReadBuffer), &enmWrittenSource,
                                         bstrWrittenMimeType.asOutParam(), ComSafeArrayAsOutParam(aWrittenBuffer));
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("WriteDataRaw(guest -> host) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(enmWrittenSource == ClipboardSource_Guest);
-        RTTESTI_CHECK(!RTStrCmp(com::Utf8Str(bstrWrittenMimeType).c_str(), "text/plain;charset=utf-8"));
+        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrWrittenMimeType).c_str(), "text/plain;charset=utf-8"));
         RTTESTI_CHECK_MSG(tstByteArrayEquals(aWrittenBuffer, abRoundTripBuffer),
                           ("WriteDataRaw(guest -> host) returned %zu bytes, expected %zu\n",
                            aWrittenBuffer.size(), abRoundTripBuffer.size()));
@@ -777,13 +678,13 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
             RTTESTI_CHECK(!ptrRoundTripFormat.isNull());
             if (ptrRoundTripFormat.isNotNull())
             {
-                com::Bstr bstrRoundTripMimeType;
+                Bstr bstrRoundTripMimeType;
                 hrc = ptrRoundTripFormat->COMGETTER(MimeType)(bstrRoundTripMimeType.asOutParam());
                 RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(MimeType)(round-trip) failed, hrc=%Rhrc\n", hrc));
-                RTTESTI_CHECK(!RTStrCmp(com::Utf8Str(bstrRoundTripMimeType).c_str(), "text/plain;charset=utf-8"));
+                RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrRoundTripMimeType).c_str(), "text/plain;charset=utf-8"));
             }
 
-            com::SafeArray<BYTE> aRoundTripBuffer;
+            SafeArray<BYTE> aRoundTripBuffer;
             hrc = ptrReadItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(aRoundTripBuffer));
             RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Buffer)(round-trip) failed, hrc=%Rhrc\n", hrc));
             RTTESTI_CHECK_MSG(tstByteArrayEquals(aRoundTripBuffer, abRoundTripBuffer),
@@ -794,13 +695,14 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         std::vector<ComPtr<IClipboardFormat> > vecFormats;
         vecFormats.push_back(ptrTextFormat);
         vecFormats.push_back(ptrUnsupportedFormat);
-        com::SafeIfaceArray<IClipboardFormat> aWriteFormats(vecFormats);
+        SafeIfaceArray<IClipboardFormat> aWriteFormats(vecFormats);
         hrc = ptrClipboard->WriteFormats(ComSafeArrayAsInParam(aWriteFormats));
-        RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("WriteFormats with unsupported MIME type returned hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK_MSG(hrc == VBOX_E_SHCL_FORMAT_NOT_SUPPORTED,
+                          ("WriteFormats with unsupported MIME type returned hrc=%Rhrc\n", hrc));
 
         vecFormats.clear();
         vecFormats.push_back(ptrTextFormat);
-        com::SafeIfaceArray<IClipboardFormat> aWriteTextFormats(vecFormats);
+        SafeIfaceArray<IClipboardFormat> aWriteTextFormats(vecFormats);
         hrc = ptrClipboard->WriteFormats(ComSafeArrayAsInParam(aWriteTextFormats));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("WriteFormats failed, hrc=%Rhrc\n", hrc));
 
@@ -818,6 +720,10 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         RTTESTI_CHECK(aReadFormats.size() == 0);
     } while (0);
 
+    if (fListenerRegistered && ptrEventSource.isNotNull() && ptrListener.isNotNull())
+        ptrEventSource->UnregisterListener(ptrListener);
+    ptrListener.setNull();
+    ptrEventSource.setNull();
     ptrClipboard.setNull();
 
     if (fMachineLocked && !ptrConsole.isNull())
@@ -846,7 +752,7 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
         HRESULT hrcWait = tstWaitMachineUnlocked(hTest, ptrMachine);
         RTTESTI_CHECK_MSG(SUCCEEDED(hrcWait), ("Waiting for machine unlock failed, hrc=%Rhrc\n", hrcWait));
 
-        com::SafeIfaceArray<IMedium> aMedia;
+        SafeIfaceArray<IMedium> aMedia;
         HRESULT hrcCleanup = ptrMachine->Unregister(CleanupMode_DetachAllReturnHardDisksOnly, ComSafeArrayAsOutParam(aMedia));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrcCleanup), ("Unregister failed, hrc=%Rhrc\n", hrcCleanup));
         if (SUCCEEDED(hrcCleanup))
@@ -864,152 +770,6 @@ static void tstConsoleClipboardPublicApi(RTTEST hTest)
 }
 
 
-/**
- * Tests clipboard item objects.
- *
- * @param   hTest           Test handle.
- */
-static void tstClipboardItem(RTTEST hTest)
-{
-    RTTestSub(hTest, "Item object");
-
-    ComPtr<IClipboardFormat> ptrTextFormat;
-    HRESULT hrc = tstCreateFormat("text/plain;charset=utf-8", ptrTextFormat);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("tstCreateFormat failed, hrc=%Rhrc\n", hrc));
-
-    const char szText[] = "Hello from the Main clipboard testcase";
-    std::vector<BYTE> abText(sizeof(szText));
-    memcpy(&abText[0], szText, sizeof(szText));
-
-    ComPtr<IClipboardItem> ptrItem;
-    hrc = tstCreateItem(ClipboardSource_Host, ptrTextFormat, abText, ptrItem);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("tstCreateItem failed, hrc=%Rhrc\n", hrc));
-
-    ClipboardSource_T enmSource = ClipboardSource_Guest;
-    hrc = ptrItem->COMGETTER(Source)(&enmSource);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Source) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(enmSource == ClipboardSource_Host);
-
-    ComPtr<IClipboardFormat> ptrFormat;
-    hrc = ptrItem->COMGETTER(Format)(ptrFormat.asOutParam());
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Format) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(ptrFormat == ptrTextFormat);
-
-    com::SafeArray<BYTE> abReadText;
-    hrc = ptrItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(abReadText));
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Buffer) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(abReadText.size() == sizeof(szText));
-    if (abReadText.size() == sizeof(szText))
-        RTTESTI_CHECK(!memcmp(abReadText.raw(), szText, sizeof(szText)));
-
-    ULONG cbItem = 0;
-    hrc = ptrItem->COMGETTER(Size)(&cbItem);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Size) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(cbItem == sizeof(szText));
-
-    ComPtr<IClipboardFormat> ptrHtmlFormat;
-    hrc = tstCreateFormat("text/html", ptrHtmlFormat);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("tstCreateFormat failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrItem->COMSETTER(Format)(ptrHtmlFormat);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(Format) failed, hrc=%Rhrc\n", hrc));
-    ptrFormat.setNull();
-    hrc = ptrItem->COMGETTER(Format)(ptrFormat.asOutParam());
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Format) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(ptrFormat == ptrHtmlFormat);
-
-    const char szHtml[] = "<p>Hello from the Main clipboard testcase</p>";
-    com::SafeArray<BYTE> abHtml;
-    hrc = abHtml.initFrom(reinterpret_cast<const BYTE *>(szHtml), sizeof(szHtml));
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("SafeArray initFrom failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrItem->COMSETTER(Buffer)(ComSafeArrayAsInParam(abHtml));
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(Buffer) failed, hrc=%Rhrc\n", hrc));
-
-    com::SafeArray<BYTE> abReadHtml;
-    hrc = ptrItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(abReadHtml));
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Buffer) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(abReadHtml.size() == sizeof(szHtml));
-    if (abReadHtml.size() == sizeof(szHtml))
-        RTTESTI_CHECK(!memcmp(abReadHtml.raw(), szHtml, sizeof(szHtml)));
-
-    hrc = ptrItem->COMGETTER(Size)(&cbItem);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Size) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(cbItem == sizeof(szHtml));
-}
-
-
-/**
- * Tests clipboard transfer objects and manager operations.
- *
- * @param   hTest           Test handle.
- */
-static void tstClipboardTransfers(RTTEST hTest)
-{
-    RTTestSub(hTest, "Transfers");
-
-    ComObjPtr<ClipboardTransferManager> ptrTransfersObj;
-    HRESULT hrc = ptrTransfersObj.createObject();
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("create transfer manager failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrTransfersObj->init();
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("transfer manager init failed, hrc=%Rhrc\n", hrc));
-
-    ComPtr<IClipboardTransferManager> ptrTransfers;
-    hrc = ptrTransfersObj.queryInterfaceTo(ptrTransfers.asOutParam());
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("transfer manager queryInterfaceTo failed, hrc=%Rhrc\n", hrc));
-
-    ComPtr<IClipboardFormat> ptrTextFormat;
-    hrc = tstCreateFormat("text/plain", ptrTextFormat);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("tstCreateFormat failed, hrc=%Rhrc\n", hrc));
-    std::vector<BYTE> abText(4, 'T');
-    ComPtr<IClipboardItem> ptrItem;
-    hrc = tstCreateItem(ClipboardSource_Guest, ptrTextFormat, abText, ptrItem);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("tstCreateItem failed, hrc=%Rhrc\n", hrc));
-
-    ComObjPtr<ClipboardTransfer> ptrTransferObj;
-    hrc = ptrTransferObj.createObject();
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("create transfer failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrTransferObj->init(1 /* aId */, ClipboardAction_Copy, ptrItem, NULL);
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("transfer init failed, hrc=%Rhrc\n", hrc));
-
-    ComPtr<IClipboardTransfer> ptrTransfer;
-    hrc = ptrTransferObj.queryInterfaceTo(ptrTransfer.asOutParam());
-    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("transfer queryInterfaceTo failed, hrc=%Rhrc\n", hrc));
-
-    ULONG idTransfer = 0;
-    hrc = ptrTransfer->COMGETTER(Id)(&idTransfer);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Id) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(idTransfer == 1);
-
-    ClipboardAction_T enmAction = ClipboardAction_Invalid;
-    hrc = ptrTransfer->COMGETTER(Action)(&enmAction);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Action) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(enmAction == ClipboardAction_Copy);
-
-    hrc = ptrTransfers->Add(ptrTransfer);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("transfer Add failed, hrc=%Rhrc\n", hrc));
-
-    com::SafeIfaceArray<IClipboardTransfer> aTransfers;
-    hrc = ptrTransfers->COMGETTER(Transfers)(ComSafeArrayAsOutParam(aTransfers));
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Transfers) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(aTransfers.size() == 1);
-
-    hrc = ptrTransfers->Cancel(ptrTransfer);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("transfer Cancel failed, hrc=%Rhrc\n", hrc));
-    aTransfers.setNull();
-    hrc = ptrTransfers->COMGETTER(Transfers)(ComSafeArrayAsOutParam(aTransfers));
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Transfers) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(aTransfers.size() == 0);
-
-    hrc = ptrTransfers->Add(ptrTransfer);
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("transfer Add failed, hrc=%Rhrc\n", hrc));
-    hrc = ptrTransfers->Reset();
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("transfer Reset failed, hrc=%Rhrc\n", hrc));
-    aTransfers.setNull();
-    hrc = ptrTransfers->COMGETTER(Transfers)(ComSafeArrayAsOutParam(aTransfers));
-    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Transfers) failed, hrc=%Rhrc\n", hrc));
-    RTTESTI_CHECK(aTransfers.size() == 0);
-}
-
-
 int main()
 {
     RTTEST hTest;
@@ -1021,20 +781,15 @@ int main()
 
     RTTestBanner(hTest);
 
-    HRESULT hrc = com::Initialize();
+    HRESULT hrc = Initialize();
     if (FAILED(hrc))
     {
         RTTestFailed(hTest, "Failed to initialize COM, hrc=%Rhrc", hrc);
         return RTTestSummaryAndDestroy(hTest);
     }
 
-    tstClipboardSettings(hTest);
-    tstClipboardFormat(hTest);
-    tstConsoleClipboardFormats(hTest);
-    tstConsoleClipboardPublicApi(hTest);
-    tstClipboardItem(hTest);
-    tstClipboardTransfers(hTest);
+    tstClipboardPublicApi(hTest);
 
-    com::Shutdown();
+    Shutdown();
     return RTTestSummaryAndDestroy(hTest);
 }

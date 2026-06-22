@@ -1,4 +1,4 @@
-/* $Id: VBoxManageClipboard.cpp 114364 2026-06-15 19:23:16Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageClipboard.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of the clipboard command.
  */
@@ -527,6 +527,42 @@ static bool clipboardGetVerboseText(const Utf8Str &strMimeType, const BYTE *pbDa
 
 
 /**
+ * Gets the MIME type of a clipboard format.
+ *
+ * @returns COM status code.
+ * @param   ptrFormat       Clipboard format to inspect.
+ * @param   strMimeType     Where to return the MIME type.
+ */
+static HRESULT clipboardGetFormatMimeType(const ComPtr<IClipboardFormat> &ptrFormat, Utf8Str &strMimeType)
+{
+    if (ptrFormat.isNull())
+        return E_FAIL;
+
+    Bstr bstrMimeType;
+    HRESULT hrc = ptrFormat->COMGETTER(MimeType)(bstrMimeType.asOutParam());
+    if (FAILED(hrc))
+        return hrc;
+
+    strMimeType = bstrMimeType;
+    return S_OK;
+}
+
+
+static const char *clipboardActionToString(ClipboardAction_T enmAction)
+{
+    switch (enmAction)
+    {
+        case ClipboardAction_Copy:   return "copy";
+        case ClipboardAction_Cut:    return "cut";
+        case ClipboardAction_Paste:  return "paste";
+        case ClipboardAction_Custom: return "custom";
+        default:                     break;
+    }
+    return "unknown";
+}
+
+
+/**
  * Prints a clipboard event carrying an item.
  *
  * @param   enmFormat       Output format.
@@ -621,6 +657,141 @@ static void clipboardPrintEventItem(CLIPBOARDLISTENFMT enmFormat, const char *ps
 
 
 /**
+ * Prints a clipboard format-changed event.
+ *
+ * @param   enmFormat       Output format.
+ * @param   ptrFormatEvent  Format-changed event object to print.
+ */
+static void clipboardPrintFormatChangedEvent(CLIPBOARDLISTENFMT enmFormat,
+                                             const ComPtr<IClipboardFormatChangedEvent> &ptrFormatEvent)
+{
+    ClipboardSource_T enmSource = ClipboardSource_Host;
+    HRESULT hrc = ptrFormatEvent->COMGETTER(ClipboardSource)(&enmSource);
+
+    SafeIfaceArray<IClipboardFormat> aFormats;
+    if (SUCCEEDED(hrc))
+        hrc = ptrFormatEvent->COMGETTER(Formats)(ComSafeArrayAsOutParam(aFormats));
+
+    std::vector<Utf8Str> vecMimeTypes;
+    if (SUCCEEDED(hrc))
+    {
+        for (size_t i = 0; i < aFormats.size(); ++i)
+        {
+            Utf8Str strMimeType;
+            hrc = clipboardGetFormatMimeType(aFormats[i], strMimeType);
+            if (FAILED(hrc))
+                break;
+            vecMimeTypes.push_back(strMimeType);
+        }
+    }
+
+    if (enmFormat == CLIPBOARDLISTENFMT_JSON)
+    {
+        RTStrmWrite(g_pStdOut, RT_STR_TUPLE("{\"event\":\"format-changed\""));
+        if (SUCCEEDED(hrc))
+        {
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"source\":"));
+            clipboardJsonString(ShClHlpSourceToString(enmSource));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"formats\":["));
+            for (size_t i = 0; i < vecMimeTypes.size(); ++i)
+            {
+                if (i)
+                    RTStrmPutCh(g_pStdOut, ',');
+                clipboardJsonString(vecMimeTypes[i].c_str());
+            }
+            RTStrmPutCh(g_pStdOut, ']');
+        }
+        RTStrmWrite(g_pStdOut, RT_STR_TUPLE("}\n"));
+    }
+    else if (enmFormat == CLIPBOARDLISTENFMT_MACHINE_READABLE)
+    {
+        RTPrintf("event=\"format-changed\"");
+        if (SUCCEEDED(hrc))
+        {
+            RTPrintf(" source=\"%s\"", ShClHlpSourceToString(enmSource));
+            for (size_t i = 0; i < vecMimeTypes.size(); ++i)
+                RTPrintf(" format=\"%s\"", vecMimeTypes[i].c_str());
+        }
+        RTPrintf("\n");
+    }
+    else
+    {
+        RTPrintf("clipboard: format-changed");
+        if (SUCCEEDED(hrc))
+        {
+            RTPrintf(" source=%s formats=", ShClHlpSourceToString(enmSource));
+            for (size_t i = 0; i < vecMimeTypes.size(); ++i)
+            {
+                if (i)
+                    RTPrintf(",");
+                RTPrintf("%s", vecMimeTypes[i].c_str());
+            }
+        }
+        RTPrintf("\n");
+    }
+}
+
+
+/**
+ * Prints a clipboard data-requested event.
+ *
+ * @param   enmFormat       Output format.
+ * @param   ptrRequestEvent Data-requested event object to print.
+ */
+static void clipboardPrintDataRequestedEvent(CLIPBOARDLISTENFMT enmFormat,
+                                             const ComPtr<IClipboardDataRequestedEvent> &ptrRequestEvent)
+{
+    ULONG uRequestId = 0;
+    ClipboardAction_T enmAction = ClipboardAction_Copy;
+    ClipboardSource_T enmSource = ClipboardSource_Host;
+    ComPtr<IClipboardFormat> ptrFormat;
+
+    HRESULT hrc = ptrRequestEvent->COMGETTER(RequestId)(&uRequestId);
+    if (SUCCEEDED(hrc))
+        hrc = ptrRequestEvent->COMGETTER(Action)(&enmAction);
+    if (SUCCEEDED(hrc))
+        hrc = ptrRequestEvent->COMGETTER(ClipboardSource)(&enmSource);
+    if (SUCCEEDED(hrc))
+        hrc = ptrRequestEvent->COMGETTER(Format)(ptrFormat.asOutParam());
+
+    Utf8Str strMimeType;
+    if (SUCCEEDED(hrc))
+        hrc = clipboardGetFormatMimeType(ptrFormat, strMimeType);
+
+    if (enmFormat == CLIPBOARDLISTENFMT_JSON)
+    {
+        RTStrmWrite(g_pStdOut, RT_STR_TUPLE("{\"event\":\"data-requested\""));
+        if (SUCCEEDED(hrc))
+        {
+            RTStrmPrintf(g_pStdOut, ",\"request-id\":%RU32,\"action\":", (uint32_t)uRequestId);
+            clipboardJsonString(clipboardActionToString(enmAction));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"source\":"));
+            clipboardJsonString(ShClHlpSourceToString(enmSource));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"format\":"));
+            clipboardJsonString(strMimeType.c_str());
+        }
+        RTStrmWrite(g_pStdOut, RT_STR_TUPLE("}\n"));
+    }
+    else if (enmFormat == CLIPBOARDLISTENFMT_MACHINE_READABLE)
+    {
+        RTPrintf("event=\"data-requested\"");
+        if (SUCCEEDED(hrc))
+            RTPrintf(" request-id=\"%RU32\" action=\"%s\" source=\"%s\" format=\"%s\"",
+                     (uint32_t)uRequestId, clipboardActionToString(enmAction), ShClHlpSourceToString(enmSource), strMimeType.c_str());
+        RTPrintf("\n");
+    }
+    else
+    {
+        RTPrintf("clipboard: data-requested");
+        if (SUCCEEDED(hrc))
+            RTPrintf(" request-id=%RU32 action=%s source=%s format=%s",
+                     (uint32_t)uRequestId, clipboardActionToString(enmAction), ShClHlpSourceToString(enmSource), strMimeType.c_str());
+        RTPrintf("\n");
+    }
+}
+
+
+/**
  * Prints a clipboard event without additional payload.
  *
  * @param   enmFormat       Output format.
@@ -677,9 +848,7 @@ static void clipboardPrintEvent(CLIPBOARDLISTENFMT enmFormat, const ComPtr<IEven
         case VBoxEventType_OnClipboardFormatChanged:
         {
             ComPtr<IClipboardFormatChangedEvent> ptrFormatEvent = ptrEvent;
-            ComPtr<IClipboardItem> ptrItem;
-            ptrFormatEvent->COMGETTER(Item)(ptrItem.asOutParam());
-            clipboardPrintEventItem(enmFormat, "format-changed", ptrItem, false /* fVerbose */);
+            clipboardPrintFormatChangedEvent(enmFormat, ptrFormatEvent);
             break;
         }
         case VBoxEventType_OnClipboardDataChanged:
@@ -688,6 +857,12 @@ static void clipboardPrintEvent(CLIPBOARDLISTENFMT enmFormat, const ComPtr<IEven
             ComPtr<IClipboardItem> ptrItem;
             ptrDataEvent->COMGETTER(Item)(ptrItem.asOutParam());
             clipboardPrintEventItem(enmFormat, "data-changed", ptrItem, fVerbose);
+            break;
+        }
+        case VBoxEventType_OnClipboardDataRequested:
+        {
+            ComPtr<IClipboardDataRequestedEvent> ptrRequestEvent = ptrEvent;
+            clipboardPrintDataRequestedEvent(enmFormat, ptrRequestEvent);
             break;
         }
         case VBoxEventType_OnClipboardTransfer:
@@ -1188,6 +1363,7 @@ static bool clipboardParseEventList(const char *pszEvents, SafeArray<VBoxEventTy
         aEventTypes.push_back(VBoxEventType_OnClipboardSourceChanged);
         aEventTypes.push_back(VBoxEventType_OnClipboardFormatChanged);
         aEventTypes.push_back(VBoxEventType_OnClipboardDataChanged);
+        aEventTypes.push_back(VBoxEventType_OnClipboardDataRequested);
         aEventTypes.push_back(VBoxEventType_OnClipboardTransfer);
         aEventTypes.push_back(VBoxEventType_OnClipboardError);
         aEventTypes.push_back(VBoxEventType_OnClipboardModeChanged);
@@ -1214,6 +1390,9 @@ static bool clipboardParseEventList(const char *pszEvents, SafeArray<VBoxEventTy
         else if (   !RTStrICmp(psz, "data")
                  || !RTStrICmp(psz, "data-changed"))
             aEventTypes.push_back(VBoxEventType_OnClipboardDataChanged);
+        else if (   !RTStrICmp(psz, "data-requested")
+                 || !RTStrICmp(psz, "request"))
+            aEventTypes.push_back(VBoxEventType_OnClipboardDataRequested);
         else if (!RTStrICmp(psz, "transfer"))
             aEventTypes.push_back(VBoxEventType_OnClipboardTransfer);
         else if (!RTStrICmp(psz, "error"))

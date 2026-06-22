@@ -1,4 +1,4 @@
-/* $Id: clipboard-helper.cpp 114402 2026-06-17 12:35:45Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-helper.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Helper functions.
  */
@@ -612,6 +612,7 @@ const char *ShClHlpVBoxEventTypeToString(uint32_t uEventType)
         case 127: return "OnClipboardFormatChanged";
         case 128: return "OnClipboardDataChanged";
         case 129: return "OnClipboardTransfer";
+        case 130: return "OnClipboardDataRequested";
         default:  break;
     }
 

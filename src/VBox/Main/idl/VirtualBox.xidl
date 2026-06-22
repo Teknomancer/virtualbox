@@ -28589,8 +28589,13 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
         See <link to="IClipboardTransferEvent">IClipboardTransferEvent</link>.
       </desc>
     </const>
+    <const name="OnClipboardDataRequested" value="130">
+      <desc>
+        See <link to="IClipboardDataRequestedEvent">IClipboardDataRequestedEvent</link>.
+      </desc>
+    </const>
     <!-- End event marker -->
-    <const name="End" value="130">
+    <const name="End" value="131">
       <desc>
         Must be last event, used for iterations and structures relying on numerical event values.
       </desc>
@@ -29511,15 +29516,56 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardFormatChangedEvent" extends="IClipboardEvent"
-    uuid="cbd01fa4-894f-461d-96c1-894836a69ce0"
+    uuid="be0f74cd-4d2c-4e7e-8c26-57f0d762efc2"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardFormatChanged"
     >
     <desc>
-      Notification when clipboard formats change.
+      Notification when the set of available clipboard formats changes.
     </desc>
     <attribute name="clipboardSource" type="ClipboardSource" readonly="yes">
       <desc>
         Clipboard source whose formats changed.
+      </desc>
+    </attribute>
+    <attribute name="formats" type="IClipboardFormat" safearray="yes" readonly="yes">
+      <desc>
+        Full set of clipboard formats currently available for the clipboard source.
+      </desc>
+    </attribute>
+  </interface>
+
+  <interface
+    name="IClipboardDataRequestedEvent" extends="IClipboardEvent"
+    uuid="4424fdfc-02b9-4e41-9a95-7eb2c2be50f5"
+    wsmap="managed" autogen="VBoxEvent" id="OnClipboardDataRequested"
+    >
+    <desc>
+      Notification when clipboard data is requested, for example by the guest.
+      An API client may use this event to decide whether and how to supply the
+      requested clipboard data.
+
+      The inherited item attribute may be NULL or may contain implementation
+      specific request context. The request details are provided by the
+      attributes below.
+    </desc>
+    <attribute name="requestId" type="unsigned long" readonly="yes">
+      <desc>
+        Unique identifier for this clipboard data request.
+      </desc>
+    </attribute>
+    <attribute name="action" type="ClipboardAction" readonly="yes">
+      <desc>
+        Clipboard action associated with the request.
+      </desc>
+    </attribute>
+    <attribute name="clipboardSource" type="ClipboardSource" readonly="yes">
+      <desc>
+        Clipboard source from which data is requested.
+      </desc>
+    </attribute>
+    <attribute name="format" type="IClipboardFormat" readonly="yes">
+      <desc>
+        Clipboard format requested.
       </desc>
     </attribute>
   </interface>

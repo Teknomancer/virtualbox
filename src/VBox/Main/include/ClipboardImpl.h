@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114405 2026-06-17 13:18:09Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -133,6 +133,9 @@ private:
                            ClipboardSource_T aSource,
                            const com::Utf8Str &aMimeType,
                            const std::vector<BYTE> &aBuffer);
+    void i_fireDataRequested(ClipboardAction_T aAction,
+                             ClipboardSource_T aSource,
+                             const com::Utf8Str &aMimeType);
 
     struct Data;
     Data *mData;

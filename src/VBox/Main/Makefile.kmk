@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114449 2026-06-19 08:31:23Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1297,8 +1297,8 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
   	src-client/GuestSessionImpl.cpp
  endif
  ifdef VBOX_WITH_SHARED_CLIPBOARD
-  VBoxC_DEFS += VBOX_WITH_SHARED_CLIPBOARD_HOST
   VBoxC_SOURCES += \
+  	src-client/GuestShClHelpers.cpp \
   	src-client/GuestShClPrivate.cpp \
   	src-client/GuestShClSvcExt.cpp \
   	src-client/VBoxSharedClipboardSvc-utils.cpp \
