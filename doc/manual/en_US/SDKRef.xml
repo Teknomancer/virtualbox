@@ -3211,11 +3211,69 @@ es.unregisterListener(listener); </screen></para>
   <chapter id="vboxclipboardapi">
     <title>Main API changes for clipboard support</title>
 
-    <para>VirtualBox 7.XX adds a public Main API for interacting with the
+    <para>The Main API provides public interfaces for interacting with the
     clipboard of a running virtual machine and separates console clipboard
-    operations from persistent machine clipboard settings.</para>
+    operations from persistent machine clipboard settings. The API also removes
+    the old implicit host clipboard handling from Main -- so Main no longer reads
+    from or writes to the host operating system clipboard by itself; API clients
+    such as front-ends, tools, or automation programs decide whether and when
+    host clipboard data is made available to a guest.</para>
 
-    <sect1>
+    <sect1 id="vboxclipboardapi-overview">
+      <title>Overview and motivation</title>
+
+      <para>Historically, parts of the clipboard data path were handled
+      automatically inside Main. This made simple front-ends convenient, but it
+      also hid policy decisions in a layer that cannot reliably know the
+      front-end's user interface state, host clipboard ownership, security
+      policy, or data-transfer timing. It was also difficult for external API
+      clients to implement clipboard behavior that matches their own event loop,
+      authentication model, or host platform clipboard API.</para>
+
+      <para>The public clipboard API moves those policy decisions to API clients.
+      Main remains responsible for VM-facing clipboard state, mode enforcement,
+      event delivery, and communication with the Guest Additions. The API client
+      is responsible for integrating with the host operating system clipboard or
+      any other clipboard source it wants to expose.</para>
+
+      <para>The practical implications are:</para>
+
+      <itemizedlist>
+        <listitem>
+          <para>A front-end or automation client must explicitly publish formats
+          and data if host-to-guest clipboard sharing is desired. If no client
+          does this, the guest will not receive host clipboard data even when the
+          VM clipboard mode allows host-to-guest transfers.</para>
+        </listitem>
+        <listitem>
+          <para>Guest-to-host data is exposed through events and read methods;
+          Main does not automatically place the data into the host operating
+          system clipboard. A client that wants this behavior must listen for
+          guest clipboard changes and write the data to the host clipboard itself.</para>
+        </listitem>
+        <listitem>
+          <para>Clipboard format announcements and payload transfer are separate
+          operations. This allows eager providers to announce available MIME
+          formats first and transfer potentially expensive payload data only when
+          the guest requests it.</para>
+        </listitem>
+        <listitem>
+          <para>Clipboard direction and file-transfer settings are still enforced
+          by the VM clipboard configuration.  The public API does not bypass
+          <link linkend="IClipboardSettings__mode">IClipboardSettings::mode</link>
+          or
+          <link linkend="IClipboardSettings__fileTransfersEnabled">IClipboardSettings::fileTransfersEnabled</link>.</para>
+        </listitem>
+      </itemizedlist>
+
+      <para>API clients should not expect Main to synthesize host clipboard
+      changes, poll the host clipboard, access platform-native clipboard APIs,
+      or retain a live provider after the client stops handling events. Main can
+      cache data that was explicitly written through the API, but guest-facing
+      reads only use data supplied in response to the current guest request.</para>
+    </sect1>
+
+    <sect1 id="vboxclipboardapi-console">
       <title>Console clipboard API</title>
 
       <para>The new <link linkend="IConsole__clipboard">IConsole::clipboard</link>
@@ -3225,7 +3283,6 @@ es.unregisterListener(listener); </screen></para>
       clipboard formats and data, including raw payload buffers for command-line
       and scripting clients, checking format availability, resetting clipboard
       state, and tracking clipboard transfers.</para>
-
 
       <para>The console clipboard API adds the following interfaces:</para>
 
@@ -3254,9 +3311,131 @@ es.unregisterListener(listener); </screen></para>
       <link linkend="ClipboardSource">ClipboardSource</link>,
       <link linkend="ClipboardTransferState">ClipboardTransferState</link>, and
       <link linkend="ClipboardError">ClipboardError</link> enumerations.</para>
+
+      <para>Clipboard providers which announce formats before payload data is
+      available should listen for the waitable
+      <link linkend="IClipboardDataRequestedEvent">IClipboardDataRequestedEvent</link>
+      event.  When this event is delivered, the provider can decide whether to
+      satisfy the request and publish matching data by calling
+      <link linkend="IClipboard__writeData">IClipboard::writeData</link> or
+      <link linkend="IClipboard__writeDataRaw">IClipboard::writeDataRaw</link>
+      with the requested action, source, and format.  Passive listeners must call
+      <link linkend="IEventSource__eventProcessed">IEventSource::eventProcessed</link>
+      when handling is complete, including when no data is supplied, so that the
+      requesting side can continue.</para>
     </sect1>
 
-    <sect1>
+    <sect1 id="vboxclipboardapi-provider">
+      <title>Implementing a clipboard provider</title>
+
+      <para>A clipboard provider is an API client that owns or can retrieve
+      clipboard payload data and makes it available to the guest through
+      <link linkend="IClipboard">IClipboard</link>. A graphical front-end will
+      usually bridge the host operating system clipboard. A command-line tool or
+      test program may instead provide data from a file, standard input, or an
+      application-specific source.</para>
+
+      <para>A typical eager provider uses the following pattern:</para>
+
+      <orderedlist>
+        <listitem>
+          <para>Open a session for the running VM and obtain
+          <link linkend="IConsole__clipboard">IConsole::clipboard</link>.</para>
+        </listitem>
+        <listitem>
+          <para>Check or configure
+          <link linkend="IClipboardSettings__mode">IClipboardSettings::mode</link>
+          so that the intended transfer direction is allowed.</para>
+        </listitem>
+        <listitem>
+          <para>Register a listener on
+          <link linkend="IClipboard__eventSource">IClipboard::eventSource</link>
+          for
+          <computeroutput>OnClipboardDataRequested</computeroutput> and,
+          optionally,
+          <computeroutput>OnClipboardError</computeroutput>.</para>
+        </listitem>
+        <listitem>
+          <para>Create one or more <link linkend="IClipboardFormat">IClipboardFormat</link>
+          objects and call
+          <link linkend="IClipboard__writeFormats">IClipboard::writeFormats</link>
+          to announce the formats which can be supplied.</para>
+        </listitem>
+        <listitem>
+          <para>When an
+          <link linkend="IClipboardDataRequestedEvent">IClipboardDataRequestedEvent</link>
+          arrives, inspect the requested action, source, and format. Only answer
+          requests that your provider intentionally supports.</para>
+        </listitem>
+        <listitem>
+          <para>Retrieve or convert the payload data, then call
+          <link linkend="IClipboard__writeData">IClipboard::writeData</link> or
+          <link linkend="IClipboard__writeDataRaw">IClipboard::writeDataRaw</link>
+          using the requested action, source, and MIME type.</para>
+        </listitem>
+        <listitem>
+          <para>If the listener is passive and the event is waitable, call
+          <link linkend="IEventSource__eventProcessed">IEventSource::eventProcessed</link>
+          after the request has been handled. Do this even when the provider
+          declines the request, otherwise the guest-facing request can wait until
+          it times out.</para>
+        </listitem>
+        <listitem>
+          <para>Keep the provider running while it owns the advertised formats.
+          If the provider exits, it should no longer be expected to answer guest
+          data requests.</para>
+        </listitem>
+      </orderedlist>
+
+      <para>The following pseudo-code illustrates the request/response flow:</para>
+
+<programlisting>clipboard = console.clipboard
+source = ClipboardSource_Host
+format = clipboard.createFormat("text/plain;charset=utf-8")
+eventSource = clipboard.eventSource
+listener = eventSource.createListener()
+eventSource.registerListener(listener,
+                             [ OnClipboardDataRequested, OnClipboardError ],
+                             false /* passive */)
+
+clipboard.writeFormats([ format ])
+
+while providerIsRunning:
+    event = eventSource.getEvent(listener, timeout)
+    if event.type == OnClipboardDataRequested:
+        request = IClipboardDataRequestedEvent(event)
+        if request.clipboardSource == source and request.format.mimeType == format.mimeType:
+            data = readOrConvertHostClipboardData(request.format.mimeType)
+            clipboard.writeDataRaw(request.action,
+                                   request.clipboardSource,
+                                   request.format.mimeType,
+                                   data)
+        if event.waitable:
+            eventSource.eventProcessed(listener, event)</programlisting>
+
+      <para>Providers should validate all guest-controlled request data, including
+      the requested MIME type, and should avoid exposing host clipboard contents
+      unless the user or application policy allows it.  If conversion is
+      expensive or may block on a host UI thread, keep the waitable event timeout
+      in mind and either complete the request promptly or acknowledge the event
+      without providing data.</para>
+    </sect1>
+
+    <sect1 id="vboxclipboardapi-consumer">
+      <title>Consuming guest clipboard data</title>
+
+      <para>To implement guest-to-host clipboard behavior, listen for clipboard
+      source, format, and data events from
+      <link linkend="IClipboard__eventSource">IClipboard::eventSource</link>.
+      When guest data is available, call
+      <link linkend="IClipboard__readData">IClipboard::readData</link> or
+      <link linkend="IClipboard__readDataRaw">IClipboard::readDataRaw</link>
+      and then decide whether to place the returned payload into the host
+      operating system clipboard.  Main will not perform that host clipboard
+      update automatically.</para>
+    </sect1>
+
+    <sect1 id="vboxclipboardapi-settings">
       <title>Clipboard settings</title>
 
       <para>The persistent clipboard configuration of a virtual machine is now
@@ -3267,6 +3446,61 @@ es.unregisterListener(listener); </screen></para>
       attribute controls the configured clipboard direction, and
       <link linkend="IClipboardSettings__fileTransfersEnabled">IClipboardSettings::fileTransfersEnabled</link>
       controls whether clipboard file transfers are allowed.</para>
+    </sect1>
+
+    <sect1 id="vboxclipboardapi-compatibility">
+      <title>Compatibility notes and known issues</title>
+
+      <para>The clipboard API changes are not backwards compatible for API
+      clients that used the old clipboard-related Main interfaces. In
+      particular, <link linkend="IMachine__clipboard">IMachine::clipboard</link>
+      now returns <link linkend="IClipboardSettings">IClipboardSettings</link>
+      for persistent VM configuration, while the live console clipboard object is
+      obtained from
+      <link linkend="IConsole__clipboard">IConsole::clipboard</link>. Clients
+      should be updated to use the settings interface for configuration and the
+      console interface for live clipboard data.</para>
+
+      <para>The former implicit host clipboard handling and the
+      <computeroutput>useHostClipboard</computeroutput> control are removed from
+      the public API. Appplications which relied on Main to synchronize the host
+      operating system clipboard must now implement that synchronization
+      explicitly by listening for clipboard events and calling the corresponding
+      read and write methods.</para>
+
+      <para>Older Guest Additions are still supported by the host service where
+      possible, including legacy protocol details needed by existing guests.
+      However, older API clients are not expected to receive the new event
+      metadata or request/response behavior until they are rebuilt or updated for
+      the new interfaces.</para>
+
+      <para>Known limitations and issues to consider:</para>
+
+      <itemizedlist>
+        <listitem>
+          <para>A data request event is waitable and has a finite delivery wait.
+          If no listener acknowledges the event or supplies matching data in
+          time, the guest request may complete without clipboard data.</para>
+        </listitem>
+        <listitem>
+          <para>Only formats understood by the shared clipboard implementation can
+          be advertised or transferred.  Use
+          <link linkend="IClipboard__getSupportedFormats">IClipboard::getSupportedFormats</link>
+          to inspect the supported formats for a source.</para>
+        </listitem>
+        <listitem>
+          <para>Multiple API clients can listen for clipboard events, but they
+          should coordinate ownership of the host clipboard. If several clients
+          answer the same request, the most recent matching API write determines
+          what Main can provide to the guest.</para>
+        </listitem>
+        <listitem>
+          <para>Host platform clipboard APIs often have thread-affinity or user
+          session restictions. For example, graphical front-ends may need to
+          access the host clipboard on their UI thread and then answer Main API
+          requests from that event loop.</para>
+        </listitem>
+      </itemizedlist>
     </sect1>
   </chapter>
 
