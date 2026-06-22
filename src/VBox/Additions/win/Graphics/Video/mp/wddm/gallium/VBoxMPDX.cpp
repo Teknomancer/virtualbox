@@ -1,4 +1,4 @@
-/* $Id: VBoxMPDX.cpp 114359 2026-06-15 14:38:33Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxMPDX.cpp 114469 2026-06-22 09:48:44Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VirtualBox Windows Guest Graphics Driver - Direct3D (DX) driver function.
  */
@@ -64,6 +64,17 @@ void SvgaCursorUpdatePosition(PVBOXMP_DEVEXT pDevExt, int xPos, int yPos)
     PVBOXWDDM_EXT_VMSVGA pSvga = pDevExt->pGa->hw.pSvga;
     SVGARegWrite(pSvga, SVGA_REG_CURSOR_X, xPos);
     SVGARegWrite(pSvga, SVGA_REG_CURSOR_Y, yPos);
+}
+
+
+uint64_t SvgaGetGraphicsMemorySize(PVBOXMP_DEVEXT pDevExt)
+{
+    if (   pDevExt->pGa
+        && pDevExt->pGa->hw.pSvga)
+    {
+        return pDevExt->pGa->hw.pSvga->u64GBObjectMemSize;
+    }
+    return 0;
 }
 
 

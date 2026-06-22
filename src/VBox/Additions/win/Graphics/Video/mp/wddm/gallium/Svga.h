@@ -1,4 +1,4 @@
-/* $Id: Svga.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: Svga.h 114469 2026-06-22 09:48:44Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VirtualBox Windows Guest Mesa3D - Gallium driver VMSVGA.
  */
@@ -230,6 +230,7 @@ typedef struct VBOXWDDM_EXT_VMSVGA
     uint32_t u32MaxMobSize;   /** SVGA_REG_MOB_MAX_SIZE */
     uint32_t u32MaxTextureWidth;  /** SVGA3D_DEVCAP_MAX_TEXTURE_WIDTH */
     uint32_t u32MaxTextureHeight; /** SVGA3D_DEVCAP_MAX_TEXTURE_HEIGHT */
+    uint64_t u64GBObjectMemSize; /** SVGA_REG_GBOBJECT_MEM_SIZE_KB * 1024 */
 
     uint32_t u32MaxTextureLevels; /** 1 + floor(log2(max(u32MaxTextureWidth, u32MaxTextureHeight))) */
 
