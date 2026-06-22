@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.h 114477 2026-06-22 11:30:42Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.h 114480 2026-06-22 12:04:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Data Control protocols family helpers.
  */
@@ -202,7 +202,6 @@ void VBClWaylandXdcpCtxReInit(vbox_wl_xdcp_base_ctx_t *pCtx);
 /**
  * Terminates (uninitalizes) the common context.
  *
- * @returns VBox status code.
  * @param   pCtx                Pointer to the context to terminate.
  */
 void VBClWaylandXdcpCtxTerm(vbox_wl_xdcp_base_ctx_t *pCtx);
