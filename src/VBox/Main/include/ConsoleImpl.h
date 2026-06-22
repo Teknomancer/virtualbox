@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.h 114439 2026-06-18 16:11:06Z klaus.espenlaub@oracle.com $ */
+/* $Id: ConsoleImpl.h 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class definition
  */
@@ -217,8 +217,6 @@ public:
 
     const ComPtr<IMachine> &i_machine() const { return mMachine; }
     const Bstr &i_getId() const { return mstrUuid; }
-
-    bool i_useHostClipboard();
 
     /**
      * Returns the live console clipboard object.

@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -419,27 +419,6 @@ static void tstClipboardPublicApi(RTTEST hTest)
         tstClipboardPublicObjects(hTest, ptrClipboard);
         RTTestSub(hTest, "Clipboard public API operations");
 
-        BOOL fUseHostClipboardInitial = FALSE;
-        hrc = ptrClipboard->COMGETTER(UseHostClipboard)(&fUseHostClipboardInitial);
-        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(UseHostClipboard) failed, hrc=%Rhrc\n", hrc));
-
-        BOOL const fUseHostClipboardToggled = !fUseHostClipboardInitial;
-        hrc = ptrClipboard->COMSETTER(UseHostClipboard)(fUseHostClipboardToggled);
-        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(UseHostClipboard) toggling failed, hrc=%Rhrc\n", hrc));
-        BOOL fUseHostClipboard = fUseHostClipboardInitial;
-        hrc = ptrClipboard->COMGETTER(UseHostClipboard)(&fUseHostClipboard);
-        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(UseHostClipboard) after toggling failed, hrc=%Rhrc\n", hrc));
-        RTTESTI_CHECK(fUseHostClipboard == fUseHostClipboardToggled);
-
-        hrc = ptrClipboard->COMSETTER(UseHostClipboard)(fUseHostClipboardInitial);
-        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(UseHostClipboard) restoring failed, hrc=%Rhrc\n", hrc));
-        hrc = ptrClipboard->COMGETTER(UseHostClipboard)(&fUseHostClipboard);
-        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(UseHostClipboard) after restoring failed, hrc=%Rhrc\n", hrc));
-        RTTESTI_CHECK(fUseHostClipboard == fUseHostClipboardInitial);
-
-        hrc = ptrClipboard->COMSETTER(UseHostClipboard)(TRUE);
-        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(UseHostClipboard) enabling failed, hrc=%Rhrc\n", hrc));
-
         SafeArray<BSTR> aFileList;
         hrc = ptrClipboard->COMGETTER(FileList)(ComSafeArrayAsOutParam(aFileList));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(FileList) failed, hrc=%Rhrc\n", hrc));
@@ -534,6 +513,12 @@ static void tstClipboardPublicApi(RTTEST hTest)
         ComPtr<IClipboardItem> ptrReadItem;
         hrc = ptrClipboard->ReadData(ClipboardAction_Copy, ptrReadItem.asOutParam());
         RTTESTI_CHECK_MSG(FAILED(hrc), ("ReadData without available formats unexpectedly succeeded\n"));
+
+        ComPtr<IEvent> ptrUnexpectedEvent;
+        hrc = ptrEventSource->GetEvent(ptrListener, 0 /* aTimeout */, ptrUnexpectedEvent.asOutParam());
+        RTTESTI_CHECK_MSG(   hrc == VBOX_E_OBJECT_NOT_FOUND
+                          || ptrUnexpectedEvent.isNull(),
+                          ("Unexpected clipboard event before explicit API write, hrc=%Rhrc\n", hrc));
 
         std::vector<BYTE> abBuffer;
         ComPtr<IClipboardItem> ptrEmptyItem;

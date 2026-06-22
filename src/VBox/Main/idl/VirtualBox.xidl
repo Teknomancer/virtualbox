@@ -15809,7 +15809,7 @@
 
   <interface
     name="IClipboard" extends="$unknown"
-    uuid="019ed598-4e48-7f91-9c93-06c174e95161"
+    uuid="0a7b2548-69ed-44a4-a7eb-76b7fb90d094"
     wsmap="managed"
     reservedMethods="8" reservedAttributes="8"
     >
@@ -15835,11 +15835,6 @@
       </desc>
     </attribute>
 
-    <attribute name="useHostClipboard" type="boolean">
-      <desc>
-        Whether this console clipboard uses the host clipboard.
-      </desc>
-    </attribute>
 
     <method name="createFormat">
       <desc>

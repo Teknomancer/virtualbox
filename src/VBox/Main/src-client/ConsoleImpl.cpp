@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -2199,20 +2199,6 @@ HRESULT Console::getClipboard(ComPtr<IClipboard> &aClipboard)
 }
 
 
-/**
- * Checks whether the console clipboard uses the host clipboard.
- *
- * @returns true if the host clipboard should be used, false otherwise.
- */
-bool Console::i_useHostClipboard()
-{
-#ifdef VBOX_WITH_SHARED_CLIPBOARD
-    AssertReturn(mClipboard, true);
-    return mClipboard->i_useHostClipboard();
-#else
-    return false;
-#endif
-}
 
 
 HRESULT Console::getDebugger(ComPtr<IMachineDebugger> &aDebugger)

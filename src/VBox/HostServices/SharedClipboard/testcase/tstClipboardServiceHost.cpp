@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114425 2026-06-18 08:30:00Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -48,9 +48,16 @@ extern "C" DECLCALLBACK(DECLEXPORT(int)) VBoxHGCMSvcLoad (VBOXHGCMSVCFNTABLE *pt
  * Note: These host service tests exercise the HGCM service layer,
  *       not the platform clipboard backends!
  */
+static bool g_fBackendConnectCalled = false;
+static bool g_fBackendConnectHeadless = false;
 static int tstShClBackendInit(PSHCLBACKEND pBackend, VBOXHGCMSVCFNTABLE *pTable) { pBackend->pHelpers = pTable->pHelpers; return VINF_SUCCESS; }
 static void tstShClBackendDestroy(PSHCLBACKEND) { }
-static int tstShClBackendConnect(PSHCLBACKEND, PSHCLCLIENT, bool) { return VINF_SUCCESS; }
+static int tstShClBackendConnect(PSHCLBACKEND, PSHCLCLIENT, bool fHeadless)
+{
+    g_fBackendConnectCalled = true;
+    g_fBackendConnectHeadless = fHeadless;
+    return VINF_SUCCESS;
+}
 static int tstShClBackendDisconnect(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
 static int tstShClBackendSync(PSHCLBACKEND, PSHCLCLIENT) { return VINF_SUCCESS; }
 static int tstShClBackendReportFormats(PSHCLBACKEND, PSHCLCLIENT, SHCLFORMATS) { AssertFailed(); return VINF_SUCCESS; }
@@ -455,6 +462,52 @@ static void testSetHeadless(void)
     RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
 }
 
+static void testHeadlessBackendConnect(void)
+{
+    struct VBOXHGCMSVCPARM parms[1];
+    VBOXHGCMSVCFNTABLE table;
+    int rc;
+
+    RTTestISub("Testing HOST_FN_SET_HEADLESS backend connect propagation");
+    rc = setupTable(&table);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    HGCMSvcSetU32(&parms[0], false);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_HEADLESS, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+    RT_ZERO(g_Client);
+    g_fBackendConnectCalled = false;
+    g_fBackendConnectHeadless = true;
+    rc = table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(g_fBackendConnectCalled);
+    RTTESTI_CHECK_MSG(g_fBackendConnectHeadless == false,
+                      ("g_fBackendConnectHeadless=%RTbool\n", g_fBackendConnectHeadless));
+    rc = table.pfnDisconnect(NULL, 1 /* clientId */, &g_Client);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+
+    HGCMSvcSetU32(&parms[0], true);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_HEADLESS, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+    RT_ZERO(g_Client);
+    g_fBackendConnectCalled = false;
+    g_fBackendConnectHeadless = false;
+    rc = table.pfnConnect(NULL, 2 /* clientId */, &g_Client, 0, 0);
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(g_fBackendConnectCalled);
+    RTTESTI_CHECK_MSG(g_fBackendConnectHeadless == true,
+                      ("g_fBackendConnectHeadless=%RTbool\n", g_fBackendConnectHeadless));
+    rc = table.pfnDisconnect(NULL, 2 /* clientId */, &g_Client);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+
+    HGCMSvcSetU32(&parms[0], false);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_HEADLESS, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = table.pfnUnload(NULL);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+}
+
 static void testHostCall(void)
 {
     testSetMode();
@@ -462,6 +515,7 @@ static void testHostCall(void)
     testSetTransferMode();
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
     testSetHeadless();
+    testHeadlessBackendConnect();
 }
 
 int main(int argc, char *argv[])

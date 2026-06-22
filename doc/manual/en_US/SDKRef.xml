@@ -3226,10 +3226,6 @@ es.unregisterListener(listener); </screen></para>
       and scripting clients, checking format availability, resetting clipboard
       state, and tracking clipboard transfers.</para>
 
-      <para>The IConsole::useHostClipboard attribute has moved to
-      <link linkend="IClipboard__useHostClipboard">IClipboard::useHostClipboard</link>.
-      This is not a persistent setting and must be explicitly set on every VM start
-      or restore.</para>
 
       <para>The console clipboard API adds the following interfaces:</para>
 

@@ -94,7 +94,8 @@
  *  Operates on the VBOX_SHCL_TRANSFERS_XXX defines.
  * @since   6.1  */
 #define VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE  2
-/** Run headless on the host, i.e. do not touch the host clipboard. */
+/** Deprecated for > 7.2: Run headless on the host, i.e. do not touch the host clipboard.
+ *  Kept for compatibility with older Guest Additions and legacy service clients. */
 #define VBOX_SHCL_HOST_FN_SET_HEADLESS       3
 
 /** Reports cancellation of the current operation to the guest.

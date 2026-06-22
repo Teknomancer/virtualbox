@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -299,7 +299,6 @@ struct Clipboard::Data
     Data()
         : mParent(NULL)
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-        , mfUseHostClipboard(true)
         , mSource(ClipboardSource_Custom)
         , mfHaveLastItem(false)
         , mLastItemSource(ClipboardSource_Custom)
@@ -318,8 +317,6 @@ struct Clipboard::Data
     ComObjPtr<ClipboardTransferManager> mTransfers;
     /** Clipboard event source. */
     ComObjPtr<EventSource> mEventSource;
-    /** Whether the console clipboard uses the host clipboard. */
-    bool mfUseHostClipboard;
     /** Last known active clipboard source. */
     ClipboardSource_T mSource;
     /** Whether last clipboard item data is available. */
@@ -707,99 +704,6 @@ HRESULT Clipboard::getEventSource(ComPtr<IEventSource> &aEventSource)
 }
 
 
-/**
- * Returns whether the console clipboard uses the host clipboard.
- *
- * @returns COM status code.
- * @param   aUseHostClipboard  Where to return the current state.
- */
-HRESULT Clipboard::getUseHostClipboard(BOOL *aUseHostClipboard)
-{
-#ifndef VBOX_WITH_SHARED_CLIPBOARD
-    ReturnComNotImplemented();
-#else /* VBOX_WITH_SHARED_CLIPBOARD */
-
-    if (!aUseHostClipboard)
-        return setError(VBOX_E_SHCL_ERROR, tr("The useHostClipboard output argument must not be NULL"));
-
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-    if (!mData)
-        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-    *aUseHostClipboard = mData->mfUseHostClipboard;
-    return S_OK;
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
-}
-
-
-/**
- * Sets whether the console clipboard uses the host clipboard.
- *
- * @returns COM status code.
- * @param   aUseHostClipboard  New host clipboard usage state.
- */
-HRESULT Clipboard::setUseHostClipboard(BOOL aUseHostClipboard)
-{
-#ifndef VBOX_WITH_SHARED_CLIPBOARD
-    ReturnComNotImplemented();
-#else /* VBOX_WITH_SHARED_CLIPBOARD */
-
-    Log2Func(("aUseHostClipboard=%RTbool\n", RT_BOOL(aUseHostClipboard)));
-    bool const fUseHostClipboard = RT_BOOL(aUseHostClipboard);
-    Console *pParent = NULL;
-    bool fChanged = false;
-    {
-        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-        if (!mData)
-            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-
-        if (mData->mfUseHostClipboard != fUseHostClipboard)
-        {
-            mData->mfUseHostClipboard = fUseHostClipboard;
-            pParent = mData->mParent;
-            fChanged = true;
-        }
-    }
-
-    if (fChanged)
-    {
-        LogFunc(("Host clipboard usage changed: fUseHostClipboard=%RTbool, pParent=%p\n", fUseHostClipboard, pParent));
-        LogRel(("Shared Clipboard: %s using host clipboard\n", fUseHostClipboard ? "Enabled" : "Disabled"));
-
-        if (pParent)
-        {
-            AutoCaller autoCaller(pParent);
-            HRESULT hrc = autoCaller.hrc();
-            if (FAILED(hrc))
-                return setError(VBOX_E_SHCL_ERROR, tr("Accessing the parent console failed (%Rhrc)"), hrc);
-
-            Console::SafeVMPtrQuiet ptrVM(pParent);
-            if (ptrVM.isOk())
-            {
-                VMMDev *pVMMDev = pParent->i_getVMMDev();
-                ptrVM.release();
-                if (pVMMDev)
-                {
-                    VBOXHGCMSVCPARM parm;
-                    HGCMSvcSetU32(&parm, !fUseHostClipboard);
-                    int vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_SET_HEADLESS, 1, &parm);
-                    if (RT_FAILURE(vrc))
-                    {
-                        LogFunc(("Setting headless mode failed: fHeadless=%RTbool, vrc=%Rrc\n", !fUseHostClipboard, vrc));
-                        LogRelMax2(16, ("Shared Clipboard: Failed to %s host clipboard integration, vrc=%Rrc\n",
-                                       fUseHostClipboard ? "enable" : "disable", vrc));
-                        return pParent->setErrorBoth(VBOX_E_IPRT_ERROR, vrc,
-                                                     Console::tr("Setting shared clipboard headless mode failed with %Rrc"),
-                                                     vrc);
-                    }
-                    Log2Func(("Set headless mode: fHeadless=%RTbool\n", !fUseHostClipboard));
-                }
-            }
-        }
-    }
-
-    return S_OK;
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
-}
 
 
 /**
@@ -1755,17 +1659,6 @@ HRESULT Clipboard::i_reset()
 }
 
 
-/**
- * Checks whether the console clipboard uses the host clipboard.
- *
- * @returns true if the host clipboard should be used, false otherwise.
- */
-bool Clipboard::i_useHostClipboard()
-{
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-    AssertPtrReturn(mData, true);
-    return mData->mfUseHostClipboard;
-}
 
 
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS

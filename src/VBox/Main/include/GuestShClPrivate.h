@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114454 2026-06-19 10:09:43Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -30,8 +30,6 @@
 #ifndef RT_WITHOUT_PRAGMA_ONCE
 # pragma once
 #endif
-
-#include <iprt/thread.h>
 
 #include <VBox/HostServices/VBoxClipboardExt.h>
 #include <VBox/HostServices/VBoxSharedClipboardSvc.h>
@@ -143,8 +141,6 @@ public:
     int readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData);
     int reportFormatsToGuest(SHCLFORMATS fFormats);
     int reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource);
-    int reportHostDataAsync(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64_t uSeq);
-    int reportHostData(SHCLFORMATS fFormats, SHCLSOURCE enmSource, uint64_t uSeq);
     int reportError(const char *pcszId, int vrc, const char *pcszMsgFmt, ...);
     int RegisterServiceExtension(PFNHGCMSVCEXT pfnExtension, void *pvExtension);
     int UnregisterServiceExtension(PFNHGCMSVCEXT pfnExtension);
@@ -155,7 +151,6 @@ public:
     /** @name Static low-level HGCM callback handler.
      * @{ */
     static DECLCALLBACK(int) hgcmDispatcher(void *pvExtension, uint32_t u32Function, void *pvParms, uint32_t cbParms);
-    static DECLCALLBACK(int) reportHostDataThread(RTTHREAD hThread, void *pvUser);
     /** @}  */
 
 protected:

@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -70,7 +70,6 @@ public:
     HRESULT i_transferCancel(ULONG aTransferId);
     HRESULT i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual);
     HRESULT i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSource, uint32_t fFormat, const void *pvData, uint32_t cbData);
-    bool i_useHostClipboard();
 
     void i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify = false);
     void i_fireClipboardError(const com::Utf8Str &aId, const com::Utf8Str &aErrMsg, LONG aRc);
@@ -87,8 +86,6 @@ private:
     HRESULT setFileList(const std::vector<com::Utf8Str> &aFileList);
     HRESULT getTransfers(ComPtr<IClipboardTransferManager> &aTransfers);
     HRESULT getEventSource(ComPtr<IEventSource> &aEventSource);
-    HRESULT getUseHostClipboard(BOOL *aUseHostClipboard);
-    HRESULT setUseHostClipboard(BOOL aUseHostClipboard);
     HRESULT createFormat(const com::Utf8Str &aMimeType,
                          ComPtr<IClipboardFormat> &aFormat);
     HRESULT createItem(ClipboardSource_T aSource,

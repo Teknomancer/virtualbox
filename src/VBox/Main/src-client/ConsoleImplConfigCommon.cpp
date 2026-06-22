@@ -1,4 +1,4 @@
-/* $Id: ConsoleImplConfigCommon.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImplConfigCommon.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation - VM Configuration Bits.
  *
@@ -4006,13 +4006,6 @@ int Console::i_configVmmDev(ComPtr<IMachine> pMachine, BusAssignmentManager *pBu
             vrc = i_getClipboard()->i_changeMode(enmClipboardMode);
             AssertLogRelMsg(RT_SUCCESS(vrc), ("Shared Clipboard: Failed to set initial clipboard mode (%d): vrc=%Rrc\n",
                                              enmClipboardMode, vrc));
-
-            /* Setup the service. */
-            VBOXHGCMSVCPARM parm;
-            HGCMSvcSetU32(&parm, !i_useHostClipboard());
-            vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_SET_HEADLESS, 1, &parm);
-            AssertLogRelMsg(RT_SUCCESS(vrc), ("Shared Clipboard: Failed to set initial headless mode (%RTbool): vrc=%Rrc\n",
-                                             !i_useHostClipboard(), vrc));
 
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
             AssertPtrReturn(i_getClipboard(), VERR_INVALID_POINTER);
