@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114476 2026-06-22 11:29:33Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -145,9 +145,9 @@ int VBClWaylandClipboardQueryHostData(PSHCLCONTEXT pCtx, const char *pszMimeType
         && ShClCacheGet(&pCtx->Wl.OtherCache, uVBoxFmt) == NULL
         && cbVBoxData > 0)
     {
-        int rc2 = ShClCacheSet(&pCtx->Wl.OtherCache, uVBoxFmt, pvVBoxData, cbVBoxData);
-        if (RT_SUCCESS(rc2))
-            pvVBoxData = NULL;
+        /** @todo one copy too many here, but it has the benefit of heap api
+         * consistency (e.g. drop-in electric heap fencing in a source file). */
+        ShClCacheSet(&pCtx->Wl.OtherCache, uVBoxFmt, pvVBoxData, cbVBoxData);
     }
     RTCritSectLeave(&pCtx->Wl.CritSect);
 
