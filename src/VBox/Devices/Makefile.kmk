@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114488 2026-06-22 16:24:15Z aleksey.ilyushin@oracle.com $
+# $Id: Makefile.kmk 114491 2026-06-22 17:29:41Z aleksey.ilyushin@oracle.com $
 ## @file
 # Top-level sub-makefile for the devices, drivers and services.
 #
@@ -1430,11 +1430,7 @@ if !defined(VBOX_ONLY_EXTPACKS) && "$(intersects $(KBUILD_TARGET_ARCH),$(VBOX_SU
   $$(tstVBoxLibssh_0_OUTDIR)/VBoxLibSshLazyLoad.asm: $(PATH_SUB_CURRENT)/Network/VBoxLibSsh.def $(VBOX_DEF_2_LAZY_LOAD) | $$(dir $$@)
 	$(call MSG_TOOL,VBoxDef2LazyLoad,tstVBoxLibssh,$(filter %.def, $^),$@)
 	$(QUIET)$(RM) -f -- "$@"
-  ifeq ($(KBUILD_TARGET),win)
 	$(VBOX_DEF_2_LAZY_LOAD) --explicit-load-function --library VBoxLibSsh --output "$@" $(filter %.def, $^)
-  else
-	$(VBOX_DEF_2_LAZY_LOAD) --system --explicit-load-function --library VBoxLibSsh --output "$@" $(filter %.def, $^)
-  endif
  endif
 
  #
