@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-dcp.cpp 114478 2026-06-22 11:48:44Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-dcp.cpp 114479 2026-06-22 12:02:16Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Data Control Protocol (DCP) helper for Wayland.
  *
@@ -27,6 +27,10 @@
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
+#error "This file is not compiled anymore as it is identical to wayland-helper-edcp.cpp. "\
+       "Instead we generate it using wayland-helper-dcp-from-edcp.sed.  The file is only " \
+       "kept around for a while in case someone has uncommitted changes to it."
+#if 0
 
 #include <errno.h>
 
@@ -822,3 +826,4 @@ const VBCLWAYLANDHELPER g_WaylandHelperDcp =
         /* .pfnTerm = */            NULL,
     },
 };
+#endif
