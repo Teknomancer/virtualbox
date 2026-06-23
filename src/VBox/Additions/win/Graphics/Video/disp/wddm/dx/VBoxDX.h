@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.h 114496 2026-06-23 08:14:00Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxDX.h 114498 2026-06-23 10:27:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VBoxVideo Display D3D User mode dll
  */
@@ -142,7 +142,9 @@ typedef struct VBOXDXKMRESOURCE
     struct
     {
         uint32_t                   fOpened : 1;
-        uint32_t                   fReserved : 31;
+        uint32_t                   fOffered : 1;
+        uint32_t                   fPendingOffered : 1;
+        uint32_t                   fReserved : 29;
     } flags;
     VBOXDXALLOCATIONDESC           AllocationDesc;
     union
@@ -151,6 +153,8 @@ typedef struct VBOXDXKMRESOURCE
         {
             struct VBOXDX_RESOURCE *pResource;              /* The structure allocated by D3D runtime. */
             RTLISTNODE             nodeStaging;             /* VBOXDX_DEVICE::listStagingResources if this resource is a staging buffer. */
+            RTLISTNODE             nodeOffered;             /* VBOXDX_DEVICE::listOfferedResources if this resource was offered when it was in use. */
+            D3DDDI_OFFER_PRIORITY  OfferPriority;           /* If fPendingOffered == 1. */
         } resource;
         struct /* Context object allocation */
         {
@@ -710,6 +714,7 @@ typedef struct VBOXDX_DEVICE
     RTLISTANCHOR                listResources;              /* All resources of this device, for cleanup. */
     RTLISTANCHOR                listDestroyedResources;     /* DestroyResource adds to this list. Flush actually deleted them. */
     RTLISTANCHOR                listStagingResources;       /* List of staging resources for uploads. */
+    RTLISTANCHOR                listOfferedResources;       /* Resources to be offered when they will becode idle. */
 
     /* Shaders */
     RTLISTANCHOR                listShaders;                /* All shaders of this device. */
