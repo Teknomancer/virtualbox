@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114502 2026-06-23 15:27:50Z aleksey.ilyushin@oracle.com $
+# $Id: Makefile.kmk 114503 2026-06-23 15:44:22Z aleksey.ilyushin@oracle.com $
 ## @file
 # Top-level sub-makefile for the devices, drivers and services.
 #
@@ -1419,11 +1419,11 @@ if !defined(VBOX_ONLY_EXTPACKS) && "$(intersects $(KBUILD_TARGET_ARCH),$(VBOX_SU
   tstVBoxLibssh_TEMPLATE    = VBoxR3TstExe
   tstVBoxLibssh_INST        = $(INST_BIN)
   tstVBoxLibssh_SDKS       += VBoxLibSsh VBoxZlib
- if1of ($(KBUILD_TARGET), win)
-  tstVBoxLibssh_LIBS       += $(PATH_STAGE_LIB)/VBoxLibSsh$(VBOX_SUFF_LIB)
- else
-  tstVBoxLibssh_LIBS       += $(PATH_STAGE_DLL)/VBoxLibSsh$(VBOX_SUFF_DLL)
- endif
+  if1of ($(KBUILD_TARGET), win)
+   tstVBoxLibssh_LIBS      += $(PATH_STAGE_LIB)/VBoxLibSsh$(VBOX_SUFF_LIB)
+  else
+   tstVBoxLibssh_LIBS      += $(PATH_STAGE_DLL)/VBoxLibSsh$(VBOX_SUFF_DLL)
+  endif
   tstVBoxLibssh_DEFS        = LIBSSH_UNIT_TEST
   tstVBoxLibssh_SOURCES     = \
   	Network/testcase/tstVBoxLibssh.cpp
