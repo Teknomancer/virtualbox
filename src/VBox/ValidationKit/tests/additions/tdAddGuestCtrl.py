@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # pylint: disable=too-many-lines
-# $Id: tdAddGuestCtrl.py 114431 2026-06-18 09:52:13Z andreas.loeffler@oracle.com $
+# $Id: tdAddGuestCtrl.py 114501 2026-06-23 12:40:55Z andreas.loeffler@oracle.com $
 
 """
 VirtualBox Validation Kit - Guest Control Tests.
@@ -38,7 +38,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 114431 $"
+__version__ = "$Revision: 114501 $"
 
 # Standard Python imports.
 import errno
@@ -3227,9 +3227,9 @@ class SubTstDrvAddGuestCtrl(base.SubTestDriverBase):
             # Fire off non-stale processes and wait for termination.
             #
             if oTestVm.isWindows() or oTestVm.isOS2():
-                asArgs = [ sShell, '/C', 'dir', '/S', self.oTstDrv.getGuestSystemDir(oTestVm), ];
+                asArgs = [ sShell, '/C', 'ver', ];
             else:
-                asArgs = [ sShell, '-c', 'ls -la ' + self.oTstDrv.getGuestSystemDir(oTestVm), ];
+                asArgs = [ sShell, '-c', ':', ]; # Issues as POSIX-compliant null command.
             reporter.log('Starting non-stale processes...');
             aoProcs = [];
             for i in xrange(0, cProcsPerGroup):
