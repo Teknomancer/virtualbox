@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.cpp 114471 2026-06-22 09:59:52Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxDX.cpp 114496 2026-06-23 08:14:00Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VirtualBox D3D user mode driver.
  */
@@ -580,13 +580,6 @@ static void vboxdxCommandBufferFinalize(PVBOXDX_DEVICE pDevice)
     pDevice->cbCommandBuffer += sizeof(*s);
     pDevice->cbCommandReserved = 0;
 
-    /* Remember the fence value for resoures involved in this submission. */
-    for (unsigned i = 0; i < pDevice->cAllocations; ++i)
-    {
-        PVBOXDXKMRESOURCE pKMResource = pDevice->apKMResourceList[i];
-        pKMResource->LastReferencedFenceValue = pDevice->ContextMonitoring.CurrentFenceValue;
-    }
-
     ++pDevice->ContextMonitoring.CurrentFenceValue;
 }
 
@@ -696,7 +689,8 @@ void vboxDXStorePatchLocation(PVBOXDX_DEVICE pDevice, void *pvPatch, PVBOXDXKMRE
         pAllocationEntry->Value = 0;
         pAllocationEntry->WriteOperation = fWriteOperation;
 
-        pDevice->apKMResourceList[idxAllocation] = pKMResource;
+        /* Remember the fence value for resources used in this submission to track resource use. */
+        pKMResource->LastReferencedFenceValue = pDevice->ContextMonitoring.CurrentFenceValue;
     }
 
     D3DDDI_PATCHLOCATIONLIST *pPatchLocation = &pDevice->pPatchLocationList[pDevice->cPatchLocations];
@@ -716,24 +710,10 @@ void vboxDXStorePatchLocation(PVBOXDX_DEVICE pDevice, void *pvPatch, PVBOXDXKMRE
 }
 
 
-static bool dxIsAllocationInUse(PVBOXDX_DEVICE pDevice, D3DKMT_HANDLE hAllocation)
+DECLINLINE(bool) dxIsResourceInUse(PVBOXDX_DEVICE pDevice, PVBOXDXKMRESOURCE pKMResource)
 {
-    if (!hAllocation)
-        return false;
-
-    /* Find the same hAllocation */
-    int idxAllocation = -1;
-    for (unsigned i = 0; i < pDevice->cAllocations; ++i)
-    {
-         D3DDDI_ALLOCATIONLIST *p = &pDevice->pAllocationList[i];
-         if (p->hAllocation == hAllocation)
-         {
-             idxAllocation = i;
-             break;
-         }
-    }
-
-    return idxAllocation >= 0;
+    uint64_t const u64LastCompletedFenceValue = ASMAtomicReadU64(pDevice->ContextMonitoring.pLastCompletedFenceValue);
+    return pKMResource->LastReferencedFenceValue > u64LastCompletedFenceValue;
 }
 
 
@@ -3313,7 +3293,7 @@ void vboxDXResourceMap(PVBOXDX_DEVICE pDevice, PVBOXDX_RESOURCE pResource, UINT 
     /** @todo Need to take into account various variants Dynamic/Staging/ Discard/NoOverwrite, etc. */
     Assert(pResource->uMap == 0); /* Must not be already mapped */
 
-    if (dxIsAllocationInUse(pDevice, hAllocation) && DDIMap != D3D10_DDI_MAP_WRITE_NOOVERWRITE)
+    if (dxIsResourceInUse(pDevice, pResource->pKMResource) && DDIMap != D3D10_DDI_MAP_WRITE_NOOVERWRITE)
     {
         vboxDXFlush(pDevice, true);
 

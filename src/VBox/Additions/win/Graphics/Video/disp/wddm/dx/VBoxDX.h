@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.h 114471 2026-06-22 09:59:52Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxDX.h 114496 2026-06-23 08:14:00Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VBoxVideo Display D3D User mode dll
  */
@@ -648,9 +648,6 @@ typedef struct VBOXDXUPLOAD
 } VBOXDXUPLOAD;
 
 
-#define VBOXDX_MAX_KMRESOURCES_PER_SUBMISSION 512 /* Arbitrary */
-
-
 typedef struct VBOXDX_DEVICE
 {
     /* DX runtime data. */
@@ -674,8 +671,6 @@ typedef struct VBOXDX_DEVICE
     UINT                      AllocationListSize;
     D3DDDI_PATCHLOCATIONLIST  *pPatchLocationList;
     UINT                      PatchLocationListSize;
-
-    PVBOXDXKMRESOURCE         apKMResourceList[VBOXDX_MAX_KMRESOURCES_PER_SUBMISSION];
 
     UINT                      cbCommandBuffer;               /* Size of commands in the buffer */
     UINT                      cbCommandReserved;             /* Size of the current command. */
