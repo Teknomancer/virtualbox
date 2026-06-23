@@ -1,4 +1,4 @@
-/* $Id: UIConverterBackendCOM.cpp 114487 2026-06-22 16:17:27Z serkan.bayraktar@oracle.com $ */
+/* $Id: UIConverterBackendCOM.cpp 114499 2026-06-23 10:31:44Z serkan.bayraktar@oracle.com $ */
 /** @file
  * VBox Qt GUI - UIConverterBackendCOM implementation.
  */
@@ -914,7 +914,7 @@ template<> SHARED_LIBRARY_STUFF QString UIConverter::toString(const KRecordingVi
     switch (enmMode)
     {
         case KRecordingVideoScalingMode_None:
-            return QApplication::translate("UICommon", "None", "RecordingVideoScalingMode");
+            return QApplication::translate("UICommon", "None (Center / Crop)", "RecordingVideoScalingMode");
         case KRecordingVideoScalingMode_NearestNeighbor:
             return QApplication::translate("UICommon", "Nearest Neighbor", "RecordingVideoScalingMode");
         case KRecordingVideoScalingMode_Bilinear:
