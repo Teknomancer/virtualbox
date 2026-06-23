@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# $Id: tdAddBasic1.py 113448 2026-03-17 15:46:56Z vadim.galitsyn@oracle.com $
+# $Id: tdAddBasic1.py 114500 2026-06-23 12:24:13Z andreas.loeffler@oracle.com $
 
 """
 VirtualBox Validation Kit - Additions Basics #1.
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 113448 $"
+__version__ = "$Revision: 114500 $"
 
 # Standard Python imports.
 import os;
@@ -776,6 +776,8 @@ class tdAddBasic1(vbox.TestDriver):                                         # py
         """
 
         fRc = True;
+        sStatus = 'N/A';
+        tsLastUpdatedMs = 0;
 
         try:
             eStatus, tsLastUpdatedMs = oGuest.getFacilityStatus(eFacilityType);
