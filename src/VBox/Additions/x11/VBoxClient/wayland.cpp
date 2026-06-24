@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114495 2026-06-22 21:47:36Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114507 2026-06-24 11:17:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -164,11 +164,10 @@ int VBClWaylandClipboardQueryHostData(PSHCLCONTEXT pCtx, const char *pszMimeType
  * @returns New uRevision value.
  * @param   pCtx        The VBoxClient shared clibpoard context.
  * @param   pszCaller   Caller name for logging.
- * @param   ppCbCtxSlot Where to return pointer to a callback slot with
- *                      uRevision entered into it. Optional
+ * @param   pOfferSlot  Offer slot to inherit from. Optional.
  * @thread  wl-gtk, wl-dcp, wl-edcp
  */
-uint64_t VBClWaylandClipboardResetOurState(PSHCLCONTEXT pCtx, const char *pszCaller, SHCLWLCBCTXSLOT **ppCbCtxSlot)
+uint64_t VBClWaylandClipboardResetOurState(PSHCLCONTEXT pCtx, const char *pszCaller, SHCLWLOFFERSLOT *pOfferSlot)
 {
     RTCritSectEnter(&pCtx->Wl.CritSect);
 
@@ -179,49 +178,41 @@ uint64_t VBClWaylandClipboardResetOurState(PSHCLCONTEXT pCtx, const char *pszCal
 
     for (unsigned i = 0; i < RT_ELEMENTS(pCtx->Wl.aOurMimeTypes); i++)
     {
-        pCtx->Wl.aOurMimeTypes[i].fFlagsAndPriority = 0;
-        pCtx->Wl.aOurMimeTypes[i].pszMimeType = NULL;
+        pCtx->Wl.aOurMimeTypes[i].fFlagsAndPriority = pOfferSlot ? pOfferSlot->aMimeTypes[i].fFlagsAndPriority : 0;
+        pCtx->Wl.aOurMimeTypes[i].pszMimeType       = pOfferSlot ? pOfferSlot->aMimeTypes[i].pszMimeType       : NULL;
     }
 
-    pCtx->Wl.fOurFormats     = VBOX_SHCL_FMT_NONE;
+    pCtx->Wl.fOurFormats     = pOfferSlot ? pOfferSlot->fFormats : VBOX_SHCL_FMT_NONE;
     uint64_t const uRevision = (pCtx->Wl.uRevision + 2) | 1;
-    pCtx->Wl.uRevision    = uRevision;
-
-    if (ppCbCtxSlot)
-    {
-        uint32_t const idx = pCtx->Wl.idxOurCbSlots++ % RT_ELEMENTS(pCtx->Wl.aOurCbSlots);
-        pCtx->Wl.aOurCbSlots[idx].pCtx      = pCtx;
-        pCtx->Wl.aOurCbSlots[idx].uRevision = uRevision;
-        *ppCbCtxSlot = &pCtx->Wl.aOurCbSlots[idx];
-    }
+    pCtx->Wl.uRevision       = uRevision;
 
     RTCritSectLeave(&pCtx->Wl.CritSect);
     return uRevision;
 }
 
 /**
- * Adds a MIME type prior to reporting a new clipboard offer to the other side.
+ * Adds a MIME type prior to reporting a potential new clipboard offer.
  *
  * This will try map the MIME type to a VBox format type and add it to the
  * reverse mapping table, iff it has higher priority than the current type for
  * the format.
  *
  * @returns VBox status code (can be ignored).
- * @param   pCtx            The VBoxClient shared clibpoard context.
- * @param   uRevision       Clipboard revision number at the start of the offer.
- *                          To avoid theoretical offer races and mixups.
+ * @param   pOfferSlot      The offset slot to update.
  * @param   pszMimeType     The MIME type being offered.
  * @param   pszCaller       Caller name for logging.
  */
-int VBClWaylandClipboardOurAddMimeType(PSHCLCONTEXT pCtx, uint64_t uRevision, const char *pszMimeType, const char *pszCaller)
+int VBClWaylandClipboardOfferAddMimeType(SHCLWLOFFERSLOT *pOfferSlot, const char *pszMimeType, const char *pszCaller)
 {
     VBClLogVerbose(5, "Wayland announces MIME type: %s\n", pszMimeType);
+    AssertPtrReturn(pOfferSlot, VERR_INVALID_POINTER);
+    PSHCLCONTEXT const pCtx = pOfferSlot->pCtx;
     AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
 
     int rc = VINF_SUCCESS;
     RTCritSectEnter(&pCtx->Wl.CritSect);
 
-    if (pCtx->Wl.uRevision == uRevision)
+    if (pCtx->Wl.uRevision == pOfferSlot->uRevision)
     {
         /* Map the MIME type to a VBox format. */
         uint32_t    fFlagsAndPriority = 0;
@@ -231,23 +222,23 @@ int VBClWaylandClipboardOurAddMimeType(PSHCLCONTEXT pCtx, uint64_t uRevision, co
         {
             AssertPtr(pszPersistentMimeType);
             int const idxFmt = ShClFormatToBitNo(uFmt);
-            if ((unsigned)idxFmt < RT_ELEMENTS(pCtx->Wl.aOurMimeTypes))
+            if ((unsigned)idxFmt < RT_ELEMENTS(pOfferSlot->aMimeTypes))
             {
                 /* Does it have higher priority than any existing mapping? */
                 if (  (fFlagsAndPriority & VBGH_MIME_CONV_F_PRIORITY_MASK)
-                    > (pCtx->Wl.aOurMimeTypes[idxFmt].fFlagsAndPriority & VBGH_MIME_CONV_F_PRIORITY_MASK))
+                    > (pOfferSlot->aMimeTypes[idxFmt].fFlagsAndPriority & VBGH_MIME_CONV_F_PRIORITY_MASK))
                 {
                     /* Okay, use this MIME type for the VBox format then. */
-                    pCtx->Wl.aOurMimeTypes[idxFmt].pszMimeType       = pszPersistentMimeType;
-                    pCtx->Wl.aOurMimeTypes[idxFmt].fFlagsAndPriority = fFlagsAndPriority;
-                    pCtx->Wl.fOurFormats |= uFmt;
+                    pOfferSlot->aMimeTypes[idxFmt].pszMimeType       = pszPersistentMimeType;
+                    pOfferSlot->aMimeTypes[idxFmt].fFlagsAndPriority = fFlagsAndPriority;
+                    pOfferSlot->fFormats |= uFmt;
                     VBClLogVerbose(4, "%s: %s -> VBoxFmt %#x/%u prio %#x\n", pszCaller, pszMimeType, uFmt, idxFmt, fFlagsAndPriority);
                     rc = VINF_SUCCESS;
                 }
                 else
                 {
                     VBClLogVerbose(6, "%s: %s -> VBoxFmt %#x/%u prio %#x - have better (%#x)\n", pszCaller, pszMimeType,
-                                   uFmt, idxFmt, fFlagsAndPriority, pCtx->Wl.aOurMimeTypes[idxFmt].fFlagsAndPriority);
+                                   uFmt, idxFmt, fFlagsAndPriority, pOfferSlot->aMimeTypes[idxFmt].fFlagsAndPriority);
                     rc = VINF_SUCCESS;
                 }
             }
@@ -262,7 +253,7 @@ int VBClWaylandClipboardOurAddMimeType(PSHCLCONTEXT pCtx, uint64_t uRevision, co
     }
     else
     {
-        VBClLogVerbose(2, "%s: outdated callback (%#RX64 vs %#RX64)\n", uRevision, pCtx->Wl.uRevision);
+        VBClLogVerbose(2, "%s: outdated callback (%#RX64 vs %#RX64)\n", pOfferSlot->uRevision, pCtx->Wl.uRevision);
         rc = VERR_VERSION_MISMATCH;
     }
 

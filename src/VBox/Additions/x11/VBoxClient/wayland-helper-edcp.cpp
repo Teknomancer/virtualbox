@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114506 2026-06-24 09:57:44Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114507 2026-06-24 11:17:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -165,9 +165,9 @@ static void vbcl_wayland_hlp_edcp_data_control_offer_offer(void *pvUser, struct 
                                                            const char *pcszMimeType)
 {
     VBClLogVerbose(3, "%s: %s\n", __func__, pcszMimeType);
-    SHCLWLCBCTXSLOT const * const pCbCtxSlot = (SHCLWLCBCTXSLOT const *)pvUser;
-    AssertPtrReturnVoid(pCbCtxSlot);
-    VBClWaylandClipboardOurAddMimeType(pCbCtxSlot->pCtx, pCbCtxSlot->uRevision, pcszMimeType, __func__);
+    SHCLWLOFFERSLOT * const pOfferSlot = (SHCLWLOFFERSLOT *)pvUser;
+    AssertPtrReturnVoid(pOfferSlot);
+    VBClWaylandClipboardOfferAddMimeType(pOfferSlot, pcszMimeType, __func__);
     RT_NOREF(pOffer);
 }
 
@@ -204,23 +204,10 @@ vbclWaylandHlpEdcpOfferV1ReceiveWrapper(VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER
 static void vbclWaylandHlpEdcpDataDeviceListener_DataOffer(void *pvUser, struct ext_data_control_device_v1 *pDevice,
                                                            struct ext_data_control_offer_v1 *pOffer)
 {
-    /** @todo r=bird: This is called both before
-     * vbclWaylandHlpEdcpDataDeviceListener_Selection
-     * andvbclWaylandHlpEdcpDataDeviceListener_PrimarySelection. We're only
-     * interested in the _Selection variant, especially if we're currently proxying
-     * the host clipboard.  Iff this is a primary selection offer and we are
-     * proxying the host clipboard, we'll end our clipboard offering now,
-     * and any attempt to paste from it will fail.
-     *
-     * Moving this code to vbclWaylandHlpEdcpDataDeviceListener_Selection doesn't
-     * work, as the offers callbacks doesn't come.  So, we probably have to
-     * pre-record them here, then decide in the selection callbacks whether to start
-     * a new session (_Selection) or not (_PrimarySelection). */
-
     /*
      * Validate input a little.
      */
-    VBCL_LOG_CALLBACK;
+    VBClLogVerbose(3, "%s: pDevice=%p pOffer=%p\n", __func__, pDevice, pOffer);
     vbox_wl_edcp_ctx_t * const pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
     AssertPtrReturnVoid(pCtx);
     PSHCLCONTEXT const pShClCtx = pCtx->BaseCtx.pShClCtx;
@@ -236,60 +223,35 @@ static void vbclWaylandHlpEdcpDataDeviceListener_DataOffer(void *pvUser, struct 
         VBClLogVerbose(5, "ignoring Wayland clipboard data offer - no shared clipboard context (pShClCtx)!\n");
     else
     {
-        /** @todo should we try get VBOX_CLIPBOARD_MIME_TYPE_REVISION_NO here to make
-         * sure it isn't a host clipboard announcement (potentially from a racing
-         * VBoxClient)?  It's only a concern if the fIngnoreWlClipIn logic fails...
-         *
-         * Perhaps better if we just collect the offered MIME types in a stack
-         * structure, then do the state transition iif it's not our own offer and such.
-         * Would eliminate the SHCLWLCBCTXSLOT hack. */
+        /*
+         * Since we're getting offers from both the clipboard & the primary selection
+         * here, before we know which it is, we record the offers being made in a
+         * temporary slot in the context structure.  When _Selection or _PrimarySelection
+         * is then called later, we take the appropriate action.
+         */
 
-        int rc = vbcl_wayland_session_end(&pCtx->BaseCtx.Session.Base, NULL, NULL);
-        if (RT_SUCCESS(rc))
+        /* Get a slot for taking down this offer. */
+        RTCritSectEnter(&pShClCtx->Wl.CritSect);
+        SHCLWLOFFERSLOT * const pOfferSlot = &pShClCtx->Wl.aOurOfferSlots[pShClCtx->Wl.idxOurOfferSlots++
+                                                                          % RT_ELEMENTS(pShClCtx->Wl.aOurOfferSlots)];
+        for (unsigned i = 0; i < RT_ELEMENTS(pOfferSlot->aMimeTypes); i++)
         {
-            rc = vbcl_wayland_session_start(&pCtx->BaseCtx.Session.Base,
-                                            VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
-                                            &vbcl_wayland_hlp_edcp_session_start_generic_cb,
-                                            &pCtx->BaseCtx.Session);
-            if (RT_SUCCESS(rc))
-            {
-                /*
-                 * Reset the common VBoxClient clipboard state.
-                 */
-                SHCLWLCBCTXSLOT *pCbCtxSlot;
-                uint64_t const uRevision = VBClWaylandClipboardResetOurState(pShClCtx, __func__, &pCbCtxSlot);
-
-                /*
-                 * Register listener on the offer and get all the mime types.
-                 */
-                ext_data_control_offer_v1_add_listener(pOffer, &g_data_control_offer_listener, pCbCtxSlot);
-
-                /* Receive all the advertised mime types. */
-                wl_display_roundtrip(pCtx->BaseCtx.pDisplay);
-
-                /* Fill the cache with data and announce it to the host. */
-                VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T Args =
-                { pShClCtx, uRevision, pCtx->BaseCtx.pDisplay, pOffer, vbclWaylandHlpEdcpOfferV1ReceiveWrapper };
-                VBClWaylandSessionJoin(&pCtx->BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
-                                       VBClWaylandXdcpFillOurCacheFromOfferAndReport, &Args);
-
-                /*
-                 * ??
-                 */
-                /** @todo Moved this from the vbclWaylandHlpXdcpGhClipFillCacheAndReport
-                 *        callback, as I cannot see how calling here or there makes much of a
-                 *        difference.
-                 *
-                 *        However, that said, why aren't we calling at the very very end of this
-                 *        function for all cases. What's the difference when fIngnoreWlClipIn is
-                 *        true, pShClCtx isn't set or vbcl_wayland_session_end/start fails?? */
-                ext_data_control_offer_v1_destroy(pOffer);
-            }
-            else
-                VBClLogError("unable to start session, rc=%Rrc\n", rc);
+            pOfferSlot->aMimeTypes[i].fFlagsAndPriority = 0;
+            pOfferSlot->aMimeTypes[i].pszMimeType       = NULL;
         }
-        else
-            VBClLogError("unable to start session, previous session is still running, rc=%Rrc\n", rc);
+        pOfferSlot->fFormats               = VBOX_SHCL_FMT_NONE;
+        pOfferSlot->fHasRevisionNoMimeType = false;
+        pOfferSlot->uRevision              = pShClCtx->Wl.uRevision;
+        pOfferSlot->pCtx                   = pShClCtx;
+        pOfferSlot->pvOffer                = pOffer;
+
+        RTCritSectLeave(&pShClCtx->Wl.CritSect);
+
+        /* Register listener on the offer and get all the mime types. */
+        ext_data_control_offer_v1_add_listener(pOffer, &g_data_control_offer_listener, pOfferSlot);
+
+        /* Receive all the advertised mime types. */
+        wl_display_roundtrip(pCtx->BaseCtx.pDisplay);
     }
 }
 
@@ -306,8 +268,86 @@ static void vbclWaylandHlpEdcpDataDeviceListener_DataOffer(void *pvUser, struct 
 static void vbclWaylandHlpEdcpDataDeviceListener_Selection(void *pvUser, struct ext_data_control_device_v1 *pDevice,
                                                            struct ext_data_control_offer_v1 *pOffer)
 {
-    RT_NOREF(pDevice, pvUser, pOffer);
-    VBCL_LOG_CALLBACK;
+    /*
+     * Validate input a little.
+     */
+    VBClLogVerbose(3, "%s: pDevice=%p pOffer=%p\n", __func__, pDevice, pOffer);
+    vbox_wl_edcp_ctx_t * const pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
+    AssertPtrReturnVoid(pCtx);
+    PSHCLCONTEXT const pShClCtx = pCtx->BaseCtx.pShClCtx;
+    RT_NOREF(pDevice);
+    AssertPtrReturnVoid(pOffer);
+
+    /*
+     * Skip this if too early.
+     */
+    if (!pShClCtx)
+        VBClLogVerbose(5, "ignoring Wayland clipboard selection - no shared clipboard context (pShClCtx)!\n");
+    else
+    {
+        /*
+         * Get the last offer slot and see if it matches up to the offer,
+         * that our clipboard state hasn't changed, and that it isn't our offer.
+         */
+        RTCritSectEnter(&pShClCtx->Wl.CritSect);
+        SHCLWLOFFERSLOT * const pOfferSlot = &pShClCtx->Wl.aOurOfferSlots[  (pShClCtx->Wl.idxOurOfferSlots - 1)
+                                                                          % RT_ELEMENTS(pShClCtx->Wl.aOurOfferSlots)];
+        if (pOfferSlot->pvOffer != (void *)pOffer)
+            VBClLogVerbose(4, "vbclWaylandHlpEdcpDataDeviceListener_Selection: Ignore - pOffer %p, expected %p!\n",
+                           pOffer, pOfferSlot->pvOffer);
+        else if (pOfferSlot->uRevision != pShClCtx->Wl.uRevision)
+            VBClLogVerbose(4, "vbclWaylandHlpEdcpDataDeviceListener_Selection: Ignore - uRevision %RX64 -> %#RX64!\n",
+                           pOfferSlot->uRevision, pShClCtx->Wl.uRevision);
+        else if (pOfferSlot->fHasRevisionNoMimeType)
+            VBClLogVerbose(4, "vbclWaylandHlpEdcpDataDeviceListener_Selection: Ingore our own offer.\n");
+        else
+        {
+            RTCritSectLeave(&pShClCtx->Wl.CritSect);
+
+            /*
+             * New session.
+             */
+            int rc = vbcl_wayland_session_end(&pCtx->BaseCtx.Session.Base, NULL, NULL);
+            if (RT_SUCCESS(rc))
+            {
+                rc = vbcl_wayland_session_start(&pCtx->BaseCtx.Session.Base,
+                                                VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
+                                                &vbcl_wayland_hlp_edcp_session_start_generic_cb,
+                                                &pCtx->BaseCtx.Session);
+                if (RT_SUCCESS(rc))
+                {
+                    /*
+                     * Reset the common VBoxClient clipboard state.
+                     */
+                    uint64_t const uRevision = VBClWaylandClipboardResetOurState(pShClCtx, __func__, pOfferSlot);
+
+                    /* Fill the cache with data and announce it to the host. */
+                    VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER_AND_REPORT_ARGS_T Args =
+                    { pShClCtx, uRevision, pCtx->BaseCtx.pDisplay, pOffer, vbclWaylandHlpEdcpOfferV1ReceiveWrapper };
+                    VBClWaylandSessionJoin(&pCtx->BaseCtx.Session.Base, VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST,
+                                           VBClWaylandXdcpFillOurCacheFromOfferAndReport, &Args);
+
+                    /*
+                     * ??
+                     */
+                    /** @todo Moved this from the vbclWaylandHlpXdcpGhClipFillCacheAndReport
+                     *        callback, as I cannot see how calling here or there makes much of a
+                     *        difference.
+                     *
+                     *        However, that said, why aren't we calling at the very very end of this
+                     *        function for all cases. What's the difference when fIngnoreWlClipIn is
+                     *        true, pShClCtx isn't set or vbcl_wayland_session_end/start fails?? */
+                    ext_data_control_offer_v1_destroy(pOffer);
+                }
+                else
+                    VBClLogError("unable to start session, rc=%Rrc\n", rc);
+            }
+            else
+                VBClLogError("unable to start session, previous session is still running, rc=%Rrc\n", rc);
+            return;
+        }
+        RTCritSectLeave(&pShClCtx->Wl.CritSect);
+    }
 }
 
 /**
@@ -346,6 +386,7 @@ static void vbclWaylandHlpEdcpDataDeviceListener_Finished(void *pvUser, struct e
 static void vbclWaylandHlpEdcpDataDeviceListener_PrimarySelection(void *pvUser, struct ext_data_control_device_v1 *pDevice,
                                                                   struct ext_data_control_offer_v1 *pOffer)
 {
+    VBClLogVerbose(3, "%s: pDevice=%p pOffer=%p\n", __func__, pDevice, pOffer);
     RT_NOREF(pDevice, pvUser, pOffer);
     VBCL_LOG_CALLBACK;
 }

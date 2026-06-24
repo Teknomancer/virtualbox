@@ -1,4 +1,4 @@
-/** $Id: clipboard.h 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard.h 114507 2026-06-24 11:17:02Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard - Main header.
  */
@@ -58,16 +58,35 @@ typedef DECLCALLBACKTYPE(int, FNHOSTCLIPREAD, (PSHCLCONTEXT pCtx, SHCLFORMAT uFm
 /** Pointer to FNHOSTCLIPREAD. */
 typedef FNHOSTCLIPREAD *PFNHOSTCLIPREAD;
 
+
+/** MIME type to VBOX_SHCL_FMT_XXX mapping table entry. */
+typedef struct SHCLWLMIMEMAPENTRY
+{
+    /** The MIME type (from mime-type-converter.cpp). */
+    char const     *pszMimeType;
+    /** The priority and flags of this MIME type. */
+    uint32_t        fFlagsAndPriority;
+} SHCLWLMIMEMAPENTRY;
+
 /**
  * Hack for wayland callbacks so we can easily match uRevision.
  */
-typedef struct SHCLWLCBCTXSLOT
+typedef struct SHCLWLOFFERSLOT
 {
-    /** Pointer back to the context.   */
-    struct SHCLCONTEXT *pCtx;
-    /** The revision for this slot. */
+    /** MIME types for each VBOX_SHCL_FMT_XXX (indexed by its log2 value).*/
+    SHCLWLMIMEMAPENTRY  aMimeTypes[VBOX_SHCL_FMT_LAST_BIT + 1];
+    /** The VBox formats on offer (VBOX_SHCL_FMT_XXX) - summary of aMimeTypes. */
+    SHCLFORMATS         fFormats;
+    /** Set if VBOX_CLIPBOARD_MIME_TYPE_REVISION_NO is on offer.   */
+    bool                fHasRevisionNoMimeType;
+    /** The revision at the start of the offer.   */
     uint64_t            uRevision;
-} SHCLWLCBCTXSLOT;
+    /** Pointer back to the context. */
+    struct SHCLCONTEXT *pCtx;
+    /** The offer pointer. */
+    void               *pvOffer;
+} SHCLWLOFFERSLOT;
+
 
 /**
  * The VBoxClient Shared Clipboard context structure.
@@ -89,7 +108,7 @@ struct SHCLCONTEXT
         /** Wayland clipboard context. */
         struct
         {
-            /** Protects everything down to, but not including, aOurCbSlots. */
+            /** Protects everything down to, but not including, aOurOfferSlots. */
             RTCRITSECT          CritSect;
             /** Revision number for the data protected by the critical section.
              *
@@ -110,13 +129,7 @@ struct SHCLCONTEXT
              * interaction. */
             SHCLCACHE           OurCache;
             /** MIME types for each VBOX_SHCL_FMT_XXX (indexed by its log2 value).*/
-            struct
-            {
-                /** The MIME type (from mime-type-converter.cpp). */
-                char const     *pszMimeType;
-                /** The priority and flags of this MIME type. */
-                uint32_t        fFlagsAndPriority;
-            } aOurMimeTypes[VBOX_SHCL_FMT_LAST_BIT + 1];
+            SHCLWLMIMEMAPENTRY  aOurMimeTypes[VBOX_SHCL_FMT_LAST_BIT + 1];
             /** Event that get's set when the cache has been filled.
              * @note Should've been a condition variable, as there is a potential race if
              *       a 2nd clipboard announcement is processed between someone leaving the
@@ -125,11 +138,11 @@ struct SHCLCONTEXT
             RTSEMEVENTMULTI     hOurCacheFilledEvent;
             /** Our side's VBox formats on offer (VBOX_SHCL_FMT_XXX). */
             SHCLFORMATS         fOurFormats;
-            /** Next slot in aOurCbSlots. */
-            uint32_t            idxOurCbSlots;
 
+            /** Next slot in aOurOfferSlots. */
+            uint32_t            idxOurOfferSlots;
             /** HACK: Circular callback context slots. */
-            SHCLWLCBCTXSLOT     aOurCbSlots[16];
+            SHCLWLOFFERSLOT     aOurOfferSlots[8];
         } Wl;
     };
 };
@@ -151,7 +164,7 @@ int VBClClipboardReadHostEvent(PSHCLCONTEXT pCtx, PFNHOSTCLIPREPORTFMTS pfnHGCli
 int VBClClipboardReadHostClipboard(PSHCLCONTEXT pCtx, SHCLFORMAT uFmt, void **ppvData, uint32_t *pcbData);
 
 int      VBClWaylandClipboardQueryHostData(PSHCLCONTEXT pCtx, const char *pszMimeType, void **ppvOutData, size_t *pcbOutData);
-uint64_t VBClWaylandClipboardResetOurState(PSHCLCONTEXT pCtx, const char *pszCaller, SHCLWLCBCTXSLOT **ppCbCtxSlot);
-int      VBClWaylandClipboardOurAddMimeType(PSHCLCONTEXT pCtx, uint64_t uRevision, const char *pszMimeType, const char *pszCaller);
+uint64_t VBClWaylandClipboardResetOurState(PSHCLCONTEXT pCtx, const char *pszCaller, struct SHCLWLOFFERSLOT *pOffer);
+int      VBClWaylandClipboardOfferAddMimeType(SHCLWLOFFERSLOT *pOfferSlot, const char *pszMimeType, const char *pszCaller);
 
 #endif /* !GA_INCLUDED_SRC_x11_VBoxClient_clipboard_h */
