@@ -1,4 +1,4 @@
-/* $Id: darwin-pasteboard.cpp 114386 2026-06-16 10:43:08Z andreas.loeffler@oracle.com $ */
+/* $Id: darwin-pasteboard.cpp 114509 2026-06-24 14:35:45Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host implementation.
  */
@@ -485,22 +485,11 @@ DECLHIDDEN(int) readFromPasteboard(PasteboardRef pPasteboard, uint32_t fFormat, 
 DECLHIDDEN(int) takePasteboardOwnership(PasteboardRef hPasteboard, uint64_t idOwnership, const char *pszOwnershipFlavor,
                                         const char *pszOwnershipValue, void **phStrOwnershipFlavor)
 {
-    /*
-     * Release the old string.
-     */
-    if (*phStrOwnershipFlavor)
+    int vrc = clearPasteboard(hPasteboard, phStrOwnershipFlavor);
+    if (RT_SUCCESS(vrc))
     {
-        CFStringRef hOldFlavor = (CFStringRef)*phStrOwnershipFlavor;
-        CFRelease(hOldFlavor);
-        *phStrOwnershipFlavor = NULL;
-    }
+        OSStatus orc = 0;
 
-    /*
-     * Clear the pasteboard and take ownership over it.
-     */
-    OSStatus orc = PasteboardClear(hPasteboard);
-    if (orc == 0)
-    {
         /* For good measure. */
         PasteboardSynchronize(hPasteboard);
 
@@ -533,9 +522,36 @@ DECLHIDDEN(int) takePasteboardOwnership(PasteboardRef hPasteboard, uint64_t idOw
         }
         else
             Log(("takePasteboardOwnership: CFDataCreate failed!\n"));
+        if (orc != 0)
+            vrc = VERR_GENERAL_FAILURE;
+    }
+    return vrc;
+}
+
+/**
+ * Clears the pasteboard and releases any current ownership flavor.
+ *
+ * @returns VBox status code.
+ * @param   hPasteboard             The pasteboard handle.
+ * @param   phStrOwnershipFlavor    Pointer to the current ownership flavor string.
+ */
+DECLHIDDEN(int) clearPasteboard(PasteboardRef hPasteboard, void **phStrOwnershipFlavor)
+{
+    if (*phStrOwnershipFlavor)
+    {
+        CFStringRef hOldFlavor = (CFStringRef)*phStrOwnershipFlavor;
+        CFRelease(hOldFlavor);
+        *phStrOwnershipFlavor = NULL;
+    }
+
+    OSStatus orc = PasteboardClear(hPasteboard);
+    if (orc == 0)
+    {
+        PasteboardSynchronize(hPasteboard);
+        Log(("clearPasteboard: cleared pasteboard\n"));
     }
     else
-        Log(("takePasteboardOwnership: PasteboardClear failed -> %d (%#x)\n", orc, orc));
+        Log(("clearPasteboard: PasteboardClear failed -> %d (%#x)\n", orc, orc));
     return orc == 0 ? VINF_SUCCESS : VERR_GENERAL_FAILURE;
 }
 
