@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114478 2026-06-22 11:48:44Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -223,6 +223,14 @@ static void vbcl_wayland_hlp_edcp_data_device_data_offer(
         VBClLogVerbose(5, "ignoring Wayland clipboard data offer - no shared clipboard context (pShClCtx)!\n");
     else
     {
+        /** @todo should we try get VBOX_CLIPBOARD_MIME_TYPE_REVISION_NO here to make
+         * sure it isn't a host clipboard announcement (potentially from a racing
+         * VBoxClient)?  It's only a concern if the fIngnoreWlClipIn logic fails...
+         *
+         * Perhaps better if we just collect the offered MIME types in a stack
+         * structure, then do the state transition iif it's not our own offer and such.
+         * Would eliminate the SHCLWLCBCTXSLOT hack. */
+
         int rc = vbcl_wayland_session_end(&pCtx->BaseCtx.Session.Base, NULL, NULL);
         if (RT_SUCCESS(rc))
         {
@@ -569,8 +577,11 @@ static DECLCALLBACK(void)
 vbcl_wayland_hlp_edcp_send_offers(const char *pcszMimeType, uint32_t fFlagsAndPriority, void *pvUser)
 {
     ext_data_control_source_v1 *pDataSource = (ext_data_control_source_v1 *)pvUser;
-    VBClLogVerbose(4, "%s: %s prio %#x\n", __func__, pcszMimeType, fFlagsAndPriority);
-    ext_data_control_source_v1_offer(pDataSource, pcszMimeType);
+    if (!(fFlagsAndPriority & VBGH_MIME_CONV_F_RO))
+    {
+        VBClLogVerbose(4, "%s: %s prio %#x\n", __func__, pcszMimeType, fFlagsAndPriority);
+        ext_data_control_source_v1_offer(pDataSource, pcszMimeType);
+    }
 }
 
 /**
@@ -605,6 +616,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_hg_report_join2_cb(void *pvU
         {
             ext_data_control_source_v1_add_listener(pDataSource, &g_data_source_listener, &g_EdcpCtx);
 
+            ext_data_control_source_v1_offer(pDataSource, VBOX_CLIPBOARD_MIME_TYPE_REVISION_NO);
             VbghMimeConvEnumerateByVBoxFormats(fFmts, vbcl_wayland_hlp_edcp_send_offers, pDataSource);
 
             ext_data_control_device_v1_set_selection(g_EdcpCtx.pDataDevice, pDataSource);

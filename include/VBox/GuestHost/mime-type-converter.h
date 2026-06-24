@@ -1,4 +1,4 @@
-/* $Id: mime-type-converter.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: mime-type-converter.h 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
 /** @file
  * MIME type converter for Shared Clipboard and Drag-and-Drop code.
  */
@@ -55,6 +55,8 @@
  *       preferences, we'd have to partition it.
  */
 #define VBGH_MIME_CONV_F_PRIORITY_MASK      UINT32_C(0x0000000f)
+/** Readonly type, skip this when exporting. */
+#define VBGH_MIME_CONV_F_RO                 UINT32_C(0x00001000)
 /** @} */
 
 /**

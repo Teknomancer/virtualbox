@@ -368,22 +368,27 @@ static struct VBCONVERTERFMTTABLE
     PFNVBFMTCONVERTOR       pfnConvertFromVBox;
 } const g_aConverterFormats[] =
 {
-    { "INVALID",                      VBOX_SHCL_FMT_NONE,          0, NULL,                   NULL                   },
+    { "INVALID",                      VBOX_SHCL_FMT_NONE,                               0, NULL,                   NULL                   },
 
-    { "UTF8_STRING",                  VBOX_SHCL_FMT_UNICODETEXT,  14, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8   },
-    { "text/plain;charset=utf-8",     VBOX_SHCL_FMT_UNICODETEXT,  12, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8   }, /** @todo r=bird: do case insensitive matching? */
-    { "text/plain;charset=UTF-8",     VBOX_SHCL_FMT_UNICODETEXT,  11, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8   },
-    { "STRING",                       VBOX_SHCL_FMT_UNICODETEXT,   3, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1 },
-    { "TEXT",                         VBOX_SHCL_FMT_UNICODETEXT,   2, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1 },
-    { "text/plain",                   VBOX_SHCL_FMT_UNICODETEXT,   1, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1 },
+    { "UTF8_STRING",                  VBOX_SHCL_FMT_UNICODETEXT,                       14, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8   },
+    { "text/plain;charset=utf-8",     VBOX_SHCL_FMT_UNICODETEXT,                       12, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8   },
+    { "text/plain;charset=UTF-8",     VBOX_SHCL_FMT_UNICODETEXT, VBGH_MIME_CONV_F_RO | 11, vbConvertUtf8ToUtf16,   vbConvertUtf16ToUtf8   }, /** @todo who puts this on the clipboard? */
+    { "STRING",                       VBOX_SHCL_FMT_UNICODETEXT,                        3, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1 },
+    { "TEXT",                         VBOX_SHCL_FMT_UNICODETEXT,                        2, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1 },
+    { "text/plain",                   VBOX_SHCL_FMT_UNICODETEXT,                        1, vbConvertLatin1ToUtf16, vbConvertUtf16ToLatin1 },
 
-    { "text/html;charset=utf-8",      VBOX_SHCL_FMT_HTML,         14, vbConvertHtmlToVBox,    vbConvertVBoxToHtml    },
-    { "application/x-moz-nativehtml", VBOX_SHCL_FMT_HTML,         12, vbConvertHtmlToVBox,    vbConvertVBoxToHtml    }, /** @todo priority and what is this format anyway? */
-    { "text/html",                    VBOX_SHCL_FMT_HTML,         10, vbConvertHtmlToVBox,    vbConvertVBoxToHtml    },
+    { "text/html;charset=utf-8",      VBOX_SHCL_FMT_HTML,                              14, vbConvertHtmlToVBox,    vbConvertVBoxToHtml    },
+    { "text/html",                    VBOX_SHCL_FMT_HTML,                              12, vbConvertHtmlToVBox,    vbConvertVBoxToHtml    },
+    /** @todo r=bird: application/x-moz-nativehtml (kNativeHTMLMime) is Windows
+     * CF_HTML, see ShClWinConvertCFHTMLToMIME() and ShClWinConvertMIMEToCFHTML for
+     * how to properly convert it. For reference:
+     * https://github.com/mozilla-firefox/firefox/blob/2dad02d1765ec525589c574612ecad90a714a5bb/editor/libeditor/HTMLEditorDataTransfer.cpp#L2175
+     */
+    { "application/x-moz-nativehtml", VBOX_SHCL_FMT_HTML,         VBGH_MIME_CONV_F_RO | 4, vbConvertHtmlToVBox,    vbConvertVBoxToHtml    }, /** @todo what's the format here actually? */
 
-    { "image/bmp",                    VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
-    { "image/x-bmp",                  VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
-    { "image/x-MS-bmp",               VBOX_SHCL_FMT_BITMAP,        1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
+    { "image/bmp",                    VBOX_SHCL_FMT_BITMAP,                             1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
+    { "image/x-bmp",                  VBOX_SHCL_FMT_BITMAP,                             1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
+    { "image/x-MS-bmp",               VBOX_SHCL_FMT_BITMAP,                             1, vbConvertBmpToVBox,     vbConvertVBoxToBmp     },
 };
 
 VBGH_DECL(void) VbghMimeConvEnumerateByVBoxFormats(SHCLFORMATS fVBoxFmts, PFNVBGHMIMECONVENUM pfnCallback, void *pvUser)

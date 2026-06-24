@@ -1,4 +1,4 @@
-/** $Id: clipboard.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard.h 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard - Main header.
  */
@@ -138,6 +138,10 @@ struct SHCLCONTEXT
 #define SHCLWLCTX_REV_IS_OTHER(a_uRevision) (((a_uRevision) & 1) == 0)
 /** Checks if the revision indicates our side's clipboard ownership. */
 #define SHCLWLCTX_REV_IS_OUR(a_uRevision)   (((a_uRevision) & 1) == 1)
+
+/** MIME type used for storing SHCLCONTEXT::Wl::uRevision and flag the (wayland)
+ *  clipboard as our. */
+#define VBOX_CLIPBOARD_MIME_TYPE_REVISION_NO    "application/x.virtualbox.vboxclient.revno"
 
 /** Shared Clipboard context.
  *  Only one context is supported at a time for now. */

@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  */
@@ -628,13 +628,24 @@ int VBClWaylandXdcpSetGuestClipboard(int fd, vbox_wl_xdcp_base_ctx_t *pCtx, cons
     PSHCLCONTEXT const pShClCtx = pCtx->pShClCtx;
     if (RT_VALID_PTR(pShClCtx))
     {
-        void  *pvWaylandData = NULL;
-        size_t cbWaylandData = 0;
-        rc = VBClWaylandClipboardQueryHostData(pShClCtx, pcszMimeType, &pvWaylandData, &cbWaylandData);
-        if (RT_SUCCESS(rc))
+        if (RTStrICmpAscii(pcszMimeType, VBOX_CLIPBOARD_MIME_TYPE_REVISION_NO) == 0)
         {
-            rc = vbcl_wayland_hlp_dcp_write_wl_fd(fd, pvWaylandData, cbWaylandData);
-            RTMemFree(pvWaylandData);
+            uint64_t uRevision = pShClCtx->Wl.uRevision;
+            if (SHCLWLCTX_REV_IS_OTHER(uRevision))
+                rc = vbcl_wayland_hlp_dcp_write_wl_fd(fd, &uRevision, sizeof(uRevision));
+            else
+                rc = VINF_SUCCESS;
+        }
+        else
+        {
+            void  *pvWaylandData = NULL;
+            size_t cbWaylandData = 0;
+            rc = VBClWaylandClipboardQueryHostData(pShClCtx, pcszMimeType, &pvWaylandData, &cbWaylandData);
+            if (RT_SUCCESS(rc))
+            {
+                rc = vbcl_wayland_hlp_dcp_write_wl_fd(fd, pvWaylandData, cbWaylandData);
+                RTMemFree(pvWaylandData);
+            }
         }
     }
     else
