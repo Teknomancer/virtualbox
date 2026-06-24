@@ -1,4 +1,4 @@
-/* $Id: DevPciVfio.cpp 114510 2026-06-24 14:57:19Z alexander.eichner@oracle.com $ */
+/* $Id: DevPciVfio.cpp 114513 2026-06-24 18:04:38Z alexander.eichner@oracle.com $ */
 /** @file
  * PCI passthrough device emulation using VFIO/IOMMUFD.
  */
@@ -2130,73 +2130,80 @@ static int pciVfioMapRegion(PVFIOPCI pThis, RTGCPHYS GCPhysStart, uintptr_t uPtr
 }
 
 
-static int pciVfioIommuGuestRamMap(PVFIOPCI pThis, PPDMDEVINS pDevIns)
+static void pciVfioIommuGuestRamMapRange(PVFIOPCI pThis, PPDMDEVINS pDevIns, RTGCPHYS GCPhysStart, RTGCPHYS cbMap)
 {
-    if (!pThis->fGuestRamMapped)
+    /** @todo This is a really gross hack because we currently lack
+     * a dedicated interface to get knowledge about guest RAM mappings.
+     * This might also return mappings for stuff not being guest RAM.
+     * Also this will allocate all guest RAM instantly but there is no way
+     * around that anyway in order for the IOMMU to work correctly.
+     */
+    uintptr_t uPtrMapping = 0;
+    size_t    cbMapping   = 0;
+    for (RTGCPHYS GCPhys = GCPhysStart; GCPhys < GCPhysStart + cbMap; GCPhys += _4K)
     {
-        /** @todo This is a really gross hack because we currently lack
-         * a dedicated interface to get knowledge about guest RAM mappings.
-         * This might also return mappings for stuff not being guest RAM.
-         */
-        RTGCPHYS  GCPhysStart = 0;
-        uintptr_t uPtrMapping = 0;
-        size_t    cbMapping   = 0;
-        for (RTGCPHYS GCPhys = 0; GCPhys < _4G + PDMDevHlpMMPhysGetRamSizeAbove4GB(pDevIns); GCPhys += _4K)
+        void *pv = NULL;
+        PGMPAGEMAPLOCK Lock;
+        int rc = PDMDevHlpPhysGCPhys2CCPtr(pDevIns, GCPhys, 0 /*fFlags*/, &pv, &Lock);
+        if (RT_SUCCESS(rc))
         {
-            void *pv = NULL;
-            PGMPAGEMAPLOCK Lock;
-            int rc = PDMDevHlpPhysGCPhys2CCPtr(pDevIns, GCPhys, 0 /*fFlags*/, &pv, &Lock);
-            if (RT_SUCCESS(rc))
+            if (cbMapping)
             {
-                if (cbMapping)
-                {
-                    if (uPtrMapping + cbMapping == (uintptr_t)pv)
-                        cbMapping += _4K;
-                    else
-                    {
-                        rc = pciVfioMapRegion(pThis, GCPhysStart, uPtrMapping, cbMapping);
-                        if (RT_FAILURE(rc))
-                            LogRel(("Mapping %RGp/%zu failed with %Rrc\n", GCPhysStart, cbMapping, rc));
-
-                        GCPhysStart = GCPhys;
-                        uPtrMapping = (uintptr_t)pv;
-                        cbMapping = _4K;
-                    }
-                }
+                if (uPtrMapping + cbMapping == (uintptr_t)pv)
+                    cbMapping += _4K;
                 else
                 {
-                    Assert(!uPtrMapping);
+                    rc = pciVfioMapRegion(pThis, GCPhysStart, uPtrMapping, cbMapping);
+                    if (RT_FAILURE(rc))
+                        LogRel(("Mapping %RGp/%zu failed with %Rrc\n", GCPhysStart, cbMapping, rc));
+
                     GCPhysStart = GCPhys;
                     uPtrMapping = (uintptr_t)pv;
                     cbMapping = _4K;
                 }
-                PDMDevHlpPhysReleasePageMappingLock(pDevIns, &Lock);
             }
-            else if (cbMapping)
+            else
             {
-                LogRel(("PDMDevHlpPhysGCPhys2CCPtr(,%RGp) -> %Rrc\n", GCPhys, rc));
-                /* Map what we currently have. */
-                Assert(uPtrMapping);
-                rc = pciVfioMapRegion(pThis, GCPhysStart, uPtrMapping, cbMapping);
-                if (RT_FAILURE(rc))
-                    LogRel(("Mapping %RGp/%zu failed with %Rrc\n", GCPhysStart, cbMapping, rc));
-                cbMapping   = 0;
-                uPtrMapping = 0;
+                Assert(!uPtrMapping);
                 GCPhysStart = GCPhys;
+                uPtrMapping = (uintptr_t)pv;
+                cbMapping = _4K;
             }
+            PDMDevHlpPhysReleasePageMappingLock(pDevIns, &Lock);
         }
-
-        if (cbMapping)
+        else if (cbMapping)
         {
+            LogRel(("PDMDevHlpPhysGCPhys2CCPtr(,%RGp) -> %Rrc\n", GCPhys, rc));
             /* Map what we currently have. */
             Assert(uPtrMapping);
-            int rc = pciVfioMapRegion(pThis, GCPhysStart, uPtrMapping, cbMapping);
+            rc = pciVfioMapRegion(pThis, GCPhysStart, uPtrMapping, cbMapping);
             if (RT_FAILURE(rc))
                 LogRel(("Mapping %RGp/%zu failed with %Rrc\n", GCPhysStart, cbMapping, rc));
             cbMapping   = 0;
             uPtrMapping = 0;
+            GCPhysStart = GCPhys;
         }
+    }
 
+    if (cbMapping)
+    {
+        /* Map what we currently have. */
+        Assert(uPtrMapping);
+        int rc = pciVfioMapRegion(pThis, GCPhysStart, uPtrMapping, cbMapping);
+        if (RT_FAILURE(rc))
+            LogRel(("Mapping %RGp/%zu failed with %Rrc\n", GCPhysStart, cbMapping, rc));
+        cbMapping   = 0;
+        uPtrMapping = 0;
+    }
+}
+
+
+static int pciVfioIommuGuestRamMap(PVFIOPCI pThis, PPDMDEVINS pDevIns)
+{
+    if (!pThis->fGuestRamMapped)
+    {
+        pciVfioIommuGuestRamMapRange(pThis, pDevIns,   0 /*GCPhysStart*/, PDMDevHlpMMPhysGetRamSizeBelow4GB(pDevIns));
+        pciVfioIommuGuestRamMapRange(pThis, pDevIns, _4G /*GCPhysStart*/, PDMDevHlpMMPhysGetRamSizeAbove4GB(pDevIns));
         pThis->fGuestRamMapped = true;
     }
 
