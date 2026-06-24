@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.cpp 114498 2026-06-23 10:27:54Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxDX.cpp 114508 2026-06-24 14:34:30Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VirtualBox D3D user mode driver.
  */
@@ -1048,6 +1048,9 @@ PVBOXDXKMRESOURCE vboxDXAllocateKMResource(PVBOXDX_DEVICE pDevice, HANDLE hResou
         ddiAllocationInfo.Flags.Primary     = 1;
     }
 
+    if (pKMResource->AllocationDesc.resourceInfo.MiscFlags & D3D10_DDI_RESOURCE_MISC_SHARED)
+        pKMResource->flags.fShared = 1;
+
     D3DDDICB_ALLOCATE ddiAllocate;
     RT_ZERO(ddiAllocate);
     ddiAllocate.hResource        = hResource;
@@ -1060,6 +1063,7 @@ PVBOXDXKMRESOURCE vboxDXAllocateKMResource(PVBOXDX_DEVICE pDevice, HANDLE hResou
                      vboxDXDeallocateKMResource(pDevice, pKMResource); vboxDXDeviceSetError(pDevice, hr),
                      false);
 
+    pKMResource->hResource = hResource;
     pKMResource->hAllocation = ddiAllocationInfo.hAllocation;
 
     if (fZero)
@@ -1087,15 +1091,16 @@ PVBOXDXKMRESOURCE vboxDXAllocateKMResource(PVBOXDX_DEVICE pDevice, HANDLE hResou
 }
 
 
-PVBOXDXKMRESOURCE vboxDXOpenKMResource(PVBOXDX_DEVICE pDevice, D3DKMT_HANDLE hAllocation,
+PVBOXDXKMRESOURCE vboxDXOpenKMResource(PVBOXDX_DEVICE pDevice, HANDLE hResource, D3DKMT_HANDLE hAllocation,
                                        VBOXDXALLOCATIONDESC const *pDesc)
 {
     PVBOXDXKMRESOURCE pKMResource = (PVBOXDXKMRESOURCE)RTMemAllocZ(sizeof(VBOXDXKMRESOURCE));
     AssertReturnStmt(pKMResource, vboxDXDeviceSetError(pDevice, E_OUTOFMEMORY), NULL);
 
+    pKMResource->hResource = hResource;
     pKMResource->hAllocation = hAllocation;
     pKMResource->AllocationDesc = *pDesc;
-    pKMResource->flags.fOpened = 1;
+    pKMResource->flags.fShared = 1;
     return pKMResource;
 }
 
@@ -1104,15 +1109,22 @@ void vboxDXDeallocateKMResource(PVBOXDX_DEVICE pDevice, PVBOXDXKMRESOURCE pKMRes
 {
     if (pKMResource)
     {
-        Assert(!pKMResource->flags.fOpened);
-
         if (pKMResource->hAllocation)
         {
             D3DDDICB_DEALLOCATE ddiDeallocate;
             RT_ZERO(ddiDeallocate);
-            //ddiDeallocate.hResource    = NULL;
-            ddiDeallocate.NumAllocations = 1;
-            ddiDeallocate.HandleList     = &pKMResource->hAllocation;
+            if (pKMResource->flags.fShared)
+            {
+                ddiDeallocate.hResource        = pKMResource->hResource;
+                //ddiDeallocate.NumAllocations = 0;
+                //ddiDeallocate.HandleList     = NULL;
+            }
+            else
+            {
+                //ddiDeallocate.hResource    = NULL;
+                ddiDeallocate.NumAllocations = 1;
+                ddiDeallocate.HandleList     = &pKMResource->hAllocation;
+            }
 
             HRESULT hr = pDevice->pRTCallbacks->pfnDeallocateCb(pDevice->hRTDevice.handle, &ddiDeallocate);
             LogFlowFunc(("pfnDeallocateCb returned 0x%x, hAllocation 0x%x", hr, pKMResource->hAllocation));
@@ -1350,7 +1362,7 @@ bool vboxDXOpenResource(PVBOXDX_DEVICE pDevice, PVBOXDX_RESOURCE pResource,
     AssertReturnStmt(pOpenResource->pOpenAllocationInfo2[0].PrivateDriverDataSize == sizeof(VBOXDXALLOCATIONDESC),
                      vboxDXDeviceSetError(pDevice, E_INVALIDARG), false);
 
-    pResource->pKMResource = vboxDXOpenKMResource(pDevice, pOpenResource->pOpenAllocationInfo2[0].hAllocation,
+    pResource->pKMResource = vboxDXOpenKMResource(pDevice, pResource->hRTResource.handle, pOpenResource->pOpenAllocationInfo2[0].hAllocation,
                                                   (VBOXDXALLOCATIONDESC *)pOpenResource->pOpenAllocationInfo2[0].pPrivateDriverData);
     if (!pResource->pKMResource)
         return false;
@@ -1404,7 +1416,7 @@ void vboxDXDestroyResource(PVBOXDX_DEVICE pDevice, PVBOXDX_RESOURCE pResource)
     /* Remove from the list of active resources. */
     RTListNodeRemove(&pResource->pKMResource->nodeResource);
 
-    if (pResource->pKMResource->AllocationDesc.fPrimary)
+    if (pResource->pKMResource->AllocationDesc.fPrimary || pResource->pKMResource->flags.fShared)
     {
         /* Delete immediately. */
         vboxDXDeallocateKMResource(pDevice, pResource->pKMResource);
@@ -1412,18 +1424,9 @@ void vboxDXDestroyResource(PVBOXDX_DEVICE pDevice, PVBOXDX_RESOURCE pResource)
     }
     else
     {
-        if (   !pResource->pKMResource->flags.fOpened
-            && !RT_BOOL(pResource->pKMResource->AllocationDesc.resourceInfo.MiscFlags & D3D10_DDI_RESOURCE_MISC_SHARED))
-        {
-            /* Set the resource for deferred destruction. */
-            pResource->pKMResource->resource.pResource = NULL;
-            RTListAppend(&pDevice->listDestroyedResources, &pResource->pKMResource->nodeResource);
-        }
-        else
-        {
-            /* Opened shared resources must not be actually deleted. Just free the KM structure. */
-            RTMemFree(pResource->pKMResource);
-        }
+        /* Set the resource for deferred destruction. */
+        pResource->pKMResource->resource.pResource = NULL;
+        RTListAppend(&pDevice->listDestroyedResources, &pResource->pKMResource->nodeResource);
     }
 }
 
@@ -4523,15 +4526,9 @@ static void dxDeallocateStagingResources(PVBOXDX_DEVICE pDevice)
 
 static void dxDestroyDeferredResources(PVBOXDX_DEVICE pDevice)
 {
-    uint64_t const u64LastCompletedFenceValue = ASMAtomicReadU64(pDevice->ContextMonitoring.pLastCompletedFenceValue);
-
     PVBOXDXKMRESOURCE pKMResource, pNext;
     RTListForEachSafe(&pDevice->listDestroyedResources, pKMResource, pNext, VBOXDXKMRESOURCE, nodeResource)
     {
-        /* Check if the resource is still in use. */
-        if (pKMResource->LastReferencedFenceValue > u64LastCompletedFenceValue)
-            continue;
-
         RTListNodeRemove(&pKMResource->nodeResource);
         vboxDXDeallocateKMResource(pDevice, pKMResource);
     }
