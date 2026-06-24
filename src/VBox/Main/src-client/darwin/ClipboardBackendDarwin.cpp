@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendDarwin.cpp 114383 2026-06-16 10:23:27Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendDarwin.cpp 114511 2026-06-24 14:57:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host.
  */
@@ -264,12 +264,13 @@ int ShClBackendReportFormats(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFOR
 
     LogFlowFunc(("fFormats=%02X\n", fFormats));
 
-    /** @todo r=bird: BUGBUG: The following is probably a mistake. */
-    /** @todo r=andy: BUGBUG: Has been there since forever; needs investigation first before removing. */
     if (fFormats == VBOX_SHCL_FMT_NONE)
     {
-        /* This is just an automatism, not a genuine announcement */
-        return VINF_SUCCESS;
+        SHCLCONTEXT *pCtx = pClient->State.pCtx;
+        RTCritSectEnter(&g_ctx.CritSect);
+        int vrcClear = clearPasteboard(pCtx->hPasteboard, &pCtx->hStrOwnershipFlavor);
+        RTCritSectLeave(&g_ctx.CritSect);
+        return vrcClear;
     }
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
