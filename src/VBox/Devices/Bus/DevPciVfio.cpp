@@ -1,4 +1,4 @@
-/* $Id: DevPciVfio.cpp 114420 2026-06-18 07:05:22Z alexander.eichner@oracle.com $ */
+/* $Id: DevPciVfio.cpp 114510 2026-06-24 14:57:19Z alexander.eichner@oracle.com $ */
 /** @file
  * PCI passthrough device emulation using VFIO/IOMMUFD.
  */
@@ -387,6 +387,41 @@ typedef struct VFIOPCI
 } VFIOPCI;
 /** Pointer to the raw PCI instance data. */
 typedef VFIOPCI *PVFIOPCI;
+
+
+/** Pointer to a const PCI quirk. */
+typedef const struct VFIOPCIQUIRK *PCVFIOPCIQUIRK;
+
+
+/**
+ * Applies quirks based on the detected vendir/device ID.
+ *
+ * @returns VBox status code.
+ * @param   pThis               The VFIO PCI device instance.
+ * @param   pFun                The function to apply the quirk to.
+ * @param   pQuirk              The quirk to apply.
+ */
+typedef DECLCALLBACKTYPE(int, FNVFIOPCIQUIRKAPPLY, (PVFIOPCI pThis, PVFIOPCIFUN pFun, PCVFIOPCIQUIRK pQuirk));
+/** Pointer to a quirk apply callback. */
+typedef FNVFIOPCIQUIRKAPPLY *PFNVFIOPCIQUIRKAPPLY;
+
+
+/**
+ * A quirk entry.
+ */
+typedef struct VFIOPCIQUIRK
+{
+    /** The vendor ID. */
+    uint16_t                idVendor;
+    /** The device ID. */
+    uint16_t                idDevice;
+    /** Some flags for the quirk. */
+    uint32_t                fQuirk;
+    /** The quirk handler. */
+    PFNVFIOPCIQUIRKAPPLY    pfnApply;
+    /** The quirk description for logging. */
+    const char              *pszDesc;
+} VFIOPCIQUIRK;
 
 
 #ifndef VBOX_DEVICE_STRUCT_TESTCASE
@@ -1946,9 +1981,10 @@ static int pciVfioCfgSpaceParseExtCapabilities(PVFIOPCI pThis, PVFIOPCIFUN pFun,
          */
         /** @todo Maybe check whether the new capability was visited already to avoid endless loops, which would
          * indicate a broken device. */
-        if (offCapNext < offCap + cbCap)
+        if (   offCapNext >= offCap
+            && offCapNext < offCap + cbCap)
             return PDMDevHlpVMSetError(pDevIns, VERR_INVALID_STATE, RT_SRC_POS,
-                                       N_("Next capability pointer points inside the current capability (next offset %#x )"), offCapNext);
+                                       N_("Next capability pointer points inside the current capability (next offset %#x, current [%#x:%#x[)"), offCapNext, offCap, cbCap);
 
         offCap = offCapNext;
     }
@@ -2357,9 +2393,10 @@ static DECLCALLBACK(VBOXSTRICTRC) pciVfioConfigWrite(PPDMDEVINS pDevIns, PPDMPCI
                                 pThis->iInstance, pFun->uPciFun, rc));
                 }
 
-                /* Check whether the INTx config changes. */
+                /* Check whether the INTx config changes and reconfigure the interrupt mode if INTx is supported by the device. */
                 bool const fIntxEnabled = !RT_BOOL(u32Value & RT_BIT(10));
-                if (fIntxEnabled != (pFun->uIrqModeCur == VFIO_PCI_INTX_IRQ_INDEX))
+                if (   (fIntxEnabled != (pFun->uIrqModeCur == VFIO_PCI_INTX_IRQ_INDEX))
+                    && pFun->acIrqVectors[VFIO_PCI_INTX_IRQ_INDEX])
                 {
                     rc = pciVfioIrqReconfigure(pThis, pFun, VFIO_PCI_INTX_IRQ_INDEX, fIntxEnabled ? 1 : 0);
                     if (RT_FAILURE(rc))
@@ -2417,6 +2454,69 @@ static DECLCALLBACK(VBOXSTRICTRC) pciVfioConfigWrite(PPDMDEVINS pDevIns, PPDMPCI
         }
         default:
             AssertReleaseFailed();
+    }
+
+    return rc;
+}
+
+
+/**
+ * Quirk handler for Intel Battlemage GPUs where the Windows driver reads from PCI config space 0x50
+ * when no hypervisor is detected and the physical device is passed through (does not apply to virtual functions in the SR-IOV case).
+ * The driver uses this to determine how much bytes to map for a PCI bar. However the 0x50 offset is not passed through because
+ * it is not part of the standard config space and not part of a capability and therefore returns 0.
+ * This results in the driver trying to map 0 bytes when calling DxgkcbMapMemory() which fails with NTSTATUS_INVALID_PARAMETER.
+ * The quirk just statically passes through the 0x50 offset readonly.
+ */
+static DECLCALLBACK(int) pciVfioQuirkIntelBattlemageApply(PVFIOPCI pThis, PVFIOPCIFUN pFun, PCVFIOPCIQUIRK pQuirk)
+{
+    RT_NOREF(pThis, pQuirk);
+
+    for (uint32_t i = 0x50; i < 0x50 + 16; i += 4)
+        pciVfioCfgSpaceSetInterceptRoU32(pFun, i, VFIO_PCI_CFG_SPACE_ACCESS_PASSTHROUGH);
+
+    return VINF_SUCCESS;
+}
+
+
+/*
+ * Quirk handling.
+ */
+static const VFIOPCIQUIRK g_aQuirks[] =
+{
+    /** Intel */
+    { 0x8086, 0xe223, 0, pciVfioQuirkIntelBattlemageApply, "Intel Arc Pro B70 config space passthrough" } /**< Intel Corporation Battlemage G31 [Arc Pro B70] */
+};
+
+
+/**
+ * Applies quirks for the given function.
+ *
+ * @returns VBox status code.
+ * @param   pThis               Pointer to the PCI VFIO device instance.
+ * @param   pFun                The function to apply a possible quirk for.
+ */
+static int pciVfioQuirkApply(PVFIOPCI pThis, PVFIOPCIFUN pFun)
+{
+    uint16_t idVendor = 0;
+    uint16_t idDevice = 0;
+    int rc = pciVfioCfgSpaceReadU16(pFun, VBOX_PCI_VENDOR_ID, &idVendor);
+    if (RT_SUCCESS(rc))
+        rc = pciVfioCfgSpaceReadU16(pFun, VBOX_PCI_DEVICE_ID, &idDevice);
+    if (RT_SUCCESS(rc))
+    {
+        for (uint32_t i = 0; i < RT_ELEMENTS(g_aQuirks); i++)
+        {
+            PCVFIOPCIQUIRK pQuirk = &g_aQuirks[i];
+
+            if (   pQuirk->idVendor == idVendor
+                && pQuirk->idDevice == idDevice)
+            {
+                LogRel(("VFIO#%d.%u: Applying quirk \"%s\" for device %#RX16:%#RX16\n", pThis->iInstance, pFun->uPciFun,
+                        pQuirk->pszDesc, idVendor, idDevice));
+                return pQuirk->pfnApply(pThis, pFun, pQuirk);
+            }
+        }
     }
 
     return rc;
@@ -3004,6 +3104,11 @@ static DECLCALLBACK(int) pciVfioConstruct(PPDMDEVINS pDevIns, int iInstance, PCF
         }
         else
             PDMPciDevSetInterruptPin(pPciDev, 0);
+
+        /* Apply any quirks for the function. */
+        rc = pciVfioQuirkApply(pThis, pFun);
+        if (RT_FAILURE(rc))
+            return PDMDevHlpVMSetError(pDevIns, rc, RT_SRC_POS, N_("Applying quirk for device failed"));
 
         /* Subsequent function should use the same major as the previous one. */
         iPciDevNo = PDMPCIDEVREG_DEV_NO_SAME_AS_PREV;
