@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114506 2026-06-24 09:57:44Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -201,9 +201,22 @@ vbclWaylandHlpEdcpOfferV1ReceiveWrapper(VBCLWLHLP_XDCP_FILL_OUR_CACHE_FROM_OFFER
  * @param pDevice           Wayland Data Control Device object.
  * @param pOffer            Wayland Data Control Offer object.
  */
-static void vbcl_wayland_hlp_edcp_data_device_data_offer(
-    void *pvUser, struct ext_data_control_device_v1 *pDevice, struct ext_data_control_offer_v1 *pOffer)
+static void vbclWaylandHlpEdcpDataDeviceListener_DataOffer(void *pvUser, struct ext_data_control_device_v1 *pDevice,
+                                                           struct ext_data_control_offer_v1 *pOffer)
 {
+    /** @todo r=bird: This is called both before
+     * vbclWaylandHlpEdcpDataDeviceListener_Selection
+     * andvbclWaylandHlpEdcpDataDeviceListener_PrimarySelection. We're only
+     * interested in the _Selection variant, especially if we're currently proxying
+     * the host clipboard.  Iff this is a primary selection offer and we are
+     * proxying the host clipboard, we'll end our clipboard offering now,
+     * and any attempt to paste from it will fail.
+     *
+     * Moving this code to vbclWaylandHlpEdcpDataDeviceListener_Selection doesn't
+     * work, as the offers callbacks doesn't come.  So, we probably have to
+     * pre-record them here, then decide in the selection callbacks whether to start
+     * a new session (_Selection) or not (_PrimarySelection). */
+
     /*
      * Validate input a little.
      */
@@ -290,8 +303,8 @@ static void vbcl_wayland_hlp_edcp_data_device_data_offer(
  * @param pDevice           Wayland Data Control Device object.
  * @param pOffer            Wayland Data Control Offer object.
  */
-static void vbcl_wayland_hlp_edcp_data_device_selection(
-    void *pvUser, struct ext_data_control_device_v1 *pDevice, struct ext_data_control_offer_v1 *pOffer)
+static void vbclWaylandHlpEdcpDataDeviceListener_Selection(void *pvUser, struct ext_data_control_device_v1 *pDevice,
+                                                           struct ext_data_control_offer_v1 *pOffer)
 {
     RT_NOREF(pDevice, pvUser, pOffer);
     VBCL_LOG_CALLBACK;
@@ -306,8 +319,7 @@ static void vbcl_wayland_hlp_edcp_data_device_selection(
  * @param pvUser            Context data.
  * @param pDevice           Wayland Data Control Device object.
  */
-static void vbcl_wayland_hlp_edcp_data_device_finished(
-    void *pvUser, struct ext_data_control_device_v1 *pDevice)
+static void vbclWaylandHlpEdcpDataDeviceListener_Finished(void *pvUser, struct ext_data_control_device_v1 *pDevice)
 {
     vbox_wl_edcp_ctx_t *pCtx = (vbox_wl_edcp_ctx_t *)pvUser;
 
@@ -331,8 +343,8 @@ static void vbcl_wayland_hlp_edcp_data_device_finished(
  * @param pDevice           Wayland Data Control Device object.
  * @param pOffer            Wayland Data Control Offer object.
  */
-static void vbcl_wayland_hlp_edcp_data_device_primary_selection(
-    void *pvUser, struct ext_data_control_device_v1 *pDevice, struct ext_data_control_offer_v1 *pOffer)
+static void vbclWaylandHlpEdcpDataDeviceListener_PrimarySelection(void *pvUser, struct ext_data_control_device_v1 *pDevice,
+                                                                  struct ext_data_control_offer_v1 *pOffer)
 {
     RT_NOREF(pDevice, pvUser, pOffer);
     VBCL_LOG_CALLBACK;
@@ -342,10 +354,10 @@ static void vbcl_wayland_hlp_edcp_data_device_primary_selection(
 /** Data Control Device interface callbacks. */
 static const struct ext_data_control_device_v1_listener g_data_device_listener =
 {
-    &vbcl_wayland_hlp_edcp_data_device_data_offer,
-    &vbcl_wayland_hlp_edcp_data_device_selection,
-    &vbcl_wayland_hlp_edcp_data_device_finished,
-    &vbcl_wayland_hlp_edcp_data_device_primary_selection,
+    vbclWaylandHlpEdcpDataDeviceListener_DataOffer,
+    vbclWaylandHlpEdcpDataDeviceListener_Selection,
+    vbclWaylandHlpEdcpDataDeviceListener_Finished,
+    vbclWaylandHlpEdcpDataDeviceListener_PrimarySelection,
 };
 
 
