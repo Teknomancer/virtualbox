@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114461 2026-06-19 14:15:10Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114527 2026-06-25 10:40:19Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -1519,7 +1519,7 @@ static int vmsvgaReadPort(PPDMDEVINS pDevIns, PVGASTATE pThis, uint32_t idxReg, 
 #ifdef VBOX_WITH_VMSVGA3D
             *pu32 = SVGA3D_MAX_SURFACE_MEM_SIZE;
 #else
-            *pu32 = _1G / _1K; /* Arbitrary value. */
+            *pu32 = _256M; /* Arbitrary value. */
 #endif
             break;
 
