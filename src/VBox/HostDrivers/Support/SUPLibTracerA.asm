@@ -1,4 +1,4 @@
-; $Id: SUPLibTracerA.asm 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+; $Id: SUPLibTracerA.asm 114517 2026-06-25 07:52:48Z andreas.loeffler@oracle.com $
 ;; @file
 ; VirtualBox Support Library - Tracer Interface, Assembly bits.
 ;
@@ -77,7 +77,7 @@ BEGINCODE
 ; Set up a SUPTRACERUMODFIREPROBE request package on the stack and a C helper
 ; function in SUPLib.cpp to do the rest.
 ;
-EXPORTEDNAME SUPTracerFireProbe
+BEGINPROC_EXPORTED SUPTracerFireProbe
         push    xBP
         mov     xBP, xSP
 
