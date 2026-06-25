@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114530 2026-06-25 10:47:49Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -386,8 +386,6 @@ static uint32_t shclEventTryRetain(PSHCLEVENT pEvent)
         if (ASMAtomicCmpXchgExU32(&pEvent->cRefs, cRefs + 1, cRefs, &cRefs))
             return cRefs + 1;
     }
-
-    return UINT32_MAX; /* Never reached. */
 }
 
 /**
