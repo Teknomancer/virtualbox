@@ -1,4 +1,4 @@
-/* $Id: VBoxManageClipboard.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageClipboard.cpp 114534 2026-06-25 12:14:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of the clipboard command.
  */
@@ -134,16 +134,40 @@ static void shclVerbose(const char *pszFormat, ...)
 
 /** Set by the signal handler when a long-running clipboard command should stop. */
 static bool volatile g_fClipboardCanceled = false;
+#ifdef RT_OS_WINDOWS
+/**
+ * Console control handler for gracefully stopping long-running clipboard commands.
+ *
+ * @param   dwCtrlType      Console control event type.
+ */
+static BOOL WINAPI shclSignalHandler(DWORD dwCtrlType) RT_NOTHROW_DEF
+{
+    bool fEventHandled = FALSE;
+    switch (dwCtrlType)
+    {
+        case CTRL_BREAK_EVENT:
+        case CTRL_CLOSE_EVENT:
+        case CTRL_C_EVENT:
+            ASMAtomicWriteBool(&g_fClipboardCanceled, true);
+            fEventHandled = TRUE;
+            break;
+        default:
+            break;
+    }
+
+    return fEventHandled;
+}
+#elif !defined(RT_OS_OS2)
 /** Signal handler function pointer type. */
 typedef void (*PFNSHCLSIGNALHANDLER)(int);
 /** Previous SIGINT handler restored after a long-running clipboard command exits. */
 static PFNSHCLSIGNALHANDLER g_pfnClipboardSigIntOld = SIG_DFL;
 /** Previous SIGTERM handler restored after a long-running clipboard command exits. */
 static PFNSHCLSIGNALHANDLER g_pfnClipboardSigTermOld = SIG_DFL;
-#ifdef SIGBREAK
+# ifdef SIGBREAK
 /** Previous SIGBREAK handler restored after a long-running clipboard command exits. */
 static PFNSHCLSIGNALHANDLER g_pfnClipboardSigBreakOld = SIG_DFL;
-#endif
+# endif
 
 
 /**
@@ -156,16 +180,23 @@ static void shclSignalHandler(int iSignal) RT_NOTHROW_DEF
     RT_NOREF(iSignal);
     ASMAtomicWriteBool(&g_fClipboardCanceled, true);
 }
+#endif /* !RT_OS_WINDOWS && !RT_OS_OS2 */
 
 
 /** Installs signal handling for long-running clipboard commands. */
 static void shclSignalHandlerInstall(void)
 {
     ASMAtomicWriteBool(&g_fClipboardCanceled, false);
+#ifdef RT_OS_WINDOWS
+    if (!SetConsoleCtrlHandler((PHANDLER_ROUTINE)shclSignalHandler, TRUE /* Add handler */))
+        RTMsgError(Clipboard::tr("Unable to install console control handler: %Rrc\n"),
+                   RTErrConvertFromWin32(GetLastError()));
+#elif !defined(RT_OS_OS2)
     g_pfnClipboardSigIntOld = signal(SIGINT, shclSignalHandler);
     g_pfnClipboardSigTermOld = signal(SIGTERM, shclSignalHandler);
-#ifdef SIGBREAK
+# ifdef SIGBREAK
     g_pfnClipboardSigBreakOld = signal(SIGBREAK, shclSignalHandler);
+# endif
 #endif
 }
 
@@ -173,13 +204,19 @@ static void shclSignalHandlerInstall(void)
 /** Uninstalls signal handling for long-running clipboard commands. */
 static void shclSignalHandlerUninstall(void)
 {
+#ifdef RT_OS_WINDOWS
+    if (!SetConsoleCtrlHandler((PHANDLER_ROUTINE)NULL, FALSE /* Remove handler */))
+        RTMsgError(Clipboard::tr("Unable to uninstall console control handler: %Rrc\n"),
+                   RTErrConvertFromWin32(GetLastError()));
+#elif !defined(RT_OS_OS2)
     if (g_pfnClipboardSigIntOld != SIG_ERR)
         (void)signal(SIGINT, g_pfnClipboardSigIntOld);
     if (g_pfnClipboardSigTermOld != SIG_ERR)
         (void)signal(SIGTERM, g_pfnClipboardSigTermOld);
-#ifdef SIGBREAK
+# ifdef SIGBREAK
     if (g_pfnClipboardSigBreakOld != SIG_ERR)
         (void)signal(SIGBREAK, g_pfnClipboardSigBreakOld);
+# endif
 #endif
 }
 
