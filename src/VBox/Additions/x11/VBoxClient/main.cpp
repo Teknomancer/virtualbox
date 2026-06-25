@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114514 2026-06-24 23:26:00Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114515 2026-06-25 00:20:17Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -79,8 +79,10 @@
  */
 typedef struct VBCLSERVICESTATE
 {
+    /** Pointer to the command descriptor. */
+    PCVBCLCOMMAND   pCommand;
     /** Pointer to the service descriptor. */
-    PVBCLSERVICE    pDesc;
+    PCVBCLSERVICE   pDesc;
     /** The worker thread. NIL_RTTHREAD if it's the main thread. */
     RTTHREAD        Thread;
     /** Whether Pre-init was called. */
@@ -100,7 +102,7 @@ typedef VBCLSERVICESTATE *PVBCLSERVICESTATE;
 *   Global Variables                                                                                                             *
 *********************************************************************************************************************************/
 /** The global service state. */
-VBCLSERVICESTATE       g_Service = { 0 };
+VBCLSERVICESTATE       g_Service = { NULL, NULL, NIL_RTTHREAD, false, false, false, false };
 
 /** Set by the signal handler when being called. */
 static volatile bool   g_fSignalHandlerCalled = false;
@@ -286,6 +288,76 @@ static int vboxClientSignalHandlerUninstall(void)
     return RTCritSectDelete(&g_csSignalHandler);
 }
 
+
+/**
+ * --session-detect
+ */
+static DECLCALLBACK(RTEXITCODE) vbclCmdSessionDetect(void)
+{
+    int rc = VBClLogCreateEx("" /* No file logging */, false /* No header */);
+    if (RT_SUCCESS(rc))
+    {
+        /* Make sure that we increase the verbosity (if needed), to gain some more insights
+         * when detecting the display server. */
+        rc = VBClLogModify("stdout", g_cVerbosity);
+        if (RT_SUCCESS(rc))
+        {
+            VBGHDISPLAYSERVERTYPE const enmType = VBGHDisplayServerTypeDetect();
+            VBClLogInfo("Detected session: %s\n", VBGHDisplayServerTypeToStr(enmType));
+            return enmType != VBGHDISPLAYSERVERTYPE_NONE ? RTEXITCODE_SUCCESS : RTEXITCODE_FAILURE;
+        }
+    }
+    return RTEXITCODE_FAILURE;
+}
+
+/** --session-detect */
+static VBCLCOMMAND const g_CmdSessionDetect =
+{
+    /* .pszName = */        "--session-detect",
+    /* .pszDesc = */        "",
+    /* .pszOptions = */     NULL,
+    /* .pfnOption = */      NULL,
+    /* .pfnExecute = */     vbclCmdSessionDetect,
+};
+
+
+/**
+ * --session-detect2
+ * The vboxwl --check variant.
+ */
+static DECLCALLBACK(RTEXITCODE) vbclCmdSessionDetect2(void)
+{
+    /* This is mainly about deciding whether we should use X11 service mode
+       or wayland.  Pure wayland leaves no options, of course. */
+    VBGHDISPLAYSERVERTYPE const enmType = VBGHDisplayServerTypeDetect();
+    bool fWayland = enmType == VBGHDISPLAYSERVERTYPE_PURE_WAYLAND;
+
+    /* In case of XWayland, X11 version of VBoxClient still can
+     * work, however with some DEs, such as Plasma on Wayland,
+     * this will no longer work. Detect such DEs here. */
+    if (enmType == VBGHDISPLAYSERVERTYPE_XWAYLAND)
+    {
+        const char *pszDesktopSession = RTEnvGet(VBGH_ENV_DESKTOP_SESSION);
+        fWayland = RT_VALID_PTR(pszDesktopSession)
+                && (   RTStrIStr(pszDesktopSession, "plasmawayland") != NULL
+                    || RTStrIStr(pszDesktopSession, "plasma")        != NULL);
+    }
+
+    RTPrintf("%s\n", fWayland ? "WL" : "X11");
+    return RTEXITCODE_SUCCESS;
+}
+
+/** --session-detect2 */
+static VBCLCOMMAND const g_CmdSessionDetect2 =
+{
+    /* .pszName = */        "--session-detect2",
+    /* .pszDesc = */        "",
+    /* .pszOptions = */     NULL,
+    /* .pfnOption = */      NULL,
+    /* .pfnExecute = */     vbclCmdSessionDetect2,
+};
+
+
 /**
  * Print out a usage message and exit with success.
  */
@@ -362,24 +434,16 @@ static RTEXITCODE vboxClientUsage(void)
  * Complains about seeing more than one service specification.
  *
  * @returns RTEXITCODE_SYNTAX.
+ * @param   pszOption       The option being processed.
  */
-static int vbclSyntaxOnlyOneService(void)
+static int vbclSyntaxOnlyOneServiceOrCommand(const char *pszOption)
 {
-    RTMsgError("More than one service specified! Only one, please.");
+    if (g_Service.pCommand)
+        RTMsgSyntax("%s: A command (%s) has already specified!", pszOption, g_Service.pCommand->pszName);
+    else
+        RTMsgSyntax("%s: A service (%s) has already specified!", pszOption, g_Service.pDesc->pszName);
     return RTEXITCODE_SYNTAX;
 }
-
-/**
- * Warns if there are more arguments after the current.
- */
-static void vbclSyntaxWarnIfMore(PRTGETOPTSTATE pState)
-{
-    Assert(pState->pDef && pState->pDef->pszLong);
-    if (   (pState->pszNextShort && *pState->pszNextShort != '\0')
-        || pState->iNext < pState->argc)
-        RTMsgWarning("Extra arguments following %s", pState->pDef->pszLong);
-}
-
 
 /**
  * The service thread.
@@ -549,9 +613,7 @@ int main(int argc, char *argv[])
     {
         { "--nodaemon",                     'd',                                RTGETOPT_REQ_NOTHING },
         { "--foreground",                   'f',                                RTGETOPT_REQ_NOTHING },
-        { "--help",                         'h',                                RTGETOPT_REQ_NOTHING },
         { "--logfile",                      'l',                                RTGETOPT_REQ_STRING  },
-        { "--version",                      'V',                                RTGETOPT_REQ_NOTHING },
         { "--verbose",                      'v',                                RTGETOPT_REQ_NOTHING },
         { "--session-type",                 VBOXCLIENT_OPT_SESSION_TYPE,        RTGETOPT_REQ_STRING  },
 
@@ -578,6 +640,8 @@ int main(int argc, char *argv[])
 #endif
 
         /* Non-service operations: */
+        { "--help",                         'h',                                RTGETOPT_REQ_NOTHING },
+        { "--version",                      'V',                                RTGETOPT_REQ_NOTHING },
         { "--session-detect",               VBOXCLIENT_OPT_SESSION_DETECT,      RTGETOPT_REQ_NOTHING },
         { "--session-detect2",              VBOXCLIENT_OPT_SESSION_DETECT2,     RTGETOPT_REQ_NOTHING },
     };
@@ -645,80 +709,38 @@ int main(int argc, char *argv[])
             /*
              * Services.
              */
+#define VBOXCLIENT_OPT_CASE_SERVICE(a_Opt, a_Service) \
+            case (a_Opt): \
+                Assert(GetState.pDef && GetState.pDef->pszLong); \
+                if ((g_Service.pDesc && (g_Service.pDesc != &(a_Service))) || g_Service.pCommand) \
+                    return vbclSyntaxOnlyOneServiceOrCommand(GetState.pDef->pszLong); \
+                g_Service.pDesc = &(a_Service); \
+                break
 #ifdef VBOX_WITH_GUEST_PROPS
-            case VBOXCLIENT_OPT_CHECK_HOST_VERSION:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcHostVersion;
-                break;
-            }
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_CHECK_HOST_VERSION,  g_SvcHostVersion);
 #endif
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-            case VBOXCLIENT_OPT_CLIPBOARD:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcClipboard;
-                break;
-            }
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_CLIPBOARD,           g_SvcClipboard);
 #endif
 #ifdef VBOX_WITH_DRAG_AND_DROP
-            case VBOXCLIENT_OPT_DRAGANDDROP:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcDragAndDrop;
-                break;
-            }
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_DRAGANDDROP,         g_SvcDragAndDrop);
 #endif
 #ifdef VBOX_WITH_SEAMLESS
-            case VBOXCLIENT_OPT_SEAMLESS:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcSeamless;
-                break;
-            }
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_SEAMLESS,            g_SvcSeamless);
 #endif
 #ifdef VBOX_WITH_VMSVGA
-            case VBOXCLIENT_OPT_VMSVGA:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcDisplaySVGA;
-                break;
-            }
-
-            case VBOXCLIENT_OPT_VMSVGA_SESSION:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_VMSVGA,              g_SvcDisplaySVGA);
 # ifdef RT_OS_LINUX
-                g_Service.pDesc = &g_SvcDisplaySVGASession;
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_VMSVGA_SESSION,      g_SvcDisplaySVGASession);
 # else
-                g_Service.pDesc = &g_SvcDisplaySVGA;
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_VMSVGA_SESSION,      g_SvcDisplaySVGA);
 # endif
-                break;
-            }
-
-            case VBOXCLIENT_OPT_DISPLAY:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcDisplayLegacy;
-                break;
-            }
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_DISPLAY,             g_SvcDisplayLegacy);
 #endif
 #ifdef VBOX_WITH_WAYLAND_ADDITIONS
-            case VBOXCLIENT_OPT_WAYLAND:
-            {
-                if (g_Service.pDesc)
-                    return vbclSyntaxOnlyOneService();
-                g_Service.pDesc = &g_SvcWayland;
-                break;
-            }
+            VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_WAYLAND,             g_SvcWayland);
 #endif
+#undef VBOXCLIENT_OPT_CASE_SERVICE
 
             /*
              * Non-service operations.
@@ -730,48 +752,16 @@ int main(int argc, char *argv[])
                 RTPrintf("%sr%s\n", RTBldCfgVersion(), RTBldCfgRevisionStr());
                 return RTEXITCODE_SUCCESS;
 
-            case VBOXCLIENT_OPT_SESSION_DETECT:
-            {
-                vbclSyntaxWarnIfMore(&GetState);
-                rc = VBClLogCreateEx("" /* No file logging */, false /* No header */);
-                if (RT_SUCCESS(rc))
-                {
-                    /* Make sure that we increase the verbosity (if needed), to gain some more insights
-                     * when detecting the display server. */
-                    rc = VBClLogModify("stdout", g_cVerbosity);
-                    if (RT_SUCCESS(rc))
-                    {
-                        VBGHDISPLAYSERVERTYPE const enmType = VBGHDisplayServerTypeDetect();
-                        VBClLogInfo("Detected session: %s\n", VBGHDisplayServerTypeToStr(enmType));
-                        return enmType != VBGHDISPLAYSERVERTYPE_NONE ? RTEXITCODE_SUCCESS : RTEXITCODE_FAILURE;
-                    }
-                }
-                return RTEXITCODE_FAILURE;
-            }
-
-            case VBOXCLIENT_OPT_SESSION_DETECT2: /* the vboxwl variant, may need to put this in a function... */
-            {
-                /* This is mainly about deciding whether we should use X11 service mode
-                   or wayland.  Pure wayland leaves no options, of course. */
-                vbclSyntaxWarnIfMore(&GetState);
-                VBGHDISPLAYSERVERTYPE const enmType = VBGHDisplayServerTypeDetect();
-                bool fWayland = enmType == VBGHDISPLAYSERVERTYPE_PURE_WAYLAND;
-
-                /* In case of XWayland, X11 version of VBoxClient still can
-                 * work, however with some DEs, such as Plasma on Wayland,
-                 * this will no longer work. Detect such DEs here. */
-                if (enmType == VBGHDISPLAYSERVERTYPE_XWAYLAND)
-                {
-                    const char *pszDesktopSession = RTEnvGet(VBGH_ENV_DESKTOP_SESSION);
-                    fWayland = RT_VALID_PTR(pszDesktopSession)
-                            && (   RTStrIStr(pszDesktopSession, "plasmawayland") != NULL
-                                || RTStrIStr(pszDesktopSession, "plasma")        != NULL);
-                }
-
-                RTPrintf("%s\n", fWayland ? "WL" : "X11");
-                return RTEXITCODE_SUCCESS;
-            }
-
+#define VBOXCLIENT_OPT_CASE_COMMAND(a_Opt, a_Command) \
+            case (a_Opt): \
+                Assert(GetState.pDef && GetState.pDef->pszLong); \
+                if (g_Service.pDesc || (g_Service.pCommand && g_Service.pCommand != &(a_Command))) \
+                    return vbclSyntaxOnlyOneServiceOrCommand(GetState.pDef->pszLong); \
+                g_Service.pCommand = &(a_Command); \
+                break
+            VBOXCLIENT_OPT_CASE_COMMAND(VBOXCLIENT_OPT_SESSION_DETECT,      g_CmdSessionDetect);
+            VBOXCLIENT_OPT_CASE_COMMAND(VBOXCLIENT_OPT_SESSION_DETECT2,     g_CmdSessionDetect2);
+#undef VBOXCLIENT_OPT_CASE_COMMAND
             /*
              * Service specific options (currently unused) and syntax errors.
              */
@@ -799,6 +789,15 @@ int main(int argc, char *argv[])
         } /* switch */
     } /* while RTGetOpt */
 
+    /*
+     * Command? Execute it and quit. No Vbgl init.
+     */
+    if (g_Service.pCommand)
+        return g_Service.pCommand->pfnExecute();
+
+    /*
+     * Service.
+     */
     if (!g_Service.pDesc)
         return RTMsgErrorExit(RTEXITCODE_SYNTAX, "No service specified. Quitting because nothing to do!");
 
