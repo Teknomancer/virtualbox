@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.h 114423 2026-06-18 07:53:57Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.h 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - header file for shared clipboard data transfer
  * interfaces and platform-dependent backend functionality.
@@ -327,6 +327,9 @@ SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFOR
  */
 int ShClSvcReadDataFromGuestAsync(PSHCLCLIENT pClient, SHCLFORMATS fFormats, PSHCLEVENT *ppEvent);
 int ShClSvcReadDataFromGuest(PSHCLCLIENT pClient, SHCLFORMAT uFmt, void **ppv, uint32_t *pcb);
+int ShClSvcGuestDataRetainValidatedEvent(PSHCLCLIENT pClient, PSHCLCLIENTCMDCTX pCmdCtx,
+                                         SHCLFORMAT uFormat, PSHCLEVENT *ppEvent);
+int ShClSvcGuestDataSignalEvent(PSHCLEVENT pEvent, SHCLEVENTID idEvent, void *pvData, uint32_t cbData);
 int ShClSvcGuestDataSignal(PSHCLCLIENT pClient, PSHCLCLIENTCMDCTX pCmdCtx, SHCLFORMAT uFormat, void *pvData, uint32_t cbData);
 int ShClSvcReportFormats(PSHCLCLIENT pClient, SHCLFORMATS fFormats);
 PSHCLBACKEND ShClSvcGetBackend(void);

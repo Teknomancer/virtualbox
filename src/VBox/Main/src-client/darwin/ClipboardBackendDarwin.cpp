@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendDarwin.cpp 114511 2026-06-24 14:57:30Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendDarwin.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host.
  */
@@ -83,9 +83,7 @@ static SHCLCONTEXT g_ctx;
 static int shClBackendReportFormatsToGuestAndMain(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
 {
 #ifdef VBOX_COM_INPROC
-    GuestShCl *pShCl = GuestShCl::tryGetInstance();
-    if (pShCl)
-        return pShCl->reportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
+    return GuestShCl::GetInst()->ReportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
 #endif
     return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
 }

@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -57,6 +57,11 @@ public:
                        ClipboardSource_T *aSource,
                        com::Utf8Str &aMimeType,
                        std::vector<BYTE> &aBuffer);
+    HRESULT i_readDataForFormat(ClipboardAction_T aAction,
+                                uint32_t uFormat,
+                                ClipboardSource_T *aSource,
+                                com::Utf8Str &aMimeType,
+                                std::vector<BYTE> &aBuffer);
     HRESULT i_readFormats(std::vector<com::Utf8Str> &aFormats);
     HRESULT i_writeData(ClipboardAction_T aAction,
                         ClipboardSource_T aSource,
@@ -69,7 +74,21 @@ public:
     HRESULT i_reset();
     HRESULT i_transferCancel(ULONG aTransferId);
     HRESULT i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual);
+    HRESULT i_requestData(const com::Utf8Str &aMimeType, ULONG *aRequestId);
     HRESULT i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSource, uint32_t fFormat, const void *pvData, uint32_t cbData);
+    HRESULT i_hostClipboardReportFormats(ClipboardAction_T aAction,
+                                         ClipboardSource_T aSource,
+                                         const std::vector<ComPtr<IClipboardFormat> > &aFormats);
+    HRESULT i_hostClipboardProvideData(ULONG aRequestId,
+                                       ClipboardAction_T aAction,
+                                       ClipboardSource_T aSource,
+                                       const com::Utf8Str &aMimeType,
+                                       const std::vector<BYTE> &aBuffer);
+    HRESULT i_hostClipboardSetData(ClipboardAction_T aAction,
+                                   ClipboardSource_T aSource,
+                                   const com::Utf8Str &aMimeType,
+                                   const std::vector<BYTE> &aBuffer);
+    HRESULT i_hostClipboardClear();
 
     void i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify = false);
     void i_fireClipboardError(const com::Utf8Str &aId, const com::Utf8Str &aErrMsg, LONG aRc);
@@ -86,6 +105,7 @@ private:
     HRESULT setFileList(const std::vector<com::Utf8Str> &aFileList);
     HRESULT getTransfers(ComPtr<IClipboardTransferManager> &aTransfers);
     HRESULT getEventSource(ComPtr<IEventSource> &aEventSource);
+    HRESULT getHostClipboard(ComPtr<IHostClipboard> &aHostClipboard);
     HRESULT createFormat(const com::Utf8Str &aMimeType,
                          ComPtr<IClipboardFormat> &aFormat);
     HRESULT createItem(ClipboardSource_T aSource,
@@ -101,6 +121,10 @@ private:
                         ClipboardSource_T *aSource,
                         com::Utf8Str &aMimeType,
                         std::vector<BYTE> &aBuffer);
+    HRESULT readDataRawWithFormat(ClipboardAction_T aAction,
+                                  const com::Utf8Str &aMimeType,
+                                  ClipboardSource_T *aSource,
+                                  std::vector<BYTE> &aBuffer);
     HRESULT writeDataRaw(ClipboardAction_T aAction,
                          ClipboardSource_T aSource,
                          const com::Utf8Str &aMimeType,
@@ -117,6 +141,12 @@ private:
                                 std::vector<ComPtr<IClipboardFormat> > &aFormats);
     /** @} */
 
+    /** @name Wrapped IInternalClipboardControl methods
+     * @{ */
+    HRESULT requestData(const com::Utf8Str &aMimeType,
+                        ULONG *aRequestId);
+    /** @} */
+
     HRESULT i_createFormat(const com::Utf8Str &aMimeType, ComPtr<IClipboardFormat> &aFormat);
     HRESULT i_createItem(ClipboardSource_T aSource,
                          const com::Utf8Str &aMimeType,
@@ -126,13 +156,19 @@ private:
                      ClipboardSource_T aSource,
                      const com::Utf8Str &aMimeType,
                      const std::vector<BYTE> &aBuffer);
+    void i_storeDataLocked(ClipboardAction_T aAction,
+                           ClipboardSource_T aSource,
+                           const com::Utf8Str &aMimeType,
+                           const std::vector<BYTE> &aBuffer);
+    void i_clearPendingDataRequestsLocked();
+    void i_removePendingDataRequestLocked(ULONG aRequestId);
     void i_fireDataChanged(ClipboardAction_T aAction,
                            ClipboardSource_T aSource,
                            const com::Utf8Str &aMimeType,
                            const std::vector<BYTE> &aBuffer);
-    void i_fireDataRequested(ClipboardAction_T aAction,
-                             ClipboardSource_T aSource,
-                             const com::Utf8Str &aMimeType);
+    ULONG i_fireDataRequested(ClipboardAction_T aAction,
+                              ClipboardSource_T aSource,
+                              uint32_t uFormat);
 
     struct Data;
     Data *mData;

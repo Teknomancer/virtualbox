@@ -1,4 +1,4 @@
-/* $Id: ConsoleVRDPServer.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleVRDPServer.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console VRDP helper class.
  */
@@ -3332,7 +3332,7 @@ DECLCALLBACK(int) ConsoleVRDPServer::ClipboardCallback(void *pvCallback,
 }
 
 /**
- * Service extension callback called by GuestShCl::hgcmDispatcher().
+ * Service extension callback called by GuestShCl::s_HgcmDispatcher().
  *
  * @returns VBox status code.
  * @retval  VERR_NOT_SUPPORTED if the extension didn't handle the requested function. This will invoke the regular backend then.
@@ -3406,6 +3406,13 @@ DECLCALLBACK(int) ConsoleVRDPServer::ClipboardServiceExtension(void *pvExtension
                                              pParms->u.ReadWriteData.cbData,
                                              NULL);
             }
+            /*
+             * VRDE only mirrors the data here.  Return VERR_NOT_SUPPORTED so the
+             * regular Main path still signals the pending guest-read event exactly
+             * once; returning success would consume the reply and leave Main waiters
+             * blocked.
+             */
+            vrc = VERR_NOT_SUPPORTED;
         } break;
 
         default:

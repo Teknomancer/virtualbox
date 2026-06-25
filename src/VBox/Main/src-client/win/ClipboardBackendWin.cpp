@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendWin.cpp 114414 2026-06-17 21:44:21Z knut.osmundsen@oracle.com $ */
+/* $Id: ClipboardBackendWin.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Win32 host.
  */
@@ -796,9 +796,7 @@ DECLCALLBACK(int) vboxClipboardSvcWinThread(RTTHREAD hThreadSelf, void *pvUser)
 static int shClBackendReportFormatsToGuestAndMain(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
 {
 #ifdef VBOX_COM_INPROC
-    GuestShCl *pShCl = GuestShCl::tryGetInstance();
-    if (pShCl)
-        return pShCl->reportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
+    return GuestShCl::GetInst()->ReportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
 #endif
     return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
 }

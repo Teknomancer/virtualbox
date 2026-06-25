@@ -572,6 +572,8 @@ typedef enum VBOXLOGGROUP
     LOG_GROUP_MAIN_HOST,
     /** Main group, IHostAudioDevice. */
     LOG_GROUP_MAIN_HOSTAUDIODEVICE,
+    /** Main group, IHostClipboard. */
+    LOG_GROUP_MAIN_HOSTCLIPBOARD,
     /** Main group, IHostDrive. */
     LOG_GROUP_MAIN_HOSTDRIVE,
     /** Main group, IHostDriveList. */
@@ -1163,6 +1165,7 @@ typedef enum VBOXLOGGROUP
     "MAIN_GUESTSESSIONEVENT", \
     "MAIN_HOST", \
     "MAIN_HOSTAUDIODEVICE", \
+    "MAIN_HOSTCLIPBOARD", \
     "MAIN_HOSTDRIVE", \
     "MAIN_HOSTDRIVELIST", \
     "MAIN_HOSTDRIVEPARTITION", \

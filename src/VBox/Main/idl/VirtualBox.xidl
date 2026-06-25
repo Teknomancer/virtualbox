@@ -15808,13 +15808,224 @@
   </interface>
 
   <interface
-    name="IClipboard" extends="$unknown"
-    uuid="0a7b2548-69ed-44a4-a7eb-76b7fb90d094"
+    name="IHostClipboard" extends="$unknown"
+    uuid="043668c1-6da2-46cf-8c4f-a11c4d268edb"
     wsmap="managed"
     reservedMethods="8" reservedAttributes="8"
     >
     <desc>
+      Native host clipboard endpoint for a console session.
+
+      See <link to="IClipboard"/> for the Main clipboard API overview and the role of this endpoint.
+    </desc>
+
+    <method name="reportFormats">
+      <desc>
+        Reports clipboard formats from the specified source to the native host clipboard.
+        This also makes those formats the current generic VM clipboard offer for
+        the supplied source, so a later native host data request can be matched
+        with <link to="IClipboardDataRequestedEvent"/> and completed through
+        <link to="IHostClipboard::provideData"/>.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action associated with the reported formats.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source being published. Initially only <tt>ClipboardSource_Guest</tt> is supported.</desc>
+      </param>
+      <param name="formats" type="IClipboardFormat" safearray="yes" dir="in">
+        <desc>Clipboard formats to make available on the native host clipboard.</desc>
+      </param>
+    </method>
+
+    <method name="provideData">
+      <desc>
+        Provides clipboard payload data for a native host clipboard data request.
+
+        The requestId must be the non-zero identifier from a matching
+        <link to="IClipboardDataRequestedEvent"/>. Request identifiers are
+        one-shot. After a successful call, or after Main decides that the
+        request is no longer current, the same identifier cannot be reused. The
+        supplied action, source and MIME type must match the request and the
+        currently advertised native host clipboard formats.
+      </desc>
+      <param name="requestId" type="unsigned long" dir="in">
+        <desc>Identifier from the corresponding clipboard data request event.</desc>
+      </param>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action associated with the payload.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source of the payload. Initially only <tt>ClipboardSource_Guest</tt> is supported.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type of the payload.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="in">
+        <desc>Payload bytes for the request.</desc>
+      </param>
+    </method>
+
+    <method name="setData">
+      <desc>
+        Sets clipboard payload data as the current native host clipboard content.
+        This publishes to the native host endpoint without replacing the generic
+        VM clipboard state.
+
+        Immediate native-host visibility depends on the active host clipboard
+        backend. Some backends may only take ownership or report formats and
+        request data lazily.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action associated with the payload.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source of the payload. Initially only <tt>ClipboardSource_Guest</tt> is supported.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type of the payload.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="in">
+        <desc>Payload bytes to publish to the native host clipboard.</desc>
+      </param>
+    </method>
+
+    <method name="clear">
+      <desc>
+        Clears the native host clipboard endpoint associated with this console clipboard.
+        This resets Main's ownership of the native host clipboard without replacing
+        the generic VM clipboard state.
+      </desc>
+    </method>
+  </interface>
+
+  <interface
+    name="IClipboard" extends="$unknown"
+    uuid="808262aa-094c-47e2-9a00-26825428cc89"
+    wsmap="managed"
+    wrap-hint-server-addinterfaces="IInternalClipboardControl"
+    reservedMethods="7" reservedAttributes="7"
+    >
+    <desc>
       Clipboard interface for a console session.
+
+      This is the live, session-scoped clipboard API exposed by
+      <link to="IConsole::clipboard"/>. It complements the persistent
+      <link to="IMachine::clipboard"/> / <link to="IClipboardSettings"/>
+      configuration, which stores the Shared Clipboard mode and related
+      machine settings.
+
+      <b>Terminology</b>
+      <ul>
+        <li><link to="ClipboardMode"/> is the configured policy that decides
+          whether clipboard data may flow from host to guest, from guest to host,
+          both ways or not at all.</li>
+        <li><link to="ClipboardSource"/> identifies where data originated,
+          such as <tt>Host</tt>, <tt>Guest</tt>, <tt>Remote</tt> or
+          <tt>Custom</tt>. Preserve the source when forwarding data to avoid
+          echoing clipboard changes back to their origin.</li>
+        <li><link to="ClipboardAction"/> describes the user operation context,
+          such as copy, cut or paste.</li>
+        <li><link to="IClipboardFormat"/> names a representation by MIME type,
+          for example <tt>text/plain</tt> or <tt>image/bmp</tt>.</li>
+        <li><link to="IClipboardItem"/> combines source, format and payload
+          bytes. The payload interpretation is defined by the MIME type.</li>
+        <li><link to="IClipboardTransfer"/> represents a longer-running
+          clipboard or file-transfer operation tracked by
+          <link to="IClipboardTransferManager"/>.</li>
+        <li><link to="IHostClipboard"/> is the native host clipboard endpoint
+          associated with this console clipboard.</li>
+      </ul>
+
+      <b>Contexts</b>
+      <ul>
+        <li>The machine context, <link to="IMachine::clipboard"/> /
+          <link to="IClipboardSettings"/>, contains persistent VM settings.</li>
+        <li>The console context, <link to="IConsole::clipboard"/> /
+          <link to="IClipboard"/>, is available for a live console session and
+          is used for format announcements, payload exchange and events.</li>
+        <li>Host/guest exchange requires the Shared Clipboard service in the VM,
+          installed Guest Additions, and support for the selected
+          formats and direction.</li>
+        <li>Clients are responsible for policy decisions and event handling;
+          native host clipboard backend access is kept inside Main and exposed
+          through <link to="IClipboard::hostClipboard"/>.</li>
+      </ul>
+
+      <b>Flow paths</b>
+      <ul>
+        <li><b>Host to guest:</b> a client representing host-side data announces
+          formats with <link to="IClipboard::writeFormats"/> and supplies
+          payload with <link to="IClipboard::writeData"/> or
+          <link to="IClipboard::writeDataRaw"/>. The data can be consumed by
+          the guest only when <link to="ClipboardMode"/> permits host-to-guest
+          sharing.</li>
+        <li><b>Guest to client:</b> clipboard events on
+          <link to="IClipboard::eventSource"/> notify clients about source,
+          format and data changes. A client can inspect guest-owned formats and
+          payload with <link to="IClipboard::readFormats"/>,
+          <link to="IClipboard::readData"/>,
+          <link to="IClipboard::readDataRaw"/> or
+          <link to="IClipboard::readDataRawWithFormat"/> when the configured mode permits
+          guest-to-host sharing.</li>
+        <li><b>Guest to native host clipboard:</b> for lazy publication, a
+          client reports guest formats through
+          <link to="IHostClipboard::reportFormats"/>, which also updates the
+          generic VM clipboard offer for the guest source. When a native host
+          application later requests one of those formats, Main emits an
+          <link to="IClipboardDataRequestedEvent"/> and the client completes
+          the request with <link to="IHostClipboard::provideData"/>. For eager
+          publication, a client that already has the payload can call
+          <link to="IHostClipboard::setData"/> directly.</li>
+      </ul>
+
+      <b>Expected data flow</b>
+      <ul>
+        <li>Announce available formats separately from payload bytes. Transfer
+          the payload only after a format is selected, unless using the eager
+          <link to="IHostClipboard::setData"/> path.</li>
+        <li>Use MIME types to describe payloads. Payloads are byte arrays and
+          their interpretation belongs to the selected MIME type.</li>
+        <li>Honor <link to="ClipboardMode"/> and preserve
+          <link to="ClipboardSource"/> values so data is not reflected back to
+          its origin.</li>
+        <li>Use <link to="IClipboard::eventSource"/> and the clipboard event
+          interfaces to drive asynchronous requests and notifications.</li>
+      </ul>
+
+      <b>Design decisions</b>
+      <ul>
+        <li>The generic VM clipboard model is separate from the native host
+          endpoint. Use <link to="IClipboard"/> for the VM's clipboard state and
+          <link to="IHostClipboard"/> for operating the host clipboard.</li>
+        <li>Main owns the platform-specific native clipboard backend logic.
+          Frontends and automation clients provide policy, user interaction and
+          event-loop integration instead of implementing host clipboard backends
+          themselves by default.</li>
+        <li>Lazy rendering is supported to avoid moving large or unused payloads;
+          eager publication remains available for clients that already have the
+          clipboard payloads.</li>
+        <li>The API reuses the console clipboard event source for source, format,
+          data, request, error and transfer notifications.</li>
+      </ul>
+
+      <b>Limitations</b>
+      <ul>
+        <li>Supported formats and exact lazy/eager behavior depend on the host
+          platform, guest platform, Shared Clipboard backend and Guest Additions
+          version.</li>
+        <li>Publishing through <link to="IHostClipboard"/> initially supports
+          <tt>ClipboardSource_Guest</tt> only.</li>
+        <li>File transfers are modeled separately from ordinary clipboard
+          payloads. They are controlled by
+          <link to="IClipboardSettings::fileTransfersEnabled"/> and tracked by
+          <link to="IClipboard::transfers"/>.</li>
+        <li>Clipboard contents are transient live-session state. Only the VM
+          clipboard settings are persistent.</li>
+        <li>Clipboard data can be supplied by a guest, host application, remote
+          client or other user-controlled sources. Treat MIME types, sizes and
+          text encodings as untrusted until validated.</li>
+      </ul>
     </desc>
 
     <attribute name="fileList" type="wstring" safearray="yes">
@@ -15832,6 +16043,12 @@
     <attribute name="eventSource" type="IEventSource" readonly="yes">
       <desc>
         Event source for clipboard events.
+      </desc>
+    </attribute>
+
+    <attribute name="hostClipboard" type="IHostClipboard" readonly="yes">
+      <desc>
+        Native host clipboard endpoint associated with this console clipboard.
       </desc>
     </attribute>
 
@@ -15920,6 +16137,24 @@
       </param>
     </method>
 
+    <method name="readDataRawWithFormat">
+      <desc>
+        Reads raw clipboard payload data in a specific MIME type for the requested clipboard action.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to read data for.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type to read.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="out">
+        <desc>Clipboard source which supplied the returned data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data returned on success.</desc>
+      </param>
+    </method>
+
     <method name="writeDataRaw">
       <desc>
         Writes raw clipboard payload data for the requested clipboard action.
@@ -15986,6 +16221,33 @@
       </param>
       <param name="formats" type="IClipboardFormat" safearray="yes" dir="return">
         <desc>Supported clipboard formats.</desc>
+      </param>
+    </method>
+  </interface>
+
+  <interface
+    name="IInternalClipboardControl" extends="$unknown"
+    uuid="fb30539c-b1ba-4cbb-9972-c9447f01428e"
+    internal="yes"
+    wsmap="suppress"
+    reservedMethods="8" reservedAttributes="8"
+    >
+    <desc>
+      Internal clipboard control interface for VM-process-only operations. This
+      interface is not public API and is intended for Main testcase and internal
+      diagnostic use only.
+    </desc>
+
+    <method name="requestData">
+      <desc>
+        Requests clipboard data from the current live clipboard source. This emits
+        an <link to="IClipboardDataRequestedEvent"/> and returns its request identifier.
+      </desc>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type of the requested data.</desc>
+      </param>
+      <param name="requestId" type="unsigned long" dir="return">
+        <desc>Identifier of the pending clipboard data request.</desc>
       </param>
     </method>
   </interface>
@@ -29535,9 +29797,9 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardDataRequested"
     >
     <desc>
-      Notification when clipboard data is requested, for example by the guest.
-      An API client may use this event to decide whether and how to supply the
-      requested clipboard data.
+      Notification when clipboard data is requested, for example by the guest or
+      by the native host clipboard backend. An API client may use this event to
+      decide whether and how to supply the requested clipboard data.
 
       The inherited item attribute may be NULL or may contain implementation
       specific request context. The request details are provided by the

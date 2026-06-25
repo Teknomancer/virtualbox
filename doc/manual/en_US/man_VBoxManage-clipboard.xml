@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-clipboard" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-06-22 10:18:18 +0200 (Mon, 22 Jun 2026) $</pubdate>
+    <pubdate>$Date: 2026-06-25 12:37:10 +0200 (Thu, 25 Jun 2026) $</pubdate>
     <title>VBoxManage clipboard</title>
   </refentryinfo>
 
@@ -84,6 +84,8 @@
       <arg choice="plain">copy</arg>
       <arg>--format=<replaceable>mime-type</replaceable></arg>
       <arg>--raw</arg>
+      <arg>--timeout=<replaceable>ms</replaceable></arg>
+      <arg>--verbose</arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-clipboard-paste">
@@ -94,7 +96,9 @@
       </group>
       <arg choice="plain">paste</arg>
       <arg>--format=<replaceable>mime-type</replaceable></arg>
+      <arg>--timeout=<replaceable>ms</replaceable></arg>
       <arg>--wait=<replaceable>ms</replaceable></arg>
+      <arg>--verbose</arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-clipboard-formats">
@@ -116,6 +120,17 @@
       <arg choice="plain">reset</arg>
     </cmdsynopsis>
 
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-serve">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">serve</arg>
+      <arg>--timeout=<replaceable>ms</replaceable></arg>
+      <arg>-v|--verbose</arg>
+    </cmdsynopsis>
+
     <cmdsynopsis id="synopsis-vboxmanage-clipboard-listen">
       <command>VBoxManage clipboard</command>
       <group choice="req">
@@ -128,7 +143,7 @@
       <arg>--timeout=<replaceable>ms</replaceable></arg>
       <arg>--count=<replaceable>n</replaceable></arg>
       <arg>--machinereadable</arg>
-      <arg>--verbose</arg>
+      <arg>-v|--verbose</arg>
     </cmdsynopsis>
   </refsynopsisdiv>
 
@@ -137,12 +152,12 @@
     <para>
       The <command>VBoxManage clipboard</command> command configures clipboard
       sharing for a virtual machine and reads or writes live clipboard data for
-      a running virtual machine.  The live data commands use standard input and
+      a running virtual machine. The live data commands use standard input and
       standard output by default, which makes them suitable for shell pipelines.
     </para>
     <para>
       Clipboard data transfer requires the virtual machine to be running and
-      the shared clipboard mode to allow the requested direction.  Use the
+      the shared clipboard mode to allow the requested direction. Use the
       <command>set-mode</command> subcommand to enable or disable shared
       clipboard access.
     </para>
@@ -172,8 +187,8 @@
         The <command>VBoxManage clipboard <replaceable>vmname</replaceable>
         set-filetransfers</command> command specifies if it is possible to transfer
         files through the clipboard between the host and VM in the direction(s)
-        configured for the <command>set-mode</command>.  Valid values are
-        <literal>off</literal> and <literal>on</literal>.  The default value is
+        configured for the <command>set-mode</command>. Valid values are
+        <literal>off</literal> and <literal>on</literal>. The default value is
         <literal>off</literal>.
       </para>
       <para>
@@ -186,30 +201,57 @@
       <title>Copy Host Data to the Virtual Machine Clipboard</title>
       <remark role="help-copy-synopsis"/>
       <para>
-        The <command>VBoxManage clipboard copy</command> command copies data
-        from host standard input to the live clipboard of the virtual machine.
-        Use shell pipes or input redirection to copy data from a host file.
+        The <command>VBoxManage clipboard copy</command> command reads data
+        from host standard input, publishes it to the live virtual machine
+        clipboard, and notifies the guest about the selected format. Use shell
+        pipes or input redirection to copy data from a host file.
+      </para>
+      <para>
+        The command reads standard input once and writes the clipboard data. If
+        <option>--timeout</option> is specified with a non-zero value, it waits
+        until the guest reads the data or until the timeout is reached. The
+        shared clipboard mode must allow host-to-guest transfers.
       </para>
       <variablelist>
         <varlistentry>
           <term><option>--format=<replaceable>mime-type</replaceable></option></term>
           <listitem><para>
-              Specifies the MIME type for the clipboard data.  The default is
+              Specifies the MIME type for the clipboard data. The default is
               <literal>text/plain;charset=utf-8</literal>.
             </para></listitem>
         </varlistentry>
         <varlistentry>
           <term><option>--raw</option></term>
           <listitem><para>
-              Treats the input as binary data.  If no explicit MIME type was
-              specified, the command uses <literal>application/octet-stream</literal>.
+              Treats the input as raw payload bytes. This option requires an
+              explicit supported MIME type specified with <option>--format</option>;
+              generic <literal>application/octet-stream</literal> clipboard data
+              is not supported.
+            </para></listitem>
+        </varlistentry>
+
+        <varlistentry>
+          <term><option>--timeout=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Waits for the guest to read the data for up to the specified
+              number of milliseconds. Without this option, the command returns
+              after publishing the data.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--verbose</option></term>
+          <listitem><para>
+              Prints diagnostic information to standard error, including listener
+              setup, published data, received events, ignored requests, guest read
+              requests, and timeout details.
             </para></listitem>
         </varlistentry>
       </variablelist>
       <para>
         For example:
       </para>
-<screen>$ echo "hello from host" | VBoxManage clipboard "Ubuntu VM" copy</screen>
+<screen>$ echo "hello from host" | VBoxManage clipboard "Ubuntu VM" copy
+$ cat foo.txt | VBoxManage clipboard "Ubuntu VM" copy --format='text/plain;charset=utf-8'</screen>
     </refsect2>
 
     <refsect2 id="vboxmanage-clipboard-paste">
@@ -217,15 +259,20 @@
       <remark role="help-copy-synopsis"/>
       <para>
         The <command>VBoxManage clipboard paste</command> command reads data
-        from the live clipboard of the virtual machine and writes it to host
-        standard output.  It does not synthesize a paste keystroke in the
-        guest.  Use shell redirection to write the clipboard payload to a host
-        file, for example <command>VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt</command>.
+        from the live clipboard of the virtual machine and writes guest-owned
+        clipboard data to host standard output. Without <option>--timeout</option>
+        or <option>--wait</option>, the command reads only currently available
+        guest data. With a non-zero wait option, it first tries currently
+        available guest data, then waits until matching guest clipboard data is
+        available or the timeout is reached. It does not synthesize a paste
+        keystroke in the guest. Use shell redirection to
+        write the clipboard payload to a host file, for example
+        <command>VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt</command>.
       </para>
       <para>
         If the command would print multiline text to an interactive terminal, it
         displays a safe preview on standard error and asks for confirmation
-        before writing the clipboard payload to standard output.  Redirect or
+        before writing the clipboard payload to standard output. Redirect or
         pipe standard output to avoid this prompt.
       </para>
       <variablelist>
@@ -236,12 +283,22 @@
             </para></listitem>
         </varlistentry>
         <varlistentry>
+          <term><option>--timeout=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Waits for matching guest clipboard data for up to the specified
+              number of milliseconds.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
           <term><option>--wait=<replaceable>ms</replaceable></option></term>
           <listitem><para>
-              Waits up to the specified number of milliseconds for new guest
-              clipboard data before writing it to the host.  If no matching
-              data arrives before the timeout, the command exits with an error
-              and writes no clipboard payload to standard output.
+              Deprecated compatibility alias for <option>--timeout=<replaceable>ms</replaceable></option>.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--verbose</option></term>
+          <listitem><para>
+              Prints diagnostic information to standard error.
             </para></listitem>
         </varlistentry>
       </variablelist>
@@ -249,7 +306,7 @@
         For example:
       </para>
 <screen>$ VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt
-$ VBoxManage clipboard "Ubuntu VM" paste --wait=10000 &gt; foo.txt</screen>
+$ VBoxManage clipboard "Ubuntu VM" paste --timeout=10000 &gt; foo.txt</screen>
     </refsect2>
 
     <refsect2 id="vboxmanage-clipboard-formats">
@@ -270,13 +327,66 @@ $ VBoxManage clipboard "Ubuntu VM" paste --wait=10000 &gt; foo.txt</screen>
       </para>
     </refsect2>
 
+    <refsect2 id="vboxmanage-clipboard-serve">
+      <title>Serve Clipboard Data Between Guest and Host</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard serve</command> command serves live
+        clipboard updates between a running virtual machine and the native host
+        clipboard. The command is a long-running API client: it listens for guest
+        clipboard events and publishes supported guest-owned payloads to the
+        &product-name; host clipboard endpoint. If only guest format information
+        is available, it reports guest-owned formats and answers native host data
+        requests by reading data through the live <literal>IClipboard</literal>
+        API. Host-origin format changes observed while serving are logged but not
+        re-reported to the guest because the native host backend already reports
+        them to the guest and Main. Native host clipboard backend logic remains in
+        Main.
+      </para>
+      <para>
+        The shared clipboard mode must allow the requested transfer direction. Without a
+        timeout, the command keeps serving clipboard events until it is
+        interrupted. Pressing <literal>Ctrl+C</literal> stops the command cleanly
+        after clearing the host clipboard endpoint and unregistering its event
+        listener.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>--timeout=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Stops serving after the specified number of milliseconds.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>-v</option></term>
+          <term><option>--verbose</option></term>
+          <listitem><para>
+              Prints diagnostic information to standard error. Repeating this
+              option logs successfully copied payloads, bounded and escaped
+              where possible.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        For example:
+      </para>
+<screen>$ VBoxManage clipboard "Ubuntu VM" serve --verbose
+$ VBoxManage clipboard "Ubuntu VM" serve -vv --timeout=30000</screen>
+    </refsect2>
+
     <refsect2 id="vboxmanage-clipboard-listen">
       <title>Listen for Clipboard Events</title>
       <remark role="help-copy-synopsis"/>
       <para>
         The <command>VBoxManage clipboard listen</command> command listens for
-        live clipboard events from the virtual machine console.  It prints
-        event metadata by default.
+        live clipboard events from the virtual machine console. It prints
+        event metadata by default. The command is observational by default; use
+        <command>VBoxManage clipboard copy</command> to publish host clipboard
+        data to the guest. With repeated <option>-v</option> or
+        <option>--verbose</option> options, the command may read guest data for
+        diagnostic output. Waitable clipboard events are acknowledged
+        automatically before event output is written. Pressing
+        <literal>Ctrl+C</literal> stops the command.
       </para>
       <variablelist>
         <varlistentry>
@@ -314,14 +424,12 @@ $ VBoxManage clipboard "Ubuntu VM" paste --wait=10000 &gt; foo.txt</screen>
             </para></listitem>
         </varlistentry>
         <varlistentry>
+          <term><option>-v</option></term>
           <term><option>--verbose</option></term>
           <listitem><para>
-              Also prints clipboard payload data for
-              <literal>data-changed</literal> events when the payload is UTF-8
-              or UTF-16 encoded text.  Other payload formats are shown as
-              <computeroutput>&quot;&lt;binary data&gt; (&lt;size&gt;)&quot;</computeroutput>.
-              The printed text payload is limited to the first 64 KiB of
-              clipboard data.
+              Increases verbosity. Repeating this option includes payload data
+              in data-change output where available and may read guest data for
+              diagnostics. Payload data is bounded and escaped where possible.
             </para></listitem>
         </varlistentry>
       </variablelist>

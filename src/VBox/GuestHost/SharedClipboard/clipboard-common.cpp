@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114482 2026-06-22 13:36:27Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -278,6 +278,7 @@ int ShClEventSourceGenerateAndRegisterEvent(PSHCLEVENTSOURCE pSource, PSHCLEVENT
                 {
                     pEvent->pParent = pSource;
                     pEvent->idEvent = idEvent;
+                    pEvent->cRefs  = 1;
                     RTListAppend(&pSource->lstEvents, &pEvent->Node);
 
                     rc = RTCritSectLeave(&pSource->CritSect);
@@ -285,7 +286,6 @@ int ShClEventSourceGenerateAndRegisterEvent(PSHCLEVENTSOURCE pSource, PSHCLEVENT
 
                     LogFlowFunc(("uSource=%RU16: New event: %#x\n", pSource->uID, idEvent));
 
-                    ShClEventRetain(pEvent);
                     *ppEvent = pEvent;
 
                     return VINF_SUCCESS;
@@ -370,6 +370,27 @@ DECLINLINE(PSHCLEVENT) shclEventGet(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEven
 }
 
 /**
+ * Tries retaining an event without reviving an already released event.
+ *
+ * @returns New reference count, or UINT32_MAX on failure.
+ * @param   pEvent              Event to retain.
+ */
+static uint32_t shclEventTryRetain(PSHCLEVENT pEvent)
+{
+    uint32_t cRefs = ASMAtomicReadU32(&pEvent->cRefs);
+    for (;;)
+    {
+        if (   cRefs == 0
+            || cRefs >= 64)
+            return UINT32_MAX;
+        if (ASMAtomicCmpXchgExU32(&pEvent->cRefs, cRefs + 1, cRefs, &cRefs))
+            return cRefs + 1;
+    }
+
+    return UINT32_MAX; /* Never reached. */
+}
+
+/**
  * Returns a specific event of a event source.
  *
  * @returns Pointer to event if found, or NULL if not found.
@@ -389,6 +410,35 @@ PSHCLEVENT ShClEventSourceGetFromId(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEven
          AssertRC(rc);
 
          return pEvent;
+    }
+
+    return NULL;
+}
+
+/**
+ * Returns and retains a specific event of an event source.
+ *
+ * @returns Pointer to retained event if found, or NULL if not found or already
+ *          being released. Must be released with ShClEventRelease().
+ * @param   pSource             Event source to get event from.
+ * @param   idEvent             ID of event to return.
+ */
+PSHCLEVENT ShClEventSourceRetainFromId(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEvent)
+{
+    AssertPtrReturn(pSource, NULL);
+
+    int rc = RTCritSectEnter(&pSource->CritSect);
+    if (RT_SUCCESS(rc))
+    {
+        PSHCLEVENT pEvent = shclEventGet(pSource, idEvent);
+        if (   pEvent
+            && shclEventTryRetain(pEvent) == UINT32_MAX)
+            pEvent = NULL;
+
+        rc = RTCritSectLeave(&pSource->CritSect);
+        AssertRC(rc);
+
+        return pEvent;
     }
 
     return NULL;
@@ -515,8 +565,9 @@ int ShClEventWait(PSHCLEVENT pEvent, RTMSINTERVAL uTimeoutMs, PSHCLEVENTPAYLOAD 
 uint32_t ShClEventRetain(PSHCLEVENT pEvent)
 {
     AssertPtrReturn(pEvent, UINT32_MAX);
-    AssertReturn(ASMAtomicReadU32(&pEvent->cRefs) < 64, UINT32_MAX);
-    return ASMAtomicIncU32(&pEvent->cRefs);
+    uint32_t const cRefs = shclEventTryRetain(pEvent);
+    AssertReturn(cRefs != UINT32_MAX, UINT32_MAX);
+    return cRefs;
 }
 
 /**

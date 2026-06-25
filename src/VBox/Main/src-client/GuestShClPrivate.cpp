@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -352,7 +352,7 @@ int GuestShCl::UnregisterServiceExtension(PFNHGCMSVCEXT pfnExtension)
  * @param   cParms              Number of parameters to send.
  * @param   paParms             Array of parameters to send. Must match \c cParms.
  */
-int GuestShCl::hostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM paParms) const
+int GuestShCl::HostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM paParms) const
 {
     /* Forward the information to the VMM device. */
     AssertPtr(m_pConsole);
@@ -371,7 +371,7 @@ int GuestShCl::hostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM 
  * @param   ppvData     Where to return the allocated data buffer.
  * @param   pcbData     Where to return the data size.
  */
-int GuestShCl::readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData)
+int GuestShCl::ReadDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData)
 {
     AssertPtrReturn(ppvData, VERR_INVALID_POINTER);
     AssertPtrReturn(pcbData, VERR_INVALID_POINTER);
@@ -393,12 +393,103 @@ int GuestShCl::readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *p
 }
 
 /**
+ * Reads clipboard data from the native host clipboard backend.
+ *
+ * @returns VBox status code.
+ * @param   uFormat     Format to request from the host backend.
+ * @param   pvData      Destination buffer.
+ * @param   cbData      Size of the destination buffer.
+ * @param   pcbActual   Where to return the required data size.
+ */
+int GuestShCl::ReadDataFromHost(SHCLFORMAT uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual)
+{
+    AssertReturn(uFormat != VBOX_SHCL_FMT_NONE, VERR_INVALID_PARAMETER);
+    AssertPtrReturn(pvData, VERR_INVALID_POINTER);
+    AssertPtrReturn(pcbActual, VERR_INVALID_POINTER);
+    *pcbActual = 0;
+
+    SHCLCLIENTCMDCTX cmdCtx;
+    RT_ZERO(cmdCtx);
+
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    PSHCLCLIENT pClient = m_pClient;
+    if (   pClient
+        && pClient->pBackend)
+        vrc = ShClBackendReadData(pClient->pBackend, pClient, &cmdCtx, uFormat, pvData, cbData, pcbActual);
+    else
+        vrc = VERR_SHCLPB_NO_DATA;
+
+    unlock();
+    return vrc;
+}
+
+/**
+ * Reports guest clipboard formats to the native host clipboard backend.
+ *
+ * @returns VBox status code.
+ * @param   fFormats    Formats to report to the host.
+ */
+int GuestShCl::ReportFormatsToHost(SHCLFORMATS fFormats)
+{
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    ++m_uGuestDataSeq;
+
+    PSHCLCLIENT pClient = m_pClient;
+    if (   pClient
+        && pClient->pBackend)
+        vrc = ShClBackendReportFormats(pClient->pBackend, pClient, fFormats);
+    else
+        vrc = VINF_SUCCESS;
+
+    unlock();
+    return vrc;
+}
+
+/**
+ * Writes guest clipboard data to the native host clipboard backend.
+ *
+ * @returns VBox status code.
+ * @param   uFormat     Format of the data buffer.
+ * @param   pvData      Data buffer. Optional when @a cbData is zero.
+ * @param   cbData      Size of the data buffer in bytes.
+ */
+int GuestShCl::WriteDataToHost(SHCLFORMAT uFormat, void *pvData, uint32_t cbData)
+{
+    AssertReturn(uFormat != VBOX_SHCL_FMT_NONE, VERR_INVALID_PARAMETER);
+    if (cbData)
+        AssertPtrReturn(pvData, VERR_INVALID_POINTER);
+
+    SHCLCLIENTCMDCTX cmdCtx;
+    RT_ZERO(cmdCtx);
+
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    PSHCLCLIENT pClient = m_pClient;
+    if (   pClient
+        && pClient->pBackend)
+        vrc = ShClBackendWriteData(pClient->pBackend, pClient, &cmdCtx, uFormat, pvData, cbData);
+    else
+        vrc = VINF_SUCCESS;
+
+    unlock();
+    return vrc;
+}
+
+/**
  * Reports host clipboard formats to the active guest clipboard client.
  *
  * @returns VBox status code.
  * @param   fFormats    Formats to report to the guest.
  */
-int GuestShCl::reportFormatsToGuest(SHCLFORMATS fFormats)
+int GuestShCl::ReportFormatsToGuest(SHCLFORMATS fFormats)
 {
     int vrc = lock();
     if (RT_FAILURE(vrc))
@@ -407,7 +498,8 @@ int GuestShCl::reportFormatsToGuest(SHCLFORMATS fFormats)
     i_incHostDataSeqLocked();
 
     PSHCLCLIENT pClient = m_pClient;
-    if (pClient)
+    if (   pClient
+        && pClient->pBackend)
         vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
     else
         vrc = VINF_SUCCESS;
@@ -417,19 +509,47 @@ int GuestShCl::reportFormatsToGuest(SHCLFORMATS fFormats)
 }
 
 /**
- * Reports clipboard formats to the guest via the service backend.
+ * Reports clipboard formats to the guest via the service backend and mirrors
+ * successful reports to the console clipboard event source.
  *
  * @returns VBox status code.
  * @param   pClient     Clipboard client to report to.
  * @param   fFormats    Formats to report to the guest.
  * @param   enmSource   Source of the format report.
  */
-int GuestShCl::reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource)
+int GuestShCl::ReportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource)
 {
     AssertPtrReturn(pClient, VERR_INVALID_POINTER);
 
-    RT_NOREF(enmSource);
-    return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+    ClipboardSource_T enmClipboardSource = ClipboardSource_Custom;
+    switch (enmSource)
+    {
+        case SHCLSOURCE_LOCAL:
+            i_incHostDataSeq();
+            enmClipboardSource = ClipboardSource_Host;
+            break;
+
+        case SHCLSOURCE_REMOTE:
+            i_incGuestDataSeq();
+            enmClipboardSource = ClipboardSource_Guest;
+            break;
+
+        default:
+            AssertFailedReturn(VERR_INVALID_PARAMETER);
+    }
+
+    int vrc;
+    if (pClient->pBackend)
+        vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+    else
+        vrc = VINF_SUCCESS;
+    if (RT_SUCCESS(vrc))
+    {
+        AssertPtr(m_pConsole->i_getClipboard());
+        if (m_pConsole->i_getClipboard())
+            m_pConsole->i_getClipboard()->i_reportFormats(fFormats, enmClipboardSource, true /* fForceNotify */);
+    }
+    return vrc;
 }
 
 
@@ -443,7 +563,7 @@ int GuestShCl::reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, S
  * @param   pcszMsgFmt          Error message to report.
  * @param   ...                 Format string for \a pcszMsgFmt.
  */
-int GuestShCl::reportError(const char *pcszId, int vrc, const char *pcszMsgFmt, ...)
+int GuestShCl::ReportError(const char *pcszId, int vrc, const char *pcszMsgFmt, ...)
 {
     /* pcszId can be NULL. */
     AssertReturn(pcszMsgFmt && *pcszMsgFmt != '\0', E_INVALIDARG);
@@ -483,8 +603,8 @@ int GuestShCl::reportError(const char *pcszId, int vrc, const char *pcszMsgFmt, 
  * @param   cbParms             Size (in bytes) of \a pvParms.
  */
 /* static */
-DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Function,
-                                            void *pvParms, uint32_t cbParms)
+DECLCALLBACK(int) GuestShCl::s_HgcmDispatcher(void *pvExtension, uint32_t u32Function,
+                                               void *pvParms, uint32_t cbParms)
 {
     LogFlowFunc(("pvExtension=%p, u32Function=%RU32, pvParms=%p, cbParms=%RU32\n",
                  pvExtension, u32Function, pvParms, cbParms));
@@ -559,7 +679,7 @@ DECLCALLBACK(int) GuestShCl::hgcmDispatcher(void *pvExtension, uint32_t u32Funct
 #endif
 
         default:
-            vrc = pThis->i_forwardToChainedSvcExt(u32Function, pvParms, cbParms);
+            vrc = pThis->i_forwardToSvcExt(u32Function, pvParms, cbParms);
             break;
     }
 

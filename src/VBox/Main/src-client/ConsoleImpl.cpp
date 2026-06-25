@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -9228,7 +9228,7 @@ HRESULT Console::i_powerDown(IProgress *aProgress /*= NULL*/)
             HGCMHostUnregisterServiceExtension(m_hHgcmSvcExtShCl);
             m_hHgcmSvcExtShCl = NULL;
         }
-        GuestShCl::destroyInstance();
+        GuestShCl::DestroyInstance();
 #endif
 
 # ifdef VBOX_WITH_DRAG_AND_DROP

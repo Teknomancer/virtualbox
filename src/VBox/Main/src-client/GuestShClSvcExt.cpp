@@ -1,4 +1,4 @@
-/* $Id: GuestShClSvcExt.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClSvcExt.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard service extension handling for Main.
  */
@@ -72,6 +72,25 @@ static bool shClSvcExtIsValidFormat(SHCLFORMAT uFormat)
     return    uFormat != VBOX_SHCL_FMT_NONE
            && (uFormat & ~VBOX_SHCL_FMT_VALID_MASK) == 0
            && (uFormat & (uFormat - 1)) == 0;
+}
+
+
+/**
+ * Validates a single Shared Clipboard format from service-extension parameters.
+ *
+ * @returns VBox status code.
+ * @retval  VINF_SUCCESS if \a uFormat names one valid VBOX_SHCL_FMT_XXX bit.
+ * @retval  VERR_INVALID_PARAMETER otherwise.
+ * @param   uFormat             Format value to validate.
+ * @param   u32Function         Service-extension function being validated.
+ */
+static int shClSvcExtValidateFormat(SHCLFORMAT uFormat, uint32_t u32Function)
+{
+    if (shClSvcExtIsValidFormat(uFormat))
+        return VINF_SUCCESS;
+    LogRelMax2(16, ("Shared Clipboard: Rejecting service-extension function %RU32 with invalid format %#x\n",
+                    u32Function, uFormat));
+    return VERR_INVALID_PARAMETER;
 }
 
 /**
@@ -177,7 +196,7 @@ static int shClSvcExtValidateDataBuffer(void *pvData, uint32_t cbData)
  * @param   pvParms             Raw service extension parameters to forward.
  * @param   cbParms             Size, in bytes, of \a pvParms.
  */
-int GuestShCl::i_forwardToChainedSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms)
+int GuestShCl::i_forwardToSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms)
 {
     PSHCLSVCEXT const pSvcExtVRDP = &m_SvcExtVRDP; /* Currently we have one extension only. */
     if (pSvcExtVRDP->pfnExt)
@@ -258,7 +277,9 @@ int GuestShCl::i_validateSvcExtParms(uint32_t u32Function, void *pvParms, uint32
             return VINF_SUCCESS;
 
         case VBOX_CLIPBOARD_EXT_FN_DATA_READ:
-            AssertReturn(shClSvcExtIsValidFormat(pParms->u.ReadWriteData.uFormat), VERR_INVALID_PARAMETER);
+            vrc = shClSvcExtValidateFormat(pParms->u.ReadWriteData.uFormat, u32Function);
+            if (RT_FAILURE(vrc))
+                return vrc;
             vrc = shClSvcExtValidateDataBuffer(pParms->u.ReadWriteData.pvData, pParms->u.ReadWriteData.cbData);
             if (RT_FAILURE(vrc))
                 return vrc;
@@ -268,7 +289,9 @@ int GuestShCl::i_validateSvcExtParms(uint32_t u32Function, void *pvParms, uint32
             return VINF_SUCCESS;
 
         case VBOX_CLIPBOARD_EXT_FN_DATA_READ_VRDE:
-            AssertReturn(shClSvcExtIsValidFormat(pParms->u.ReadWriteData.uFormat), VERR_INVALID_PARAMETER);
+            vrc = shClSvcExtValidateFormat(pParms->u.ReadWriteData.uFormat, u32Function);
+            if (RT_FAILURE(vrc))
+                return vrc;
             vrc = shClSvcExtValidateDataBuffer(pParms->u.ReadWriteData.pvData, pParms->u.ReadWriteData.cbData);
             if (RT_FAILURE(vrc))
                 return vrc;
@@ -277,7 +300,9 @@ int GuestShCl::i_validateSvcExtParms(uint32_t u32Function, void *pvParms, uint32
             return VINF_SUCCESS;
 
         case VBOX_CLIPBOARD_EXT_FN_DATA_WRITE:
-            AssertReturn(shClSvcExtIsValidFormat(pParms->u.ReadWriteData.uFormat), VERR_INVALID_PARAMETER);
+            vrc = shClSvcExtValidateFormat(pParms->u.ReadWriteData.uFormat, u32Function);
+            if (RT_FAILURE(vrc))
+                return vrc;
             vrc = shClSvcExtValidateDataBuffer(pParms->u.ReadWriteData.pvData, pParms->u.ReadWriteData.cbData);
             if (RT_FAILURE(vrc))
                 return vrc;
@@ -379,7 +404,7 @@ int GuestShCl::i_handleSvcExtReportFormatsToHost(PSHCLEXTPARMS pParms, void *pvP
         m_pConsole->i_getClipboard()->i_reportFormats(fFormats, ClipboardSource_Guest,
                                                        true /* fForceNotify */);
 
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST, pvParms, cbParms);
     return vrc == VERR_NOT_SUPPORTED ? VINF_SUCCESS : vrc;
 }
 
@@ -399,7 +424,7 @@ int GuestShCl::i_handleSvcExtReportFormatsToGuest(PSHCLEXTPARMS pParms, void *pv
 {
     RT_NOREF(pParms);
 
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_GUEST, pvParms, cbParms);
     return vrc == VERR_NOT_SUPPORTED ? VINF_SUCCESS : vrc;
 }
 
@@ -417,7 +442,7 @@ int GuestShCl::i_handleSvcExtReportFormatsToGuest(PSHCLEXTPARMS pParms, void *pv
  */
 int GuestShCl::i_handleSvcExtDataRead(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_DATA_READ, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_DATA_READ, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         void *pvData = pParms->u.ReadWriteData.pvData;
@@ -462,7 +487,7 @@ int GuestShCl::i_handleSvcExtDataReadVrde(PSHCLEXTPARMS pParms)
     int vrc = ShClSvcReadDataFromGuestAsync(pClient, fFormats, &pEvent);
     if (RT_SUCCESS(vrc))
     {
-        PSHCLEVENTPAYLOAD pPayload;
+        PSHCLEVENTPAYLOAD pPayload = NULL;
         vrc = ShClEventWait(pEvent, SHCL_TIMEOUT_DEFAULT_MS, &pPayload);
         if (RT_SUCCESS(vrc))
         {
@@ -475,6 +500,7 @@ int GuestShCl::i_handleSvcExtDataReadVrde(PSHCLEXTPARMS pParms)
             else
                 pvData = NULL;
         }
+        ShClEventRelease(pEvent);
     }
     return vrc;
 }
@@ -493,20 +519,30 @@ int GuestShCl::i_handleSvcExtDataReadVrde(PSHCLEXTPARMS pParms)
  */
 int GuestShCl::i_handleSvcExtDataWrite(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_DATA_WRITE, pvParms, cbParms);
-    if (vrc == VERR_NOT_SUPPORTED)
+    PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
+    PSHCLCLIENTCMDCTX pCmdCtx = pParms->u.ReadWriteData.pCmdCtx;
+    SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
+
+    PSHCLEVENT pEvent = NULL;
+    int vrc = ShClSvcGuestDataRetainValidatedEvent(pClient, pCmdCtx, fFormats, &pEvent);
+    if (RT_FAILURE(vrc) || !pEvent)
+        return vrc;
+
+    int const vrcChained = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_DATA_WRITE, pvParms, cbParms);
+    if (vrcChained == VERR_NOT_SUPPORTED)
     {
-        PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
-        PSHCLCLIENTCMDCTX pCmdCtx = pParms->u.ReadWriteData.pCmdCtx;
         void *pvData = pParms->u.ReadWriteData.pvData;
         uint32_t cbData = pParms->u.ReadWriteData.cbData;
-        SHCLFORMATS fFormats = pParms->u.ReadWriteData.uFormat;
 
-        vrc = ShClSvcGuestDataSignal(pClient, pCmdCtx, fFormats, pvData, cbData);
+        SHCLEVENTID const idEvent = VBOX_SHCL_CONTEXTID_GET_EVENT(pCmdCtx->uContextID);
+        vrc = ShClSvcGuestDataSignalEvent(pEvent, idEvent, pvData, cbData);
         if (RT_FAILURE(vrc))
             LogRelMax(16, ("Shared Clipboard: Signalling host about guest clipboard data failed with %Rrc\n", vrc));
         AssertRC(vrc);
     }
+    else
+        vrc = vrcChained;
+    ShClEventRelease(pEvent);
     return vrc;
 }
 
@@ -524,7 +560,7 @@ int GuestShCl::i_handleSvcExtDataWrite(PSHCLEXTPARMS pParms, void *pvParms, uint
  */
 int GuestShCl::i_handleSvcExtBackendInit(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
@@ -548,7 +584,7 @@ int GuestShCl::i_handleSvcExtBackendInit(PSHCLEXTPARMS pParms, void *pvParms, ui
  */
 int GuestShCl::i_handleSvcExtBackendDestroy(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_DESTROY, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
@@ -572,7 +608,7 @@ int GuestShCl::i_handleSvcExtBackendDestroy(PSHCLEXTPARMS pParms, void *pvParms,
  */
 int GuestShCl::i_handleSvcExtBackendConnect(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_CONNECT, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
@@ -603,7 +639,7 @@ int GuestShCl::i_handleSvcExtBackendConnect(PSHCLEXTPARMS pParms, void *pvParms,
  */
 int GuestShCl::i_handleSvcExtBackendDisconnect(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_DISCONNECT, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
@@ -630,7 +666,7 @@ int GuestShCl::i_handleSvcExtBackendDisconnect(PSHCLEXTPARMS pParms, void *pvPar
  */
 int GuestShCl::i_handleSvcExtBackendSync(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_BACKEND_SYNC, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         PSHCLBACKEND pBackend = pParms->u.ReadWriteData.pBackend;
@@ -651,7 +687,7 @@ int GuestShCl::i_handleSvcExtBackendSync(PSHCLEXTPARMS pParms, void *pvParms, ui
  */
 int GuestShCl::i_handleSvcExtError(PSHCLEXTPARMS pParms)
 {
-    return reportError(pParms->u.Error.pszId, pParms->u.Error.rc, pParms->u.Error.pszMsg);
+    return ReportError(pParms->u.Error.pszId, pParms->u.Error.rc, pParms->u.Error.pszMsg);
 }
 
 
@@ -669,7 +705,7 @@ int GuestShCl::i_handleSvcExtError(PSHCLEXTPARMS pParms)
  */
 int GuestShCl::i_handleSvcExtFileTransfer(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
-    int vrc = i_forwardToChainedSvcExt(VBOX_CLIPBOARD_EXT_FN_FILE_TRANSFER, pvParms, cbParms);
+    int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_FILE_TRANSFER, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
     {
         PSHCLCLIENT pClient = pParms->u.FileTransferData.pClient;

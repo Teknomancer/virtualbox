@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114482 2026-06-22 13:36:27Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1189,6 +1189,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
  	src-client/ClipboardItemImpl.cpp \
  	src-client/ClipboardTransferImpl.cpp \
  	src-client/ClipboardTransferManagerImpl.cpp \
+ 	src-client/HostClipboardImpl.cpp \
  	src-client/ConsoleImpl.cpp \
  	src-client/ConsoleImplConfigCommon.cpp \
  	src-client/ConsoleImplConfigX86.cpp \

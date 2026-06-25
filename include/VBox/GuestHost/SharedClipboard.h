@@ -217,6 +217,8 @@ typedef struct SHCLEVENT
     PSHCLEVENTSOURCE    pParent;
     /** The event's ID, for self-reference. */
     SHCLEVENTID         idEvent;
+    /** User-defined event value. */
+    uint32_t            uUser;
     /** Reference count to this event. */
     uint32_t            cRefs;
     /** Event semaphore for signalling the event. */
@@ -263,6 +265,7 @@ int ShClEventSourceTerm(PSHCLEVENTSOURCE pSource);
 void ShClEventSourceReset(PSHCLEVENTSOURCE pSource);
 int ShClEventSourceGenerateAndRegisterEvent(PSHCLEVENTSOURCE pSource, PSHCLEVENT *ppEvent);
 PSHCLEVENT ShClEventSourceGetFromId(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEvent);
+PSHCLEVENT ShClEventSourceRetainFromId(PSHCLEVENTSOURCE pSource, SHCLEVENTID idEvent);
 PSHCLEVENT ShClEventSourceGetLast(PSHCLEVENTSOURCE pSource);
 /** @} */
 

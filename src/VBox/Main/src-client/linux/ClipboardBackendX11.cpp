@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendX11.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
+/* $Id: ClipboardBackendX11.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - X11 backend.
  */
@@ -320,9 +320,7 @@ int ShClBackendReportFormatsToGuest(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, 
 static int shClBackendReportFormatsToGuestAndMain(PSHCLCLIENT pClient, SHCLFORMATS fFormats)
 {
 #ifdef VBOX_COM_INPROC
-    GuestShCl *pShCl = GuestShCl::tryGetInstance();
-    if (pShCl)
-        return pShCl->reportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
+    return GuestShCl::GetInst()->ReportFormatsToGuest(pClient, fFormats, SHCLSOURCE_LOCAL);
 #endif
     return ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
 }

@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -59,7 +59,7 @@ typedef SHCLSVCEXT *PSHCLSVCEXT;
 /**
  * Private singleton class for managing the Shared Clipboard implementation within Main.
  *
- * Can't be instanciated directly, only via the factory pattern via GuestShCl::createInstance().
+ * Can't be instanciated directly, only via the factory pattern via GuestShCl::CreateInstance().
  */
 class GuestShCl
 {
@@ -71,7 +71,7 @@ public:
      * @returns Newly created Singleton object, or NULL on failure.
      * @param   pConsole        Pointer to parent console.
      */
-    static GuestShCl *createInstance(Console *pConsole)
+    static GuestShCl *CreateInstance(Console *pConsole)
     {
         AssertPtrReturn(pConsole, NULL);
         Assert(NULL == GuestShCl::s_pInstance);
@@ -82,7 +82,7 @@ public:
     /**
      * Destroys the Singleton GuestShCl object.
      */
-    static void destroyInstance(void)
+    static void DestroyInstance(void)
     {
         if (GuestShCl::s_pInstance)
         {
@@ -94,21 +94,11 @@ public:
     /**
      * Returns the Singleton GuestShCl object.
      *
-     * @returns Pointer to Singleton GuestShCl object, or NULL if not created yet.
+     * @returns Pointer to Singleton GuestShCl object.
      */
-    static inline GuestShCl *getInstance(void)
+    static inline GuestShCl *GetInst(void)
     {
         AssertPtr(GuestShCl::s_pInstance);
-        return GuestShCl::s_pInstance;
-    }
-
-    /**
-     * Returns the Singleton GuestShCl object, if it has been created.
-     *
-     * @returns Pointer to Singleton GuestShCl object, or NULL if not created yet.
-     */
-    static inline GuestShCl *tryGetInstance(void)
-    {
         return GuestShCl::s_pInstance;
     }
 
@@ -137,11 +127,14 @@ public:
 
     /** @name Public helper functions.
      * @{ */
-    int hostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM paParms) const;
-    int readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData);
-    int reportFormatsToGuest(SHCLFORMATS fFormats);
-    int reportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource);
-    int reportError(const char *pcszId, int vrc, const char *pcszMsgFmt, ...);
+    int HostCall(uint32_t u32Function, uint32_t cParms, PVBOXHGCMSVCPARM paParms) const;
+    int ReadDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData);
+    int ReadDataFromHost(SHCLFORMAT uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual);
+    int ReportFormatsToHost(SHCLFORMATS fFormats);
+    int WriteDataToHost(SHCLFORMAT uFormat, void *pvData, uint32_t cbData);
+    int ReportFormatsToGuest(SHCLFORMATS fFormats);
+    int ReportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, SHCLSOURCE enmSource);
+    int ReportError(const char *pcszId, int vrc, const char *pcszMsgFmt, ...);
     int RegisterServiceExtension(PFNHGCMSVCEXT pfnExtension, void *pvExtension);
     int UnregisterServiceExtension(PFNHGCMSVCEXT pfnExtension);
     /** @}  */
@@ -150,14 +143,14 @@ public:
 
     /** @name Static low-level HGCM callback handler.
      * @{ */
-    static DECLCALLBACK(int) hgcmDispatcher(void *pvExtension, uint32_t u32Function, void *pvParms, uint32_t cbParms);
+    static DECLCALLBACK(int) s_HgcmDispatcher(void *pvExtension, uint32_t u32Function, void *pvParms, uint32_t cbParms);
     /** @}  */
 
 protected:
 
     /** @name Service extension callback helpers.
      * @{ */
-    int i_forwardToChainedSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms);
+    int i_forwardToSvcExt(uint32_t u32Function, void *pvParms, uint32_t cbParms);
     int i_validateSvcExtParms(uint32_t u32Function, void *pvParms, uint32_t cbParms);
     /** @}  */
 
@@ -214,7 +207,7 @@ private:
 };
 
 /** Access to the GuestShCl's singleton instance. */
-#define GuestShClInst() GuestShCl::getInstance()
+#define GuestShClInst() GuestShCl::GetInst()
 
 #endif /* !MAIN_INCLUDED_GuestShClPrivate_h */
 

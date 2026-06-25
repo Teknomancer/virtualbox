@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114470 2026-06-22 09:53:42Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -412,6 +412,212 @@ static void testGetHostMsgOld(void)
     table.pfnUnload(NULL);
 }
 
+/**
+ * Tests late guest data replies for an expired host wait event.
+ *
+ * The test creates a context-ID capable client, queues an asynchronous
+ * read-data request, drains the resulting READ_DATA_CID host message, and then
+ * releases the associated event to simulate the host-side read timing out. It
+ * finally calls ShClSvcGuestDataSignal() with the stale context ID, as a guest
+ * would do when its DATA_WRITE reply arrives after the host has stopped waiting.
+ *
+ * This is needed because guest response timing is guest-controlled and cannot
+ * be trusted. The expected behavior is to drop the
+ * stale payload and report success to the service dispatcher, because there is
+ * no remaining host waiter that can consume the data.
+ */
+static void testGuestDataSignalExpiredEvent(void)
+{
+    struct VBOXHGCMSVCPARM parms[1];
+    struct VBOXHGCMSVCPARM aMsgParms[2];
+    VBOXHGCMSVCFNTABLE table;
+    VBOXHGCMCALLHANDLE_TYPEDEF call;
+    int rc;
+
+    RTTestISub("Testing late guest data for expired event");
+    rc = setupTable(&table);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    HGCMSvcSetU32(&parms[0], VBOX_SHCL_MODE_BIDIRECTIONAL);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_MODE, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RT_ZERO(g_Client);
+    rc = table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
+
+    PSHCLEVENT pEvent = NULL;
+    rc = ShClSvcReadDataFromGuestAsync(&g_Client, VBOX_SHCL_FMT_UNICODETEXT, &pEvent);
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK_RETV(pEvent != NULL);
+
+    uint64_t const uContextID = VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID,
+                                                         g_Client.EventSrc.uID, pEvent->idEvent);
+
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    HGCMSvcSetU64(&aMsgParms[0], VBOX_SHCL_HOST_MSG_READ_DATA_CID);
+    HGCMSvcSetU32(&aMsgParms[1], 0);
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_MSG_GET, 2, aMsgParms, 0);
+    RTTESTI_CHECK_RC_OK(call.rc);
+    RTTESTI_CHECK(aMsgParms[0].u.uint64 == uContextID);
+    RTTESTI_CHECK(aMsgParms[1].u.uint32 == VBOX_SHCL_FMT_UNICODETEXT);
+
+    RTTESTI_CHECK(ShClEventRelease(pEvent) == 0);
+
+    SHCLCLIENTCMDCTX cmdCtx;
+    RT_ZERO(cmdCtx);
+    cmdCtx.uContextID = uContextID;
+
+    char szData[] = "late data";
+    rc = ShClSvcGuestDataSignal(&g_Client, &cmdCtx, VBOX_SHCL_FMT_UNICODETEXT, szData, sizeof(szData));
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = table.pfnDisconnect(NULL, 1 /* clientId */, &g_Client);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+    rc = table.pfnUnload(NULL);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+}
+
+/**
+ * Tests guest data reply validation for still pending host wait events.
+ */
+static void testGuestDataSignalRejectsMismatches(void)
+{
+    struct VBOXHGCMSVCPARM parms[1];
+    struct VBOXHGCMSVCPARM aMsgParms[2];
+    VBOXHGCMSVCFNTABLE table;
+    VBOXHGCMCALLHANDLE_TYPEDEF call;
+    int rc;
+
+    RTTestISub("Testing guest data context validation");
+    rc = setupTable(&table);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    HGCMSvcSetU32(&parms[0], VBOX_SHCL_MODE_BIDIRECTIONAL);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_MODE, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RT_ZERO(g_Client);
+    rc = table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
+
+    PSHCLEVENT pEvent = NULL;
+    rc = ShClSvcReadDataFromGuestAsync(&g_Client, VBOX_SHCL_FMT_UNICODETEXT, &pEvent);
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK_RETV(pEvent != NULL);
+
+    uint64_t const uContextID = VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID,
+                                                         g_Client.EventSrc.uID, pEvent->idEvent);
+
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    HGCMSvcSetU64(&aMsgParms[0], VBOX_SHCL_HOST_MSG_READ_DATA_CID);
+    HGCMSvcSetU32(&aMsgParms[1], 0);
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_MSG_GET, 2, aMsgParms, 0);
+    RTTESTI_CHECK_RC_OK(call.rc);
+    RTTESTI_CHECK(aMsgParms[0].u.uint64 == uContextID);
+    RTTESTI_CHECK(aMsgParms[1].u.uint32 == VBOX_SHCL_FMT_UNICODETEXT);
+
+    SHCLCLIENTCMDCTX cmdCtx;
+    RT_ZERO(cmdCtx);
+    char szData[] = "pending data";
+
+    cmdCtx.uContextID = VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID,
+                                                 g_Client.EventSrc.uID, 0);
+    rc = ShClSvcGuestDataSignal(&g_Client, &cmdCtx, VBOX_SHCL_FMT_UNICODETEXT, szData, sizeof(szData));
+    RTTESTI_CHECK_RC(rc, VERR_WRONG_ORDER);
+
+    cmdCtx.uContextID = VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID + 1,
+                                                 g_Client.EventSrc.uID, pEvent->idEvent);
+    rc = ShClSvcGuestDataSignal(&g_Client, &cmdCtx, VBOX_SHCL_FMT_UNICODETEXT, szData, sizeof(szData));
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_CONTEXT);
+
+    cmdCtx.uContextID = VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID,
+                                                 g_Client.EventSrc.uID + 1, pEvent->idEvent);
+    rc = ShClSvcGuestDataSignal(&g_Client, &cmdCtx, VBOX_SHCL_FMT_UNICODETEXT, szData, sizeof(szData));
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_CONTEXT);
+
+    cmdCtx.uContextID = uContextID;
+    rc = ShClSvcGuestDataSignal(&g_Client, &cmdCtx, VBOX_SHCL_FMT_HTML, szData, sizeof(szData));
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_CONTEXT);
+
+    rc = ShClSvcGuestDataSignal(&g_Client, &cmdCtx, VBOX_SHCL_FMT_UNICODETEXT, szData, sizeof(szData));
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(ShClEventRelease(pEvent) == 0);
+
+    PSHCLEVENT pMultiEvent = NULL;
+    rc = ShClSvcReadDataFromGuestAsync(&g_Client, VBOX_SHCL_FMT_UNICODETEXT | VBOX_SHCL_FMT_HTML, &pMultiEvent);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+    RTTESTI_CHECK(pMultiEvent == NULL);
+
+    rc = table.pfnDisconnect(NULL, 1 /* clientId */, &g_Client);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+    rc = table.pfnUnload(NULL);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+}
+
+/**
+ * Tests guest DATA_WRITE format validation before forwarding data to the backend.
+ */
+static void testGuestDataWriteRejectsInvalidFormats(void)
+{
+    struct VBOXHGCMSVCPARM parms[1];
+    struct VBOXHGCMSVCPARM aWriteParms[VBOX_SHCL_CPARMS_DATA_WRITE];
+    static const SHCLFORMAT s_aInvalidFormats[] =
+    {
+        VBOX_SHCL_FMT_NONE,
+        VBOX_SHCL_FMT_UNICODETEXT | VBOX_SHCL_FMT_HTML,
+        VBOX_SHCL_FMT_VALID_MASK + 1
+    };
+    VBOXHGCMSVCFNTABLE table;
+    VBOXHGCMCALLHANDLE_TYPEDEF call;
+    char szData[] = "invalid format data";
+    int rc;
+
+    RTTestISub("Testing guest DATA_WRITE invalid format rejection");
+    rc = setupTable(&table);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    HGCMSvcSetU32(&parms[0], VBOX_SHCL_MODE_BIDIRECTIONAL);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_MODE, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RT_ZERO(g_Client);
+    rc = table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
+
+    for (size_t i = 0; i < RT_ELEMENTS(s_aInvalidFormats); i++)
+    {
+        RTTestISubF("Testing guest DATA_WRITE invalid format %#x", s_aInvalidFormats[i]);
+        HGCMSvcSetU64(&aWriteParms[0], VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID,
+                                                                 g_Client.EventSrc.uID, 1));
+        HGCMSvcSetU32(&aWriteParms[1], s_aInvalidFormats[i]);
+        aWriteParms[2].type = VBOX_HGCM_SVC_PARM_PTR;
+        aWriteParms[2].u.pointer.addr = szData;
+        aWriteParms[2].u.pointer.size = sizeof(szData);
+
+        call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+        table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                      VBOX_SHCL_GUEST_FN_DATA_WRITE, RT_ELEMENTS(aWriteParms), aWriteParms, 0);
+        RTTESTI_CHECK_RC(call.rc, VERR_INVALID_PARAMETER);
+    }
+
+    rc = table.pfnDisconnect(NULL, 1 /* clientId */, &g_Client);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+    rc = table.pfnUnload(NULL);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+}
+
+/**
+ * Tests VBOX_SHCL_HOST_FN_SET_HEADLESS host calls.
+ *
+ * This host function is deprecated but intentionally kept for older Guest
+ * Additions and compatibility with the historic service protocol.
+ */
 static void testSetHeadless(void)
 {
     struct VBOXHGCMSVCPARM parms[2];
@@ -516,6 +722,9 @@ static void testHostCall(void)
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
     testSetHeadless();
     testHeadlessBackendConnect();
+    testGuestDataSignalExpiredEvent();
+    testGuestDataSignalRejectsMismatches();
+    testGuestDataWriteRejectsInvalidFormats();
 }
 
 int main(int argc, char *argv[])
