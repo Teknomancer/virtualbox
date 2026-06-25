@@ -1,4 +1,4 @@
-/* $Id: ConsoleImplConfigCommon.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImplConfigCommon.cpp 114532 2026-06-25 11:46:49Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation - VM Configuration Bits.
  *
@@ -4024,10 +4024,11 @@ int Console::i_configVmmDev(ComPtr<IMachine> pMachine, BusAssignmentManager *pBu
             AssertLogRelMsg(RT_SUCCESS(vrc), ("Shared Clipboard: Failed to set initial file transfer mode (%u): vrc=%Rrc\n",
                                              fFileTransfersEnabled, vrc));
 # endif
-            AssertPtrReturn(GuestShCl::CreateInstance(this /* pConsole */), VERR_NO_MEMORY);
+            GuestShCl *pGuestShCl = GuestShCl::CreateInstance(this /* pConsole */);
+            AssertPtrReturn(pGuestShCl, VERR_NO_MEMORY);
             vrc = HGCMHostRegisterServiceExtension(&m_hHgcmSvcExtShCl, "VBoxSharedClipboard",
                                                    &GuestShCl::s_HgcmDispatcher,
-                                                   GuestShClInst());
+                                                   pGuestShCl);
             if (RT_FAILURE(vrc))
                 Log(("Cannot register VBoxSharedClipboard extension, vrc=%Rrc\n", vrc));
         }
