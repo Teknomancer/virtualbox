@@ -1,4 +1,4 @@
-/* $Id: HMR0SVM-x86.cpp 113526 2026-03-24 08:45:34Z knut.osmundsen@oracle.com $ */
+/* $Id: HMR0SVM-x86.cpp 114522 2026-06-25 09:32:47Z alexander.eichner@oracle.com $ */
 /** @file
  * HM SVM (AMD-V) - Host Context Ring-0.
  */
@@ -6415,9 +6415,7 @@ static VBOXSTRICTRC hmR0SvmRunGuestCodeDebug(PVMCPUCC pVCpu, uint32_t *pcLoops)
     for (;;)
     {
         Assert(!HMR0SuspendPending());
-        AssertMsg(pVCpu->hmr0.s.idEnteredCpu == RTMpCpuId(),
-                  ("Illegal migration! Entered on CPU %u Current %u cLoops=%u\n", (unsigned)pVCpu->hmr0.s.idEnteredCpu,
-                  (unsigned)RTMpCpuId(), *pcLoops));
+        HMSVM_ASSERT_CPU_SAFE(pVCpu);
         bool fStepping = pVCpu->hm.s.fSingleInstruction;
 
         /* Set up VM-execution controls the next two can respond to. */
