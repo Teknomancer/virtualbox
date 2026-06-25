@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114269 2026-06-09 05:33:40Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114516 2026-06-25 07:04:32Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-makefile for NAT Networking
 #
@@ -27,6 +27,11 @@
 
 SUB_DEPTH = ../../../..
 include $(KBUILD_PATH)/subheader.kmk
+
+# Include testcases.
+ifdef VBOX_WITH_TESTCASES
+ include $(PATH_SUB_CURRENT)/testcase/Makefile.kmk
+endif
 
 #
 # Hardened stub exe for VBoxNetNAT.
