@@ -1160,6 +1160,9 @@ public:
     SAFEARRAY * __asInParam() { return m.arr; }
 
     /** Internal function Never call it directly. */
+    SAFEARRAY * __asInParam() const { return m.arr; }
+
+    /** Internal function Never call it directly. */
     OutSafeArrayDipper __asOutParam()
     { setNull(); return OutSafeArrayDipper(&m.arr, (void **)&m.raw); }
 
