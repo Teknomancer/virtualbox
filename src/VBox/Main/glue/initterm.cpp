@@ -1,4 +1,4 @@
-/* $Id: initterm.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: initterm.cpp 114550 2026-06-26 09:55:31Z andreas.loeffler@oracle.com $ */
 /** @file
  * MS COM / XPCOM Abstraction Layer - Initialization and Termination.
  */
@@ -61,6 +61,7 @@
 #include "../include/LoggingNew.h"
 
 #include <iprt/asm.h>
+#include <iprt/dir.h>
 #include <iprt/env.h>
 #include <iprt/ldr.h>
 #include <iprt/param.h>
@@ -691,6 +692,16 @@ HRESULT Initialize(uint32_t fInitFlags /*=VBOX_COM_INIT_F_DEFAULT*/)
             continue;
         }
         LogFlowFunc(("component directory : \"%s\"\n", szCompDir));
+
+        if (!RTDirExists(szCompDir))
+        {
+            hrc = NS_ERROR_FILE_NOT_FOUND;
+            /* If VBOX_APP_HOME (index 0) does not exist fail immediately
+             * and don't probe other paths, otherwise continue probing. */
+            if (i == 0)
+                break;
+            continue;
+        }
 
         nsCOMPtr<DirectoryServiceProvider> dsProv;
         dsProv = new DirectoryServiceProvider();
