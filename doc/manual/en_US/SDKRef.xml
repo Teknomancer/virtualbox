@@ -3431,8 +3431,11 @@ while providerIsRunning:
       <link linkend="IClipboard__readData">IClipboard::readData</link> or
       <link linkend="IClipboard__readDataRaw">IClipboard::readDataRaw</link>
       and then decide whether to place the returned payload into the host
-      operating system clipboard.  Main will not perform that host clipboard
-      update automatically.</para>
+      operating system clipboard. Pass an empty requested MIME type to
+      <link linkend="IClipboard__readDataRaw">IClipboard::readDataRaw</link>
+      to let Main choose the preferred available format, or pass a specific
+      MIME type to read that format. The returned MIME type identifies the
+      actual payload representation.</para>
     </sect1>
 
     <sect1 id="vboxclipboardapi-settings">

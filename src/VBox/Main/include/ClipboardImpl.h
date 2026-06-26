@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -118,13 +118,10 @@ private:
                       const ComPtr<IClipboardItem> &aItem,
                       ComPtr<IClipboardItem> &aWrittenItem);
     HRESULT readDataRaw(ClipboardAction_T aAction,
+                        const com::Utf8Str &aRequestedMimeType,
                         ClipboardSource_T *aSource,
                         com::Utf8Str &aMimeType,
                         std::vector<BYTE> &aBuffer);
-    HRESULT readDataRawWithFormat(ClipboardAction_T aAction,
-                                  const com::Utf8Str &aMimeType,
-                                  ClipboardSource_T *aSource,
-                                  std::vector<BYTE> &aBuffer);
     HRESULT writeDataRaw(ClipboardAction_T aAction,
                          ClipboardSource_T aSource,
                          const com::Utf8Str &aMimeType,

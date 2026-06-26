@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -1087,22 +1087,24 @@ HRESULT Clipboard::writeData(ClipboardAction_T aAction,
  * Reads raw clipboard data.
  *
  * @returns COM status code.
- * @param   aAction         Clipboard action to read for.
- * @param   aSource         Where to return the clipboard source.
- * @param   aMimeType       Where to return the MIME type.
- * @param   aBuffer         Where to return the payload bytes.
+ * @param   aAction             Clipboard action to read for.
+ * @param   aRequestedMimeType  MIME type to read, or empty to auto-select.
+ * @param   aSource             Where to return the clipboard source.
+ * @param   aMimeType           Where to return the MIME type.
+ * @param   aBuffer             Where to return the payload bytes.
  */
 HRESULT Clipboard::readDataRaw(ClipboardAction_T aAction,
+                               const com::Utf8Str &aRequestedMimeType,
                                ClipboardSource_T *aSource,
                                com::Utf8Str &aMimeType,
                                std::vector<BYTE> &aBuffer)
 {
 #ifndef VBOX_WITH_SHARED_CLIPBOARD
-    RT_NOREF(aAction, aSource, aMimeType, aBuffer);
+    RT_NOREF(aAction, aRequestedMimeType, aSource, aMimeType, aBuffer);
     ReturnComNotImplemented();
 #else /* VBOX_WITH_SHARED_CLIPBOARD */
 
-    Log2Func(("aAction=%RU32\n", (uint32_t)aAction));
+    Log2Func(("aAction=%RU32, aRequestedMimeType=%s\n", (uint32_t)aAction, aRequestedMimeType.c_str()));
     if (!ShClMainIsValidAction(aAction))
     {
         LogFunc(("Rejecting invalid clipboard action %RU32\n", (uint32_t)aAction));
@@ -1110,6 +1112,18 @@ HRESULT Clipboard::readDataRaw(ClipboardAction_T aAction,
     }
     if (!aSource)
         return setError(VBOX_E_SHCL_ERROR, tr("The clipboard source output argument must not be NULL"));
+
+    SHCLFORMAT uRequestedFormat = VBOX_SHCL_FMT_NONE;
+    if (!aRequestedMimeType.isEmpty())
+    {
+        uRequestedFormat = consoleClipboardMimeTypeToFormat(aRequestedMimeType);
+        if (uRequestedFormat == VBOX_SHCL_FMT_NONE)
+        {
+            LogFunc(("Rejecting raw read for unsupported MIME type: %s\n", aRequestedMimeType.c_str()));
+            return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED,
+                            tr("Clipboard MIME type '%s' is not supported"), aRequestedMimeType.c_str());
+        }
+    }
 
     HRESULT hrc = S_OK;
     ClipboardMode_T enmMode = ClipboardMode_Disabled;
@@ -1134,92 +1148,10 @@ HRESULT Clipboard::readDataRaw(ClipboardAction_T aAction,
                         (uint32_t)enmMode, (uint32_t)enmReportedSource);
     }
 
-    hrc = i_readData(aAction, aSource, aMimeType, aBuffer);
-    if (FAILED(hrc))
-        return setError(hrc, tr("Reading shared clipboard data failed (%Rhrc)"), hrc);
-    if (!ShClMainIsValidSource(*aSource))
-    {
-        LogFunc(("Read returned invalid clipboard source %RU32\n", (uint32_t)*aSource));
-        return setError(VBOX_E_SHCL_ERROR, tr("Invalid clipboard source %RU32"), (uint32_t)*aSource);
-    }
-
-    if (!ShClMainModeAllowsRead(enmMode, *aSource))
-    {
-        LogFunc(("Rejecting read from source %RU32 in clipboard mode %RU32\n", (uint32_t)*aSource, (uint32_t)enmMode));
-        return setError(VBOX_E_SHCL_ACCESS_DENIED,
-                        tr("Shared Clipboard mode %RU32 does not allow reading from source %RU32"),
-                        (uint32_t)enmMode, (uint32_t)*aSource);
-    }
-    return S_OK;
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
-}
-
-
-/**
- * Reads raw clipboard data in a specific MIME type.
- *
- * @returns COM status code.
- * @param   aAction         Clipboard action to read for.
- * @param   aMimeType       MIME type to read.
- * @param   aSource         Where to return the clipboard source.
- * @param   aBuffer         Where to return the payload bytes.
- */
-HRESULT Clipboard::readDataRawWithFormat(ClipboardAction_T aAction,
-                                         const com::Utf8Str &aMimeType,
-                                         ClipboardSource_T *aSource,
-                                         std::vector<BYTE> &aBuffer)
-{
-#ifndef VBOX_WITH_SHARED_CLIPBOARD
-    RT_NOREF(aAction, aMimeType, aSource, aBuffer);
-    ReturnComNotImplemented();
-#else /* VBOX_WITH_SHARED_CLIPBOARD */
-
-    Log2Func(("aAction=%RU32, aMimeType=%s\n", (uint32_t)aAction, aMimeType.c_str()));
-    if (!ShClMainIsValidAction(aAction))
-    {
-        LogFunc(("Rejecting invalid clipboard action %RU32\n", (uint32_t)aAction));
-        return setError(VBOX_E_SHCL_ERROR, tr("Invalid clipboard action %RU32"), (uint32_t)aAction);
-    }
-    if (!aSource)
-        return setError(VBOX_E_SHCL_ERROR, tr("The clipboard source output argument must not be NULL"));
-    if (aMimeType.isEmpty())
-    {
-        LogFunc(("Rejecting raw read with empty MIME type\n"));
-        return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED, tr("Clipboard MIME type must not be empty"));
-    }
-
-    SHCLFORMAT const uFormat = consoleClipboardMimeTypeToFormat(aMimeType);
-    if (uFormat == VBOX_SHCL_FMT_NONE)
-    {
-        LogFunc(("Rejecting raw read for unsupported MIME type: %s\n", aMimeType.c_str()));
-        return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED,
-                        tr("Clipboard MIME type '%s' is not supported"), aMimeType.c_str());
-    }
-
-    ClipboardMode_T enmMode = ClipboardMode_Disabled;
-    ClipboardSource_T enmReportedSource = ClipboardSource_Custom;
-    Console *pParent = NULL;
-    {
-        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-        if (!mData)
-            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-        pParent = mData->mParent;
-        enmReportedSource = mData->mSource;
-    }
-    HRESULT hrc = ShClMainGetMode(pParent, &enmMode);
-    if (FAILED(hrc))
-        return setError(VBOX_E_SHCL_ERROR, tr("Getting the Shared Clipboard mode failed (%Rhrc)"), hrc);
-    if (!ShClMainModeAllowsRead(enmMode, enmReportedSource))
-    {
-        LogFunc(("Rejecting raw read for reported source %RU32 in clipboard mode %RU32\n",
-                 (uint32_t)enmReportedSource, (uint32_t)enmMode));
-        return setError(VBOX_E_SHCL_ACCESS_DENIED,
-                        tr("Shared Clipboard mode %RU32 does not allow reading from source %RU32"),
-                        (uint32_t)enmMode, (uint32_t)enmReportedSource);
-    }
-
-    com::Utf8Str strReadMimeType;
-    hrc = i_readDataForFormat(aAction, uFormat, aSource, strReadMimeType, aBuffer);
+    if (uRequestedFormat != VBOX_SHCL_FMT_NONE)
+        hrc = i_readDataForFormat(aAction, uRequestedFormat, aSource, aMimeType, aBuffer);
+    else
+        hrc = i_readData(aAction, aSource, aMimeType, aBuffer);
     if (FAILED(hrc))
         return setError(hrc, tr("Reading shared clipboard data failed (%Rhrc)"), hrc);
     if (!ShClMainIsValidSource(*aSource))

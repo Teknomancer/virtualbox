@@ -15901,7 +15901,7 @@
 
   <interface
     name="IClipboard" extends="$unknown"
-    uuid="808262aa-094c-47e2-9a00-26825428cc89"
+    uuid="ee497f25-37cd-4b33-902f-355d44c84513"
     wsmap="managed"
     wrap-hint-server-addinterfaces="IInternalClipboardControl"
     reservedMethods="7" reservedAttributes="7"
@@ -15964,10 +15964,12 @@
           <link to="IClipboard::eventSource"/> notify clients about source,
           format and data changes. A client can inspect guest-owned formats and
           payload with <link to="IClipboard::readFormats"/>,
-          <link to="IClipboard::readData"/>,
-          <link to="IClipboard::readDataRaw"/> or
-          <link to="IClipboard::readDataRawWithFormat"/> when the configured mode permits
-          guest-to-host sharing.</li>
+          <link to="IClipboard::readData"/> or
+          <link to="IClipboard::readDataRaw"/> when the configured mode permits
+          guest-to-host sharing. Use <link to="IClipboard::readDataRaw"/>
+          with an empty requested MIME type to let Main choose a preferred
+          available format, or with a specific MIME type to read a specific
+          format.</li>
         <li><b>Guest to native host clipboard:</b> for lazy publication, a
           client reports guest formats through
           <link to="IHostClipboard::reportFormats"/>, which also updates the
@@ -16122,33 +16124,24 @@
     <method name="readDataRaw">
       <desc>
         Reads raw clipboard payload data for the requested clipboard action.
+
+        If <tt>requestedMimeType</tt> is empty, Main chooses the preferred
+        currently available clipboard format and returns its MIME type in
+        <tt>mimeType</tt>. If <tt>requestedMimeType</tt> is not empty, Main reads
+        that MIME type, or an equivalent supported MIME type, and fails if that
+        format is unsupported or not currently available.
       </desc>
       <param name="action" type="ClipboardAction" dir="in">
         <desc>Clipboard action to read data for.</desc>
+      </param>
+      <param name="requestedMimeType" type="wstring" dir="in">
+        <desc>MIME type to read, or empty to let Main choose the preferred available format.</desc>
       </param>
       <param name="source" type="ClipboardSource" dir="out">
         <desc>Clipboard source which supplied the returned data.</desc>
       </param>
       <param name="mimeType" type="wstring" dir="out">
         <desc>MIME type of the returned data.</desc>
-      </param>
-      <param name="buffer" type="octet" safearray="yes" dir="return">
-        <desc>Clipboard data returned on success.</desc>
-      </param>
-    </method>
-
-    <method name="readDataRawWithFormat">
-      <desc>
-        Reads raw clipboard payload data in a specific MIME type for the requested clipboard action.
-      </desc>
-      <param name="action" type="ClipboardAction" dir="in">
-        <desc>Clipboard action to read data for.</desc>
-      </param>
-      <param name="mimeType" type="wstring" dir="in">
-        <desc>MIME type to read.</desc>
-      </param>
-      <param name="source" type="ClipboardSource" dir="out">
-        <desc>Clipboard source which supplied the returned data.</desc>
       </param>
       <param name="buffer" type="octet" safearray="yes" dir="return">
         <desc>Clipboard data returned on success.</desc>

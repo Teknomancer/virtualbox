@@ -1,4 +1,4 @@
-' $Id: clipboard_api.iuml 114483 2026-06-22 13:41:46Z andreas.loeffler@oracle.com $
+' $Id: clipboard_api.iuml 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - VirtualBox Clipboard API - Draft
 '
@@ -228,7 +228,7 @@ abstract class IClipboard
     +readData(ClipboardAction) : IClipboardItem
     +readFormats : SafeArray<IClipboardFormat>
     +writeData(ClipboardAction, IClipboardItem) : IClipboardItem
-    +readDataRaw(ClipboardAction) : SafeArray<octet>
+    +readDataRaw(ClipboardAction, wstring requestedMimeType) : SafeArray<octet>
     +writeDataRaw(ClipboardAction, ClipboardSource, wstring, SafeArray<octet>) : SafeArray<octet>
     +writeFormats(SafeArray<IClipboardFormat>) : HRESULT
     +reset : HRESULT

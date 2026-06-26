@@ -1,4 +1,4 @@
-/* $Id: VBoxManageClipboard.cpp 114548 2026-06-26 09:02:22Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageClipboard.cpp 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of the clipboard command.
  */
@@ -513,9 +513,8 @@ static HRESULT shclGetItemData(const ComPtr<IClipboardItem> &ptrItem, Utf8Str &s
 /**
  * Returns the public Shared Clipboard format preference for a MIME type.
  *
- * This mirrors Main's current ReadDataRaw() format selection order so that
- * VBoxManage serve only advertises formats it can read back through the
- * existing public API.
+ * This mirrors Main's ReadDataRaw() auto-selection order and supported MIME
+ * mappings.
  *
  * @returns Format priority, UINT32_MAX if unsupported.
  * @param   strMimeType     MIME type to classify.
@@ -594,7 +593,7 @@ static bool shclMimeMatches(const char *pszRequested, const Utf8Str &strActual)
 
 
 /**
- * Selects the preferred format that can be read back through ReadDataRaw().
+ * Selects the preferred format for ReadDataRaw() auto-selection.
  *
  * @returns COM status code.
  * @param   aFormats        Candidate clipboard formats.
@@ -1004,10 +1003,11 @@ static bool shclVerboseReadGuestData(const char *pszCommand, const char *pszOper
         return false;
 
     ClipboardSource_T enmReadSource = ClipboardSource_Custom;
+    Bstr bstrRequestedMimeType("");
     Bstr bstrReadMimeType;
     SafeArray<BYTE> aBuffer;
-    HRESULT hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, &enmReadSource, bstrReadMimeType.asOutParam(),
-                                            ComSafeArrayAsOutParam(aBuffer));
+    HRESULT hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, bstrRequestedMimeType.raw(), &enmReadSource,
+                                            bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aBuffer));
     if (FAILED(hrc))
     {
         if (fLogFailures)
@@ -2464,9 +2464,11 @@ static RTEXITCODE shclHandlePasteDataRequested(const ComPtr<IClipboard> &ptrClip
     }
 
     ClipboardSource_T enmReadSource = ClipboardSource_Custom;
+    Bstr bstrRequestedMimeType(strRequestedMimeType);
+    Bstr bstrReadMimeType;
     SafeArray<BYTE> aBuffer;
-    HRESULT hrc = ptrClipboard->ReadDataRawWithFormat(enmAction, Bstr(strRequestedMimeType).raw(), &enmReadSource,
-                                                      ComSafeArrayAsOutParam(aBuffer));
+    HRESULT hrc = ptrClipboard->ReadDataRaw(enmAction, bstrRequestedMimeType.raw(), &enmReadSource,
+                                            bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aBuffer));
     if (FAILED(hrc))
     {
         shclVerbose("paste: request id=%RU32 read failed: %Rhrc", (uint32_t)uRequestId, hrc);
@@ -2477,8 +2479,9 @@ static RTEXITCODE shclHandlePasteDataRequested(const ComPtr<IClipboard> &ptrClip
         return RTMsgErrorExit(RTEXITCODE_FAILURE, Clipboard::tr("Reading guest clipboard data failed: %Rhrc"), hrc);
     }
 
+    Utf8Str strReadMimeType(bstrReadMimeType);
     shclVerbose("paste: request id=%RU32 read source=%s format=%s size=%zu", (uint32_t)uRequestId,
-                ShClHlpSourceToString(enmReadSource), strRequestedMimeType.c_str(), aBuffer.size());
+                ShClHlpSourceToString(enmReadSource), strReadMimeType.c_str(), aBuffer.size());
     if (enmReadSource != ClipboardSource_Guest)
     {
         shclVerbose("paste: request id=%RU32 ignored non-guest data", (uint32_t)uRequestId);
@@ -2487,7 +2490,7 @@ static RTEXITCODE shclHandlePasteDataRequested(const ComPtr<IClipboard> &ptrClip
 
     if (aBuffer.size())
     {
-        hrc = ptrHostClipboard->ProvideData(uRequestId, enmAction, ClipboardSource_Guest, Bstr(strRequestedMimeType).raw(),
+        hrc = ptrHostClipboard->ProvideData(uRequestId, enmAction, ClipboardSource_Guest, bstrReadMimeType.raw(),
                                             ComSafeArrayAsInParam(aBuffer));
         if (FAILED(hrc))
             RTMsgWarning(Clipboard::tr("Providing guest clipboard data for host request %RU32 failed: %Rhrc"),
@@ -2564,12 +2567,14 @@ static RTEXITCODE shclHandlePasteTryCurrent(ComPtr<IClipboard> const &ptrClipboa
         Utf8Str const &strMimeType = vecTryMimeTypes[i];
 
         ClipboardSource_T enmSource = ClipboardSource_Host;
+        Bstr bstrRequestedMimeType(strMimeType);
+        Bstr bstrReadMimeType;
         SafeArray<BYTE> aBuffer;
-        HRESULT hrc = ptrClipboard->ReadDataRawWithFormat(ClipboardAction_Copy, Bstr(strMimeType).raw(), &enmSource,
-                                                          ComSafeArrayAsOutParam(aBuffer));
+        HRESULT hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, bstrRequestedMimeType.raw(), &enmSource,
+                                                bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aBuffer));
         if (FAILED(hrc))
         {
-            shclVerbose("paste: ReadDataRawWithFormat(%s) failed: %Rhrc", strMimeType.c_str(), hrc);
+            shclVerbose("paste: ReadDataRaw(%s) failed: %Rhrc", strMimeType.c_str(), hrc);
             if (   hrc == VBOX_E_SHCL_NO_DATA
                 || hrc == VBOX_E_SHCL_ACCESS_DENIED
                 || hrc == VBOX_E_SHCL_GUEST_ERROR)
@@ -2582,8 +2587,9 @@ static RTEXITCODE shclHandlePasteTryCurrent(ComPtr<IClipboard> const &ptrClipboa
             return RTMsgErrorExit(RTEXITCODE_FAILURE, Clipboard::tr("Reading shared clipboard data failed: %Rhrc"), hrc);
         }
 
+        Utf8Str strReadMimeType(bstrReadMimeType);
         shclVerbose("paste: read source=%s format=%s size=%zu", ShClHlpSourceToString(enmSource),
-                    strMimeType.c_str(), aBuffer.size());
+                    strReadMimeType.c_str(), aBuffer.size());
         if (enmSource != ClipboardSource_Guest)
         {
             shclVerbose("paste: current data is not guest-owned; waiting for guest data");
@@ -2592,14 +2598,14 @@ static RTEXITCODE shclHandlePasteTryCurrent(ComPtr<IClipboard> const &ptrClipboa
         }
         if (pfGuestOffer)
             *pfGuestOffer = true;
-        if (!shclMimeMatches(pszFormat, strMimeType))
+        if (!shclMimeMatches(pszFormat, strReadMimeType))
         {
             shclVerbose("paste: current data does not match requested format; waiting for matching data");
             fNeedWait = true;
             continue;
         }
 
-        return shclHandlePasteOutputData(strMimeType, pszFormat, aBuffer.raw(), aBuffer.size());
+        return shclHandlePasteOutputData(strReadMimeType, pszFormat, aBuffer.raw(), aBuffer.size());
     }
 
     *pfNeedWait = fNeedWait || !vecTryMimeTypes.empty();
@@ -3228,10 +3234,11 @@ static RTEXITCODE shclHandleServeDataRequested(const ComPtr<IClipboard> &ptrClip
     }
 
     ClipboardSource_T enmReadSource = ClipboardSource_Custom;
-    Bstr bstrReadMimeType(strRequestedMimeType);
+    Bstr bstrRequestedMimeType(strRequestedMimeType);
+    Bstr bstrReadMimeType;
     SafeArray<BYTE> aBuffer;
-    HRESULT hrc = ptrClipboard->ReadDataRawWithFormat(enmAction, bstrReadMimeType.raw(), &enmReadSource,
-                                                      ComSafeArrayAsOutParam(aBuffer));
+    HRESULT hrc = ptrClipboard->ReadDataRaw(enmAction, bstrRequestedMimeType.raw(), &enmReadSource,
+                                            bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aBuffer));
     if (FAILED(hrc))
     {
         RTMsgWarning(Clipboard::tr("Reading guest clipboard data for host request %RU32 failed: %Rhrc"),

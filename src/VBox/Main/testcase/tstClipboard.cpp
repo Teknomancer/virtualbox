@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -170,10 +170,11 @@ static bool tstReadDataRawEquals(IClipboard *pClipboard, const char *pszWhat, Cl
     AssertPtrReturn(pszExpectedMimeType, false);
 
     ClipboardSource_T enmReadSource = ClipboardSource_Custom;
+    Bstr bstrRequestedMimeType("");
     Bstr bstrReadMimeType;
     SafeArray<BYTE> aReadBuffer;
-    HRESULT hrc = pClipboard->ReadDataRaw(ClipboardAction_Copy, &enmReadSource, bstrReadMimeType.asOutParam(),
-                                          ComSafeArrayAsOutParam(aReadBuffer));
+    HRESULT hrc = pClipboard->ReadDataRaw(ClipboardAction_Copy, bstrRequestedMimeType.raw(), &enmReadSource,
+                                          bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aReadBuffer));
     if (FAILED(hrc))
     {
         RTTestIFailed("%s: ReadDataRaw failed, hrc=%Rhrc\n", pszWhat, hrc);
@@ -277,10 +278,11 @@ static void tstHostClipboardTryNativeReadBack(RTTEST hTest, IClipboard *pClipboa
     for (unsigned i = 0; i < 20; i++)
     {
         ClipboardSource_T enmReadSource = ClipboardSource_Custom;
+        Bstr bstrRequestedMimeType("");
         Bstr bstrReadMimeType;
         SafeArray<BYTE> aReadBuffer;
-        HRESULT hrc = pClipboard->ReadDataRaw(ClipboardAction_Copy, &enmReadSource, bstrReadMimeType.asOutParam(),
-                                              ComSafeArrayAsOutParam(aReadBuffer));
+        HRESULT hrc = pClipboard->ReadDataRaw(ClipboardAction_Copy, bstrRequestedMimeType.raw(), &enmReadSource,
+                                              bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aReadBuffer));
         if (SUCCEEDED(hrc) && enmReadSource == ClipboardSource_Host)
         {
             Utf8Str strReadMimeType(bstrReadMimeType);
@@ -471,11 +473,11 @@ static void tstHostClipboard(RTTEST hTest, IClipboard *pClipboard, IClipboardSet
 
         /* Ensure data supplied for the pending request became the guest-owned clipboard content. */
         ClipboardSource_T enmProvidedReadSource = ClipboardSource_Custom;
+        Bstr bstrProvidedRequestedMimeType("");
         Bstr bstrProvidedReadMimeType;
         SafeArray<BYTE> aProvidedReadBuffer;
-        hrc = pClipboard->ReadDataRaw(ClipboardAction_Copy, &enmProvidedReadSource,
-                                      bstrProvidedReadMimeType.asOutParam(),
-                                      ComSafeArrayAsOutParam(aProvidedReadBuffer));
+        hrc = pClipboard->ReadDataRaw(ClipboardAction_Copy, bstrProvidedRequestedMimeType.raw(), &enmProvidedReadSource,
+                                      bstrProvidedReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aProvidedReadBuffer));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("ReadDataRaw after HostClipboard ProvideData failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(enmProvidedReadSource == ClipboardSource_Guest);
         RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrProvidedReadMimeType).c_str(), "text/plain;charset=utf-8"));
@@ -1211,10 +1213,11 @@ static void tstClipboardPublicApi(RTTEST hTest)
         RTTESTI_CHECK(aSupportedFormats.size() == 1);
 
         ClipboardSource_T enmGuestReadSource = ClipboardSource_Custom;
+        Bstr bstrGuestRequestedMimeType("");
         Bstr bstrGuestReadMimeType;
         SafeArray<BYTE> aGuestReadBuffer;
-        hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, &enmGuestReadSource, bstrGuestReadMimeType.asOutParam(),
-                                       ComSafeArrayAsOutParam(aGuestReadBuffer));
+        hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, bstrGuestRequestedMimeType.raw(), &enmGuestReadSource,
+                                        bstrGuestReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aGuestReadBuffer));
         RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("ReadDataRaw(host -> guest) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(enmGuestReadSource == ClipboardSource_Host);
         RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrGuestReadMimeType).c_str(), "text/plain;charset=utf-8"));
@@ -1223,13 +1226,16 @@ static void tstClipboardPublicApi(RTTEST hTest)
                            aGuestReadBuffer.size(), abRoundTripBuffer.size()));
 
         ClipboardSource_T enmTextPlainReadSource = ClipboardSource_Custom;
+        Bstr bstrTextPlainRequestedMimeType("text/plain");
+        Bstr bstrTextPlainReadMimeType;
         SafeArray<BYTE> aTextPlainReadBuffer;
-        hrc = ptrClipboard->ReadDataRawWithFormat(ClipboardAction_Copy, Bstr("text/plain").raw(), &enmTextPlainReadSource,
-                                                  ComSafeArrayAsOutParam(aTextPlainReadBuffer));
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("ReadDataRawWithFormat(text/plain, host -> guest) failed, hrc=%Rhrc\n", hrc));
+        hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, bstrTextPlainRequestedMimeType.raw(), &enmTextPlainReadSource,
+                                        bstrTextPlainReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aTextPlainReadBuffer));
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("ReadDataRaw(text/plain, host -> guest) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(enmTextPlainReadSource == ClipboardSource_Host);
+        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrTextPlainReadMimeType).c_str(), "text/plain;charset=utf-8"));
         RTTESTI_CHECK_MSG(tstByteArrayEquals(aTextPlainReadBuffer, abRoundTripBuffer),
-                          ("ReadDataRawWithFormat(text/plain, host -> guest) returned %zu bytes, expected %zu\n",
+                          ("ReadDataRaw(text/plain, host -> guest) returned %zu bytes, expected %zu\n",
                            aTextPlainReadBuffer.size(), abRoundTripBuffer.size()));
 
         /* Switch to bidirectional mode and verify raw guest-origin writes. */
@@ -1251,13 +1257,15 @@ static void tstClipboardPublicApi(RTTEST hTest)
                            aWrittenBuffer.size(), abRoundTripBuffer.size()));
 
         enmTextPlainReadSource = ClipboardSource_Custom;
+        bstrTextPlainReadMimeType.setNull();
         aTextPlainReadBuffer.setNull();
-        hrc = ptrClipboard->ReadDataRawWithFormat(ClipboardAction_Copy, Bstr("text/plain").raw(), &enmTextPlainReadSource,
-                                                  ComSafeArrayAsOutParam(aTextPlainReadBuffer));
-        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("ReadDataRawWithFormat(text/plain, guest -> host) failed, hrc=%Rhrc\n", hrc));
+        hrc = ptrClipboard->ReadDataRaw(ClipboardAction_Copy, bstrTextPlainRequestedMimeType.raw(), &enmTextPlainReadSource,
+                                        bstrTextPlainReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aTextPlainReadBuffer));
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("ReadDataRaw(text/plain, guest -> host) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(enmTextPlainReadSource == ClipboardSource_Guest);
+        RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrTextPlainReadMimeType).c_str(), "text/plain;charset=utf-8"));
         RTTESTI_CHECK_MSG(tstByteArrayEquals(aTextPlainReadBuffer, abRoundTripBuffer),
-                          ("ReadDataRawWithFormat(text/plain, guest -> host) returned %zu bytes, expected %zu\n",
+                          ("ReadDataRaw(text/plain, guest -> host) returned %zu bytes, expected %zu\n",
                            aTextPlainReadBuffer.size(), abRoundTripBuffer.size()));
 
         /* Verify the object read API sees the same guest-origin payload. */
