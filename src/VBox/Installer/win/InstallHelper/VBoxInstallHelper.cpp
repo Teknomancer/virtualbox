@@ -1,4 +1,4 @@
-/* $Id: VBoxInstallHelper.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxInstallHelper.cpp 114546 2026-06-26 08:45:50Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxInstallHelper - Various helper routines for Windows host installer.
  */
@@ -1057,10 +1057,27 @@ UINT __stdcall ArePythonAPIDepsInstalled(MSIHANDLE hModule)
  */
 UINT __stdcall IsMSCRTInstalled(MSIHANDLE hModule)
 {
+    const PRTUTF16 *pwszRuntimeArch;
+    uint32_t const uNativeArch = RTSystemGetNativeArch();
+    switch (uNativeArch)
+    {
+#if 0 /** @todo Needs testing first. */
+        case RT_ARCH_VAL_ARM64: pwszRuntimeArch = L"ARM64"; break;
+#else
+        case RT_ARCH_VAL_ARM64: pwszRuntimeArch = L"X64";   break;
+#endif
+        case RT_ARCH_VAL_AMD64: pwszRuntimeArch = L"X64";   break;
+        default:
+            logStringF(hModule, "IsMSCRTInstalled: Unsupported host architecture (%#x)", uNativeArch);
+            return ERROR_SUCCESS;
+    }
+
+    RTUTF16 wszRuntimeKey[128];
+    RTUtf16Printf(wszRuntimeKey, RT_ELEMENTS(wszRuntimeKey),
+                  "SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\%ls", pwszRuntimeArch);
+
     HKEY hKey;
-    LSTATUS lrc = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                                L"SOFTWARE\\Microsoft\\VisualStudio\\14.0\\VC\\Runtimes\\X64",
-                                0, KEY_READ, &hKey);
+    LSTATUS lrc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, wszRuntimeKey, 0, KEY_READ, &hKey);
     if (lrc == ERROR_SUCCESS)
     {
         DWORD dwVal;
@@ -1076,22 +1093,22 @@ UINT __stdcall IsMSCRTInstalled(MSIHANDLE hModule)
                     VBoxMsiSetPropDWORD(hModule, L"VBOX_MSCRT_VER_MAJ", dwMaj);
 
                     DWORD dwMin;
-                    lrc = VBoxMsiRegQueryDWORD(hModule, hKey, "Minor", &dwMin);
+                    rc = VBoxMsiRegQueryDWORD(hModule, hKey, "Minor", &dwMin);
                     if (RT_SUCCESS(rc))
                     {
                         VBoxMsiSetPropDWORD(hModule, L"VBOX_MSCRT_VER_MIN", dwMin);
 
-                        logStringF(hModule, "IsMSCRTInstalled: Found v%u.%u\n", dwMaj, dwMin);
+                        logStringF(hModule, "IsMSCRTInstalled: Found %ls v%u.%u\n", pwszRuntimeArch, dwMaj, dwMin);
 
                         /* Check for at least 2019. */
                         if (dwMaj > 14 || (dwMaj == 14 && dwMin >= 20))
                             VBoxMsiSetProp(hModule, L"VBOX_MSCRT_INSTALLED", L"1");
                     }
                     else
-                        logStringF(hModule, "IsMSCRTInstalled: Found, but 'Minor' key not present (lrc=%d)", lrc);
+                        logStringF(hModule, "IsMSCRTInstalled: Found, but 'Minor' key not present (rc=%Rrc)", rc);
                 }
                 else
-                    logStringF(hModule, "IsMSCRTInstalled: Found, but 'Major' key not present (lrc=%d)", lrc);
+                    logStringF(hModule, "IsMSCRTInstalled: Found, but 'Major' key not present (rc=%Rrc)", rc);
             }
             else
             {
@@ -1100,7 +1117,7 @@ UINT __stdcall IsMSCRTInstalled(MSIHANDLE hModule)
             }
         }
         else
-            logStringF(hModule, "IsMSCRTInstalled: Found, but 'Installed' key not present (lrc=%d)", lrc);
+            logStringF(hModule, "IsMSCRTInstalled: Found, but 'Installed' key not present (rc=%Rrc)", rc);
 
         RegCloseKey(hKey);
     }
