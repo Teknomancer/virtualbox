@@ -1,4 +1,4 @@
-/* $Id: GuestShClSvcExt.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClSvcExt.cpp 114557 2026-06-26 13:42:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard service extension handling for Main.
  */
@@ -619,6 +619,7 @@ int GuestShCl::i_handleSvcExtBackendConnect(PSHCLEXTPARMS pParms, void *pvParms,
         {
             lock();
             m_pClient = pClient;
+            m_fGuestReadsBlocked = false;
             unlock();
         }
     }
@@ -644,9 +645,19 @@ int GuestShCl::i_handleSvcExtBackendDisconnect(PSHCLEXTPARMS pParms, void *pvPar
     {
         PSHCLCLIENT pClient = pParms->u.ReadWriteData.pClient;
         lock();
+        if (m_pClient == pClient)
+            m_fGuestReadsBlocked = true;
+        unlock();
+
+        i_waitForGuestReads();
+
+        lock();
         vrc = ShClBackendDisconnect(pClient->pBackend, pClient);
         if (m_pClient == pClient)
+        {
             m_pClient = NULL;
+            m_fGuestReadsBlocked = false;
+        }
         unlock();
     }
     return vrc;

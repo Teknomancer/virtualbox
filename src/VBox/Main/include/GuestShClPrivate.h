@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114557 2026-06-26 13:42:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -33,6 +33,8 @@
 
 #include <VBox/HostServices/VBoxClipboardExt.h>
 #include <VBox/HostServices/VBoxSharedClipboardSvc.h>
+
+#include <iprt/semaphore.h>
 
 /**
  * Forward prototype declarations.
@@ -121,6 +123,9 @@ protected:
     bool i_isHostDataSeqCurrentLocked(uint64_t uSeq);
     uint64_t i_getGuestDataSeq(void);
     bool i_isGuestDataSeqCurrent(uint64_t uSeq);
+    int i_beginGuestRead(PSHCLCLIENT *ppClient);
+    void i_endGuestRead(void);
+    void i_waitForGuestReads(void);
     /** @}  */
 
 public:
@@ -194,6 +199,12 @@ protected:
     /** Active guest clipboard client, if any.
      *  Weak pointer owned by the HGCM service and protected by m_CritSect. */
     PSHCLCLIENT                 m_pClient;
+    /** Whether new guest data reads using m_pClient are blocked. */
+    bool                        m_fGuestReadsBlocked;
+    /** Number of active guest data reads using m_pClient outside m_CritSect. */
+    uint32_t                    m_cGuestReads;
+    /** Signalled when no guest data reads are active. */
+    RTSEMEVENTMULTI             m_hGuestReadsDone;
     /** Host data sequence counter, protected by m_CritSect. */
     uint64_t                    m_uHostDataSeq;
     /** Guest data sequence counter, protected by m_CritSect. */

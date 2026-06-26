@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114557 2026-06-26 13:42:09Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -65,6 +65,9 @@ GuestShCl::GuestShCl(Console *pConsole)
     : m_pConsole(pConsole)
     , m_pfnExtCallback(NULL)
     , m_pClient(NULL)
+    , m_fGuestReadsBlocked(false)
+    , m_cGuestReads(0)
+    , m_hGuestReadsDone(NIL_RTSEMEVENTMULTI)
     , m_uHostDataSeq(0)
     , m_uGuestDataSeq(0)
 {
@@ -75,6 +78,14 @@ GuestShCl::GuestShCl(Console *pConsole)
     int vrc = RTCritSectInit(&m_CritSect);
     if (RT_FAILURE(vrc))
         throw vrc;
+
+    vrc = RTSemEventMultiCreate(&m_hGuestReadsDone);
+    if (RT_FAILURE(vrc))
+    {
+        RTCritSectDelete(&m_CritSect);
+        throw vrc;
+    }
+    RTSemEventMultiSignal(m_hGuestReadsDone);
 }
 
 GuestShCl::~GuestShCl(void)
@@ -89,6 +100,19 @@ void GuestShCl::uninit(void)
 {
     LogFlowFuncEnter();
 
+    if (m_hGuestReadsDone != NIL_RTSEMEVENTMULTI)
+    {
+        int vrc = lock();
+        if (RT_SUCCESS(vrc))
+        {
+            m_fGuestReadsBlocked = true;
+            unlock();
+        }
+        i_waitForGuestReads();
+        RTSemEventMultiDestroy(m_hGuestReadsDone);
+        m_hGuestReadsDone = NIL_RTSEMEVENTMULTI;
+    }
+
     if (RTCritSectIsInitialized(&m_CritSect))
         RTCritSectDelete(&m_CritSect);
 
@@ -96,6 +120,8 @@ void GuestShCl::uninit(void)
 
     m_pfnExtCallback = NULL;
     m_pClient = NULL;
+    m_fGuestReadsBlocked = false;
+    m_cGuestReads = 0;
     m_uHostDataSeq = 0;
     m_uGuestDataSeq = 0;
 }
@@ -273,6 +299,71 @@ bool GuestShCl::i_isGuestDataSeqCurrent(uint64_t uSeq)
 
 
 /**
+ * Starts a guest data read that will use the active service client outside m_CritSect.
+ *
+ * @returns VBox status code.
+ * @param   ppClient        Where to return the active client.
+ */
+int GuestShCl::i_beginGuestRead(PSHCLCLIENT *ppClient)
+{
+    AssertPtrReturn(ppClient, VERR_INVALID_POINTER);
+    *ppClient = NULL;
+
+    int vrc = lock();
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    if (   m_pClient
+        && !m_fGuestReadsBlocked)
+    {
+        *ppClient = m_pClient;
+        if (m_cGuestReads++ == 0)
+            RTSemEventMultiReset(m_hGuestReadsDone);
+        vrc = VINF_SUCCESS;
+    }
+    else
+        vrc = VERR_SHCLPB_NO_DATA;
+
+    unlock();
+    return vrc;
+}
+
+
+/** Ends a guest data read started by i_beginGuestRead(). */
+void GuestShCl::i_endGuestRead(void)
+{
+    int const vrc = lock();
+    if (RT_SUCCESS(vrc))
+    {
+        Assert(m_cGuestReads > 0);
+        if (m_cGuestReads > 0 && --m_cGuestReads == 0)
+            RTSemEventMultiSignal(m_hGuestReadsDone);
+        unlock();
+    }
+}
+
+
+/** Waits until all guest data reads using the active client have completed. */
+void GuestShCl::i_waitForGuestReads(void)
+{
+    for (;;)
+    {
+        int vrc = lock();
+        if (RT_FAILURE(vrc))
+            return;
+        bool const fDone = m_cGuestReads == 0;
+        unlock();
+        if (fDone)
+            return;
+        vrc = RTSemEventMultiWait(m_hGuestReadsDone, RT_INDEFINITE_WAIT);
+        AssertRC(vrc);
+        if (RT_FAILURE(vrc))
+            return;
+    }
+}
+
+
+/**
  * Registers a Shared Clipboard service extension.
  *
  * @returns VBox status code.
@@ -378,17 +469,16 @@ int GuestShCl::ReadDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *p
     *ppvData = NULL;
     *pcbData = 0;
 
-    int vrc = lock();
+    PSHCLCLIENT pClient = NULL;
+    int vrc = i_beginGuestRead(&pClient);
     if (RT_FAILURE(vrc))
         return vrc;
 
-    PSHCLCLIENT pClient = m_pClient;
-    if (pClient)
-        vrc = ShClSvcReadDataFromGuest(pClient, uFormat, ppvData, pcbData);
-    else
-        vrc = VERR_SHCLPB_NO_DATA;
+    /* Do not hold m_CritSect while waiting for the guest reply: the reply callback
+     * validates the active client under the same lock before signalling the event. */
+    vrc = ShClSvcReadDataFromGuest(pClient, uFormat, ppvData, pcbData);
 
-    unlock();
+    i_endGuestRead();
     return vrc;
 }
 
