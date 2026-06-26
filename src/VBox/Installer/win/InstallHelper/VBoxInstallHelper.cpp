@@ -1,4 +1,4 @@
-/* $Id: VBoxInstallHelper.cpp 114546 2026-06-26 08:45:50Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxInstallHelper.cpp 114547 2026-06-26 08:50:46Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxInstallHelper - Various helper routines for Windows host installer.
  */
@@ -1057,7 +1057,7 @@ UINT __stdcall ArePythonAPIDepsInstalled(MSIHANDLE hModule)
  */
 UINT __stdcall IsMSCRTInstalled(MSIHANDLE hModule)
 {
-    const PRTUTF16 *pwszRuntimeArch;
+    PCRTUTF16 pwszRuntimeArch;
     uint32_t const uNativeArch = RTSystemGetNativeArch();
     switch (uNativeArch)
     {
