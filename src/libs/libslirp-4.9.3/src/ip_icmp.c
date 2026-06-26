@@ -144,6 +144,19 @@ static int icmp_send(struct socket *so, struct mbuf *m, int hlen)
     addr.sin_family = AF_INET;
     addr.sin_addr = so->so_faddr;
 
+#ifdef VBOX /* github:gh-479 */
+    /* Forward ICMP with the guest supplied TTL. */
+    int ttl = ip->ip_ttl - IPTTLDEC;
+    if (ttl <= 0) {
+        /* Let traceroute see the hop limit expire. */
+        DEBUG_MISC("icmp ttl exceeded");
+        icmp_send_error(m, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, 0, NULL);
+        icmp_detach(so);
+        return 0;
+    }
+    setsockopt(so->s, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
+#endif
+
     slirp_insque(so, &so->slirp->icmp);
 
     if (sendto(so->s, m->m_data + hlen, m->m_len - hlen, 0,
@@ -486,9 +499,8 @@ void icmp_reflect(struct mbuf *m)
         m->m_len -= optlen;
     }
 
-#ifdef VBOX
-    if (ip->ip_ttl < 0 && ip->ip_ttl > MAXTTL)
-        ip->ip_ttl = MAXTTL;
+#ifdef VBOX /* github:gh-479 */
+    /* Keep the TTL from the real reply. */
 #else
     ip->ip_ttl = MAXTTL;
 #endif
@@ -508,6 +520,10 @@ void icmp_receive(struct socket *so)
     struct ip *ip = mtod(m, struct ip *);
     int hlen = ip->ip_hl << 2;
     uint8_t error_code;
+#ifdef VBOX /* github:gh-479 */
+    /* Remember the host-side ICMP source. */
+    struct in_addr icmp_src = ip->ip_dst;
+#endif
     struct icmp *icp;
     int id, len;
 
@@ -526,6 +542,11 @@ void icmp_receive(struct socket *so)
                 len = -1;
                 errno = -EINVAL;
             } else {
+#ifdef VBOX /* github:gh-479 */
+                /* Preserve TTL and source from replies with IP headers. */
+                ip->ip_ttl = inner_ip->ip_ttl;
+                icmp_src = inner_ip->ip_src;
+#endif
                 len -= inner_hlen;
                 memmove(icp, (unsigned char *)icp + inner_hlen, len);
             }
@@ -549,8 +570,19 @@ void icmp_receive(struct socket *so)
         DEBUG_MISC(" udp icmp rx errno = %d-%s", errno, g_strerror(errno));
         icmp_send_error(so->so_m, ICMP_UNREACH, error_code, 0, g_strerror(errno));
     } else {
-        icmp_reflect(so->so_m);
-        so->so_m = NULL; /* Don't m_free() it again! */
+#ifdef VBOX /* github:gh-479 */
+        /* Do not reflect ICMP errors as echo replies. */
+        if (len < ICMP_MINLEN) {
+            icmp_send_error(so->so_m, ICMP_UNREACH, ICMP_UNREACH_HOST, 0, "short icmp");
+        } else if (icp->icmp_type == ICMP_TIMXCEED || icp->icmp_type == ICMP_UNREACH) {
+            /* Pass traceroute errors back to the guest. */
+            icmp_forward_error(so->so_m, icp->icmp_type, icp->icmp_code, 0, NULL, &icmp_src);
+        } else
+#endif
+        {
+            icmp_reflect(so->so_m);
+            so->so_m = NULL; /* Don't m_free() it again! */
+        }
     }
     icmp_detach(so);
 }
