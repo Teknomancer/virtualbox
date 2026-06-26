@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# $Id: tdAddBasic1.py 114500 2026-06-23 12:24:13Z andreas.loeffler@oracle.com $
+# $Id: tdAddBasic1.py 114545 2026-06-26 07:52:54Z knut.osmundsen@oracle.com $
 
 """
 VirtualBox Validation Kit - Additions Basics #1.
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 114500 $"
+__version__ = "$Revision: 114545 $"
 
 # Standard Python imports.
 import os;
@@ -727,18 +727,13 @@ class tdAddBasic1(vbox.TestDriver):                                         # py
         # Give the guest some time to build Guest Additions on system boot if needed.
         fRc = self.waitForGAs(oSession, cMsTimeout = 15 * 60 * 1000, aenmWaitForRunLevels = [ eExpectedRunLevel ]);
 
-        # Try to detect the display server running on the guest OS.
-        # This might fail on pure server guest OSes (no X, no Wayland).
-        if  fRc \
-        and oTestVm.isLinux():
-            ## @todo Fudge factor -- Wait for the desktop env to come up.
-            #        Remove once facility statuses are implemented within VBoxClient.
-            reporter.log('Waiting 30s for the desktop environment to come up before checking for the display server ...');
-            self.sleep(30);
-            if self.fpApiVer >= 7.1 and self.uRevision >= 157189:
-                sVBoxClient = oTestVm.pathJoin(self.getGuestSystemDir(oTestVm, '/usr'), 'VBoxClient');
-                fRc = fRc and self.txsRunTest(oTxsSession, 'Check display server detection', 5 * 60 * 1000,
-                                              sVBoxClient, (sVBoxClient, '-v', '-v', '--session-detect'));
+        # Try to detect the display server running on the guest OS.  This will typically fail
+        # because TXS is running as a service and have no DISPLAY or WAYLAND_DISPLAY variable
+        # to guide the X and Wayland client libraries to connect to the display.
+        if fRc and oTestVm.isLinux() and self.fpApiVer >= 7.1 and self.uRevision >= 157189:
+            sVBoxClient = oTestVm.pathJoin(self.getGuestSystemDir(oTestVm, '/usr'), 'VBoxClient');
+            fRc = fRc and self.txsRunTest(oTxsSession, 'Check display server detection', 5 * 60 * 1000,
+                                          sVBoxClient, (sVBoxClient, '-v', '-v', '--session-detect'));
         return fRc;
 
     def testIGuest_additionsVersion(self, oGuest):
