@@ -1,4 +1,4 @@
-# $Id: ApprovedLanguages.kmk 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: ApprovedLanguages.kmk 114553 2026-06-26 12:12:32Z serkan.bayraktar@oracle.com $
 ## @file
 # ApprovedLanguages.kmk - List of approved GUI translations
 #
@@ -53,6 +53,7 @@ VBOX_APPROVED_GUI_LANGUAGES := \
 	ru \
 	sk \
 	sl \
+	sv \
 	th \
 	tr \
 	uk \
