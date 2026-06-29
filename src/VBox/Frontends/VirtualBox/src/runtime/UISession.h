@@ -1,4 +1,4 @@
-/* $Id: UISession.h 114263 2026-06-05 17:21:04Z andreas.loeffler@oracle.com $ */
+/* $Id: UISession.h 114562 2026-06-29 10:30:36Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISession class declaration.
  */
@@ -36,6 +36,7 @@
 #include <QEvent>
 #include <QMap>
 #include <QObject>
+#include <QString>
 
 /* GUI includes: */
 #include "UIAddDiskEncryptionPasswordDialog.h"
@@ -64,6 +65,7 @@
 class QMenu;
 class UIConsoleEventHandler;
 class UIFrameBuffer;
+class UISharedClipboardProvider;
 class UIMachine;
 class UIMachineLogic;
 class UIMachineWindow;
@@ -652,7 +654,8 @@ private slots:
 
     /** @name Clipboard stuff.
      ** @{ */
-        /** Handles clipboard errors. */
+        /** Handles clipboard errors.
+          * @param  strMsg  Brings the error message. */
         void sltClipboardError(const QString &strMsg);
     /** @} */
 
@@ -681,6 +684,8 @@ private:
         bool prepareCOMStuff();
         /** Prepares console event-handler. */
         void prepareConsoleEventHandlers();
+        /** Prepares shared clipboard provider. */
+        void prepareSharedClipboardProvider();
         /** Prepares frame-buffers. */
         void prepareFramebuffers();
         /** Prepares connections. */
@@ -692,6 +697,8 @@ private:
         void cleanupFramebuffers();
         /** Cleanups console event-handler. */
         void cleanupConsoleEventHandlers();
+        /** Cleanups shared clipboard provider. */
+        void cleanupSharedClipboardProvider();
         /** Cleanups COM stuff. */
         void cleanupCOMStuff();
     /** @} */
@@ -745,6 +752,12 @@ private:
      ** @{ */
         /** Holds the CConsole event handler instance. */
         UIConsoleEventHandler *m_pConsoleEventhandler;
+        /** Holds the shared clipboard provider instance. */
+        UISharedClipboardProvider *m_pSharedClipboardProvider;
+        /** Holds the last clipboard error shown in the notification center. */
+        QString m_strLastClipboardError;
+        /** Holds the millisecond timestamp of the last shown clipboard error. */
+        qint64 m_i64LastClipboardErrorMs;
 
         /** Holds the session instance. */
         CSession          m_comSession;

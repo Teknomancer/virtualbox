@@ -1,4 +1,4 @@
-/* $Id: UISession.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: UISession.cpp 114562 2026-06-29 10:30:36Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISession class implementation.
  */
@@ -27,6 +27,7 @@
 
 /* Qt includes: */
 #include <QApplication>
+#include <QDateTime>
 #include <QRegularExpression>
 #include <QWidget>
 
@@ -57,6 +58,7 @@
 #include "UIMousePointerShapeData.h"
 #include "UINotificationCenter.h"
 #include "UISession.h"
+#include "UISharedClipboardProvider.h"
 #include "UITextTable.h"
 #include "UIUSBTools.h"
 #include "UIVersion.h"
@@ -119,6 +121,8 @@ UISession::UISession(UIMachine *pMachine)
     , m_pMachine(pMachine)
     , m_fValid(false)
     , m_pConsoleEventhandler(0)
+    , m_pSharedClipboardProvider(0)
+    , m_i64LastClipboardErrorMs(0)
     /* Common variables: */
     , m_enmMachineStatePrevious(KMachineState_Null)
     , m_enmMachineState(KMachineState_Null)
@@ -205,6 +209,9 @@ bool UISession::initialize()
     /* Fetch corresponding states: */
     if (uiCommon().isSeparateProcess())
         sltAdditionsChange();
+
+    /* Prepare shared clipboard provider: */
+    prepareSharedClipboardProvider();
 
 #ifdef VBOX_GUI_WITH_PIDFILE
     uiCommon().createPidfile();
@@ -2403,6 +2410,7 @@ void UISession::sltMountDVDAdHoc(const QString &strSource)
 void UISession::sltDetachCOM()
 {
     /* Cleanup everything COM related: */
+    cleanupSharedClipboardProvider();
     cleanupFramebuffers();
     cleanupConsoleEventHandlers();
     cleanupCOMStuff();
@@ -2455,6 +2463,15 @@ void UISession::sltAdditionsChange()
 
 void UISession::sltClipboardError(const QString &strMsg)
 {
+    /* Main reflects clipboard errors both on the console event source and on clipboard sessions.
+     * Suppress the duplicate notification while still allowing later repeated errors through. */
+    const qint64 i64Now = QDateTime::currentMSecsSinceEpoch();
+    if (   strMsg == m_strLastClipboardError
+        && i64Now - m_i64LastClipboardErrorMs < 1000)
+        return;
+
+    m_strLastClipboardError = strMsg;
+    m_i64LastClipboardErrorMs = i64Now;
     UINotificationMessage::warnAboutClipboardError(strMsg);
 }
 
@@ -2644,6 +2661,19 @@ void UISession::prepareConsoleEventHandlers()
             this, &UISession::sigCursorPositionChange);
 }
 
+void UISession::prepareSharedClipboardProvider()
+{
+    /* Create shared clipboard provider: */
+    m_pSharedClipboardProvider = new UISharedClipboardProvider(this);
+    if (m_pSharedClipboardProvider)
+    {
+        connect(m_pSharedClipboardProvider, &UISharedClipboardProvider::sigClipboardError,
+                this, &UISession::sltClipboardError,
+                Qt::QueuedConnection);
+        m_pSharedClipboardProvider->prepare();
+    }
+}
+
 void UISession::prepareFramebuffers()
 {
     /* Acquire guest-screen count: */
@@ -2698,6 +2728,14 @@ void UISession::cleanupConsoleEventHandlers()
     delete m_pConsoleEventhandler;
     m_pConsoleEventhandler = 0;
 }
+
+void UISession::cleanupSharedClipboardProvider()
+{
+    /* Destroy shared clipboard provider: */
+    delete m_pSharedClipboardProvider;
+    m_pSharedClipboardProvider = 0;
+}
+
 
 void UISession::cleanupCOMStuff()
 {

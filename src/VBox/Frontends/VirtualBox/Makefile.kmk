@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114487 2026-06-22 16:17:27Z serkan.bayraktar@oracle.com $
+# $Id: Makefile.kmk 114562 2026-06-29 10:30:36Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VirtualBox Qt GUI.
 #
@@ -686,6 +686,7 @@ VirtualBoxVM_QT_MOCHDRS = \
 	src/runtime/UIMouseHandler.h \
 	src/runtime/UIMultiScreenLayout.h \
 	src/runtime/UISession.h \
+	src/runtime/UISharedClipboardProvider.h \
 	src/runtime/UIVMCloseDialog.h \
 	src/runtime/fullscreen/UIKeyboardHandlerFullscreen.h \
 	src/runtime/fullscreen/UIMachineLogicFullscreen.h \
@@ -1009,6 +1010,7 @@ VirtualBoxVM_QT_MOCSRCS = \
 	src/runtime/UIConsoleEventHandler.cpp \
 	src/runtime/UIFrameBuffer.cpp \
 	src/runtime/UIIndicatorsPool.cpp \
+	src/runtime/UISharedClipboardProvider.cpp \
 	src/runtime/information/UIInformationRuntime.cpp \
 	src/guestctrl/UIGuestProcessControlWidget.cpp \
 	src/softkeyboard/UISoftKeyboard.cpp \
@@ -1241,6 +1243,7 @@ VirtualBoxVM_SOURCES = \
 	src/runtime/UIMouseHandler.cpp \
 	src/runtime/UIMultiScreenLayout.cpp \
 	src/runtime/UISession.cpp \
+	src/runtime/UISharedClipboardProvider.cpp \
 	src/runtime/UIVMCloseDialog.cpp \
 	src/runtime/fullscreen/UIKeyboardHandlerFullscreen.cpp \
 	src/runtime/fullscreen/UIMachineLogicFullscreen.cpp \
