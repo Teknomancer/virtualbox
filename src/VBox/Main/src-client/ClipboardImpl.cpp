@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114561 2026-06-29 08:52:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -2768,6 +2768,8 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
                                           const com::Utf8Str &aMimeType,
                                           const std::vector<BYTE> &aBuffer)
 {
+    RT_NOREF(aClientId);
+
     Log2Func(("clientId=%RU32, action=%s, source=%s, mime=%s, cb=%zu\n",
               aClientId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource),
               aMimeType.c_str(), aBuffer.size()));
@@ -3788,4 +3790,3 @@ int Clipboard::i_changeFileTransferMode(bool fEnabled)
 }
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
-
