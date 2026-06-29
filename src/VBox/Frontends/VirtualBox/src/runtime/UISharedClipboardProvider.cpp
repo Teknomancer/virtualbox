@@ -1,4 +1,4 @@
-/* $Id: UISharedClipboardProvider.cpp 114562 2026-06-29 10:30:36Z andreas.loeffler@oracle.com $ */
+/* $Id: UISharedClipboardProvider.cpp 114563 2026-06-29 12:25:11Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISharedClipboardProvider class implementation.
  */
@@ -544,7 +544,7 @@ void UISharedClipboardProvider::prepareSession()
         return;
 
     CClipboard comClipboard = comConsole.GetClipboard();
-    if (comClipboard.isNull() || !comConsole.isOk())
+    if (comClipboard.isNull() || !comClipboard.isOk())
     {
         emit sigClipboardError(tr("Creating the GUI shared clipboard provider failed: no live clipboard object is available."));
         return;
