@@ -1614,6 +1614,36 @@
   </enum>
 
   <enum
+    name="IClipboardSessionFlag"
+    uuid="ff4800ba-f52d-49bd-9bcd-2ea617f4bf7d"
+    >
+    <desc>
+      Flags controlling clipboard session event delivery.
+    </desc>
+
+    <const name="ExcludeOwnChanges" value="1">
+      <desc>Do not deliver passive clipboard change events caused by the same clipboard session.</desc>
+    </const>
+    <const name="ExcludeReflections" value="2">
+      <desc>
+        Suppress a matching anonymous source/format or data update which appears
+        to reflect formats previously announced by the same clipboard session.
+        Direct events originated by the session are still delivered unless
+        ExcludeOwnChanges is also specified.
+      </desc>
+    </const>
+    <const name="IncludeInitialState" value="4">
+      <desc>
+        Deliver the current clipboard state once on the session event source after
+        the first external listener is registered.
+      </desc>
+    </const>
+    <const name="IncludePayload" value="8">
+      <desc>Include clipboard payload items in session data-change events when payload data is available.</desc>
+    </const>
+  </enum>
+
+  <enum
     name="DnDMode"
     uuid="07af8800-f936-4b33-9172-cd400e83c148"
     >
@@ -15817,6 +15847,8 @@
       Native host clipboard endpoint for a console session.
 
       See <link to="IClipboard"/> for the Main clipboard API overview and the role of this endpoint.
+      When returned by <link to="IClipboardSession::hostClipboard"/>, operations are associated with that
+      session's client identifier.
     </desc>
 
     <method name="reportFormats">
@@ -15846,8 +15878,10 @@
         <link to="IClipboardDataRequestedEvent"/>. Request identifiers are
         one-shot. After a successful call, or after Main decides that the
         request is no longer current, the same identifier cannot be reused. The
-        supplied action, source and MIME type must match the request and the
-        currently advertised native host clipboard formats.
+        call must be made through the host clipboard endpoint that owns the
+        request; for a session endpoint, the session client identifier must
+        match as well. The supplied action, source and MIME type must match the
+        request and the currently advertised native host clipboard formats.
       </desc>
       <param name="requestId" type="unsigned long" dir="in">
         <desc>Identifier from the corresponding clipboard data request event.</desc>
@@ -15900,11 +15934,125 @@
   </interface>
 
   <interface
+    name="IClipboardSession" extends="$unknown"
+    uuid="2abe6095-1f1d-49a4-abba-fcf83243fd1d"
+    wsmap="managed"
+    reservedMethods="8" reservedAttributes="8"
+    >
+    <desc>
+      Client-specific clipboard session.
+
+      A session associates write operations and native-host clipboard operations with a non-zero
+      client identifier. Session event delivery can then filter own changes and conservative
+      reflection events without changing direct <link to="IClipboard"/> behavior.
+    </desc>
+
+    <attribute name="id" type="unsigned long" readonly="yes">
+      <desc>
+        Session identifier used as the origin client id in clipboard events caused by this session.
+        This value is never 0; 0 is reserved for <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt>.
+      </desc>
+    </attribute>
+
+    <attribute name="eventSource" type="IEventSource" readonly="yes">
+      <desc>
+        Event source for this clipboard session.
+      </desc>
+    </attribute>
+
+    <attribute name="hostClipboard" type="IHostClipboard" readonly="yes">
+      <desc>
+        Native host clipboard endpoint associated with this clipboard session.
+      </desc>
+    </attribute>
+
+    <method name="readFormats">
+      <desc>
+        Reads the clipboard formats currently available.
+      </desc>
+      <param name="formats" type="IClipboardFormat" safearray="yes" dir="return">
+        <desc>Clipboard formats returned on success.</desc>
+      </param>
+    </method>
+
+    <method name="readDataRaw">
+      <desc>
+        Reads raw clipboard payload data for the requested clipboard action.
+
+        If <tt>requestedMimeType</tt> is empty, Main chooses the preferred
+        currently available clipboard format and returns its MIME type in
+        <tt>mimeType</tt>. If <tt>requestedMimeType</tt> is not empty, Main reads
+        that MIME type, or an equivalent supported MIME type, and fails if that
+        format is unsupported or not currently available.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to read data for.</desc>
+      </param>
+      <param name="requestedMimeType" type="wstring" dir="in">
+        <desc>MIME type to read, or empty to let Main choose the preferred available format.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="out">
+        <desc>Clipboard source which supplied the returned data.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="out">
+        <desc>MIME type of the returned data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data returned on success.</desc>
+      </param>
+    </method>
+
+    <method name="writeDataRaw">
+      <desc>
+        Writes raw clipboard payload data for the requested clipboard action using this session's client identifier.
+      </desc>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action to write data for.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source of the supplied data.</desc>
+      </param>
+      <param name="mimeType" type="wstring" dir="in">
+        <desc>MIME type of the supplied data.</desc>
+      </param>
+      <param name="buffer" type="octet" safearray="yes" dir="in">
+        <desc>Clipboard data to write.</desc>
+      </param>
+      <param name="writtenSource" type="ClipboardSource" dir="out">
+        <desc>Clipboard source accepted for the written data.</desc>
+      </param>
+      <param name="writtenMimeType" type="wstring" dir="out">
+        <desc>MIME type accepted for the written data.</desc>
+      </param>
+      <param name="writtenBuffer" type="octet" safearray="yes" dir="return">
+        <desc>Clipboard data accepted for writing.</desc>
+      </param>
+    </method>
+
+    <method name="writeFormats">
+      <desc>
+        Writes the clipboard formats currently available using this session's client identifier.
+      </desc>
+      <param name="formats" type="IClipboardFormat" safearray="yes" dir="in">
+        <desc>Clipboard formats to make available.</desc>
+      </param>
+    </method>
+
+    <method name="close">
+      <desc>
+        Closes the clipboard session and unregisters its event forwarding state.
+        Clients should close sessions explicitly when event forwarding and native
+        host clipboard endpoint ownership are no longer needed.
+      </desc>
+    </method>
+  </interface>
+
+  <interface
     name="IClipboard" extends="$unknown"
     uuid="ee497f25-37cd-4b33-902f-355d44c84513"
     wsmap="managed"
     wrap-hint-server-addinterfaces="IInternalClipboardControl"
-    reservedMethods="7" reservedAttributes="7"
+    reservedMethods="6" reservedAttributes="7"
     >
     <desc>
       Clipboard interface for a console session.
@@ -15935,6 +16083,12 @@
           <link to="IClipboardTransferManager"/>.</li>
         <li><link to="IHostClipboard"/> is the native host clipboard endpoint
           associated with this console clipboard.</li>
+        <li><link to="IClipboardSession"/> associates operations with a non-zero
+          client identifier. Calls through <link to="IClipboard"/> and
+          its <link to="IClipboard::hostClipboard"/> endpoint that are not
+          associated with an <link to="IClipboardSession"/> are anonymous and use
+          <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt> / <tt>clientId == 0</tt> in clipboard
+          events.</li>
       </ul>
 
       <b>Contexts</b>
@@ -16214,6 +16368,18 @@
       </param>
       <param name="formats" type="IClipboardFormat" safearray="yes" dir="return">
         <desc>Supported clipboard formats.</desc>
+      </param>
+    </method>
+
+    <method name="createSession">
+      <desc>
+        Creates a client-specific clipboard session.
+      </desc>
+      <param name="flags" type="IClipboardSessionFlag" safearray="yes" dir="in">
+        <desc>Session flags controlling event delivery.</desc>
+      </param>
+      <param name="session" type="IClipboardSession" dir="return">
+        <desc>Created clipboard session.</desc>
       </param>
     </method>
   </interface>
@@ -29695,12 +29861,28 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardModeChangedEvent" extends="IEvent"
-    uuid="cac21692-7997-4595-a731-3a509db604e5"
+    uuid="36897005-9a1a-43a0-a2c2-a5dac4cd2676"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardModeChanged"
     >
     <desc>
       Notification when the shared clipboard mode changes.
     </desc>
+    <attribute name="revision" type="long long" readonly="yes">
+      <desc>
+        Monotonic clipboard state revision number. Multiple events for the same
+        state update may share a revision. A value of 0 means no live clipboard
+        revision is available.
+      </desc>
+    </attribute>
+    <attribute name="clientId" type="unsigned long" readonly="yes">
+      <desc>
+        Main clipboard client identifier which originated the event. A value of 0 means that no
+        <link to="IClipboardSession"/> originated the event. In the native SDK headers this value is named
+        <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt>. It is used for direct <link to="IClipboard"/> calls, calls through
+        <link to="IClipboard::hostClipboard"/>, guest/backend-originated events, and internal clipboard state
+        changes. Real <link to="IClipboardSession"/> identifiers are non-zero.
+      </desc>
+    </attribute>
     <attribute name="clipboardMode" type="ClipboardMode" readonly="yes">
       <desc>
         The new clipboard mode.
@@ -29710,12 +29892,28 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardFileTransferModeChangedEvent" extends="IEvent"
-    uuid="00391758-00B1-4E9D-0000-11FA00F9D583"
+    uuid="27553a46-730a-4fcf-a504-c20fbe8c0758"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardFileTransferModeChanged"
     >
     <desc>
       Notification when the shared clipboard file transfer mode changes.
     </desc>
+    <attribute name="revision" type="long long" readonly="yes">
+      <desc>
+        Monotonic clipboard state revision number. Multiple events for the same
+        state update may share a revision. A value of 0 means no live clipboard
+        revision is available.
+      </desc>
+    </attribute>
+    <attribute name="clientId" type="unsigned long" readonly="yes">
+      <desc>
+        Main clipboard client identifier which originated the event. A value of 0 means that no
+        <link to="IClipboardSession"/> originated the event. In the native SDK headers this value is named
+        <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt>. It is used for direct <link to="IClipboard"/> calls, calls through
+        <link to="IClipboard::hostClipboard"/>, guest/backend-originated events, and internal clipboard state
+        changes. Real <link to="IClipboardSession"/> identifiers are non-zero.
+      </desc>
+    </attribute>
     <attribute name="enabled" type="boolean" readonly="yes">
       <desc>
         Whether file transfers are allowed or not.
@@ -29725,11 +29923,27 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardEvent" extends="IEvent"
-    uuid="2dcc4f52-5bee-406b-838e-2cae63b3df2a"
+    uuid="00054109-1799-41f3-bf59-a9d2e81e5176"
     wsmap="managed">
     <desc>
       Abstract base interface for clipboard events.
     </desc>
+    <attribute name="revision" type="long long" readonly="yes">
+      <desc>
+        Monotonic clipboard state revision number. Multiple events for the same
+        state update may share a revision. A value of 0 means no live clipboard
+        revision is available.
+      </desc>
+    </attribute>
+    <attribute name="clientId" type="unsigned long" readonly="yes">
+      <desc>
+        Main clipboard client identifier which originated the event. A value of 0 means that no
+        <link to="IClipboardSession"/> originated the event. In the native SDK headers this value is named
+        <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt>. It is used for direct <link to="IClipboard"/> calls, calls through
+        <link to="IClipboard::hostClipboard"/>, guest/backend-originated events, and internal clipboard state
+        changes. Real <link to="IClipboardSession"/> identifiers are non-zero.
+      </desc>
+    </attribute>
     <attribute name="id" type="wstring" readonly="yes">
       <desc>Name of the clipboard this event belongs to.
 
@@ -29739,7 +29953,9 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
     </attribute>
     <attribute name="item" type="IClipboardItem" readonly="yes">
       <desc>
-        Clipboard item associated with the event.
+        Clipboard item associated with the event, or NULL when no payload item is
+        included. Session data-change events include this item only when the
+        session was created with IncludePayload.
       </desc>
     </attribute>
     <attribute name="veto" type="boolean" readonly="yes">
@@ -29751,12 +29967,28 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardSourceChangedEvent" extends="IEvent"
-    uuid="5dc52168-cf7a-4b67-8d2b-c73de8b3c174"
+    uuid="fac6e9b2-2e1d-4b3b-96ec-a54b8fd15cd5"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardSourceChanged"
     >
     <desc>
       Notification when the active clipboard source changes.
     </desc>
+    <attribute name="revision" type="long long" readonly="yes">
+      <desc>
+        Monotonic clipboard state revision number. Multiple events for the same
+        state update may share a revision. A value of 0 means no live clipboard
+        revision is available.
+      </desc>
+    </attribute>
+    <attribute name="clientId" type="unsigned long" readonly="yes">
+      <desc>
+        Main clipboard client identifier which originated the event. A value of 0 means that no
+        <link to="IClipboardSession"/> originated the event. In the native SDK headers this value is named
+        <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt>. It is used for direct <link to="IClipboard"/> calls, calls through
+        <link to="IClipboard::hostClipboard"/>, guest/backend-originated events, and internal clipboard state
+        changes. Real <link to="IClipboardSession"/> identifiers are non-zero.
+      </desc>
+    </attribute>
     <attribute name="clipboardSource" type="ClipboardSource" readonly="yes">
       <desc>
         New clipboard source.
@@ -29766,7 +29998,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardFormatChangedEvent" extends="IClipboardEvent"
-    uuid="be0f74cd-4d2c-4e7e-8c26-57f0d762efc2"
+    uuid="b624783f-404f-4803-ab8d-8035af79d1d0"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardFormatChanged"
     >
     <desc>
@@ -29786,7 +30018,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardDataRequestedEvent" extends="IClipboardEvent"
-    uuid="4424fdfc-02b9-4e41-9a95-7eb2c2be50f5"
+    uuid="f0146cf1-c72f-4d65-b5c4-f681d3866e5b"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardDataRequested"
     >
     <desc>
@@ -29822,11 +30054,12 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardDataChangedEvent" extends="IClipboardEvent"
-    uuid="b05ff6bc-d988-4e5f-9191-ff6392488153"
+    uuid="d0e20459-65e7-4af9-ad1b-4b0572e1dbc7"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardDataChanged"
     >
     <desc>
-      Notification when clipboard data changes.
+      Notification when clipboard data changes. The inherited item attribute may
+      be NULL for session event sources unless IncludePayload was requested.
     </desc>
     <attribute name="action" type="ClipboardAction" readonly="yes">
       <desc>
@@ -29837,12 +30070,30 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardTransferEvent" extends="IEvent"
-    uuid="1ac1ed45-26e7-4b81-b4b2-b4a4bf52976c"
+    uuid="7ff45a50-ff9a-4d7a-af87-9d497b4bcca6"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardTransfer"
     >
     <desc>
       Notification when clipboard transfer state changes.
     </desc>
+
+    <attribute name="revision" type="long long" readonly="yes">
+      <desc>
+        Monotonic clipboard state revision number. Multiple events for the same
+        state update may share a revision. A value of 0 means no live clipboard
+        revision is available.
+      </desc>
+    </attribute>
+
+    <attribute name="clientId" type="unsigned long" readonly="yes">
+      <desc>
+        Main clipboard client identifier which originated the event. A value of 0 means that no
+        <link to="IClipboardSession"/> originated the event. In the native SDK headers this value is named
+        <tt>VBOX_SHCL_MAIN_CLIENT_NONE</tt>. It is used for direct <link to="IClipboard"/> calls, calls through
+        <link to="IClipboard::hostClipboard"/>, guest/backend-originated events, and internal clipboard state
+        changes. Real <link to="IClipboardSession"/> identifiers are non-zero.
+      </desc>
+    </attribute>
 
     <attribute name="transfer" type="IClipboardTransfer" readonly="yes">
       <desc>
@@ -29871,7 +30122,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardErrorEvent" extends="IClipboardEvent"
-    uuid="9e5f6f25-beda-46ad-8ddb-23c0268ac345"
+    uuid="7a11518a-95cc-4fe5-baaf-1293a2e4845b"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardError"
     >
     <desc>

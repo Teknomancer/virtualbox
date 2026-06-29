@@ -1,4 +1,4 @@
-/* $Id: ConsoleImpl.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation
  */
@@ -110,6 +110,7 @@
 #include <VBox/com/array.h>
 #include "VBox/com/ErrorInfo.h"
 #include <VBox/com/listeners.h>
+#include <VBox/GuestHost/SharedClipboard.h>
 
 #include <iprt/asm.h>
 #include <iprt/buildconfig.h>
@@ -165,6 +166,52 @@
 #include <memory> // for auto_ptr
 #include <vector>
 #include <exception>// std::exception
+
+/**
+ * Fires a console-level anonymous clipboard error event.
+ *
+ * @returns COM status code.
+ * @param   aSource     Event source to fire on.
+ * @param   aId         Clipboard error identifier.
+ * @param   aErrMsg     Error message.
+ * @param   aRc         VBox status code associated with the error.
+ */
+static HRESULT consoleFireClipboardErrorEvent(IEventSource *aSource,
+                                              const Utf8Str &aId,
+                                              const Utf8Str &aErrMsg,
+                                              LONG aRc)
+{
+    return ::FireClipboardErrorEvent(aSource, 0 /* aRevision */, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                     aId, NULL /* aItem */, FALSE /* aVeto */, aErrMsg, aRc);
+}
+
+
+/**
+ * Fires a console-level anonymous clipboard mode-changed event.
+ *
+ * @returns COM status code.
+ * @param   aSource         Event source to fire on.
+ * @param   aClipboardMode  New clipboard mode.
+ */
+static HRESULT consoleFireClipboardModeChangedEvent(IEventSource *aSource, ClipboardMode_T aClipboardMode)
+{
+    return ::FireClipboardModeChangedEvent(aSource, 0 /* aRevision */, VBOX_SHCL_MAIN_CLIENT_NONE, aClipboardMode);
+}
+
+
+/**
+ * Fires a console-level anonymous clipboard file-transfer mode-changed event.
+ *
+ * @returns COM status code.
+ * @param   aSource     Event source to fire on.
+ * @param   fEnabled    Whether clipboard file transfer is enabled.
+ */
+static HRESULT consoleFireClipboardFileTransferModeChangedEvent(IEventSource *aSource, bool fEnabled)
+{
+    return ::FireClipboardFileTransferModeChangedEvent(aSource, 0 /* aRevision */, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                                       fEnabled ? TRUE : FALSE);
+}
+
 
 // VMTask and friends
 ////////////////////////////////////////////////////////////////////////////////
@@ -5906,7 +5953,7 @@ HRESULT Console::i_onClipboardError(const Utf8Str &aId, const Utf8Str &aErrMsg, 
     if (SUCCEEDED(hrc))
     {
         alock.release();
-        ::FireClipboardErrorEvent(mEventSource, aId, NULL /* aItem */, FALSE /* aVeto */, aErrMsg, aRc);
+        consoleFireClipboardErrorEvent(mEventSource, aId, aErrMsg, aRc);
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
         if (mClipboard.isNotNull())
             mClipboard->i_fireClipboardError(aId, aErrMsg, aRc);
@@ -5967,7 +6014,7 @@ HRESULT Console::i_onClipboardModeChange(ClipboardMode_T aClipboardMode)
     /* notify console callbacks on success */
     if (SUCCEEDED(hrc))
     {
-        ::FireClipboardModeChangedEvent(mEventSource, aClipboardMode);
+        consoleFireClipboardModeChangedEvent(mEventSource, aClipboardMode);
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
         if (mClipboard.isNotNull())
             mClipboard->i_fireClipboardModeChanged(aClipboardMode);
@@ -6028,7 +6075,7 @@ HRESULT Console::i_onClipboardFileTransferModeChange(bool aEnabled)
     /* notify console callbacks on success */
     if (SUCCEEDED(hrc))
     {
-        ::FireClipboardFileTransferModeChangedEvent(mEventSource, aEnabled ? TRUE : FALSE);
+        consoleFireClipboardFileTransferModeChangedEvent(mEventSource, aEnabled);
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
         if (mClipboard.isNotNull())
             mClipboard->i_fireClipboardFileTransferModeChanged(aEnabled);
@@ -12364,6 +12411,3 @@ const PDMDRVREG Console::DrvStatusReg =
     PDM_DRVREG_VERSION
 };
 
-
-
-/* vi: set tabstop=4 shiftwidth=4 expandtab: */

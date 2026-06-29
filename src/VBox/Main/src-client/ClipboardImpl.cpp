@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -36,6 +36,7 @@
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
 # include "ClipboardFormatImpl.h"
 # include "ClipboardItemImpl.h"
+# include "ClipboardSessionImpl.h"
 # include "ClipboardTransferManagerImpl.h"
 # include "ConsoleClipboardFormats.h"
 # include "ConsoleImpl.h"
@@ -303,12 +304,15 @@ struct Clipboard::Data
         : mParent(NULL)
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
         , mSource(ClipboardSource_Custom)
+        , mCurrentClientId(VBOX_SHCL_MAIN_CLIENT_NONE)
         , mfHaveLastItem(false)
         , mLastItemSource(ClipboardSource_Custom)
         , mLastItemAction(ClipboardAction_Invalid)
         , mLastItemSerial(0)
         , mNextItemId(0)
         , mNextRequestId(1)
+        , mNextClientId(1)
+        , mNextEventRevision(1)
 #endif
     { }
 
@@ -325,6 +329,8 @@ struct Clipboard::Data
     ComObjPtr<HostClipboard> mHostClipboard;
     /** Last known active clipboard source. */
     ClipboardSource_T mSource;
+    /** Client identifier which owns the current format offer. */
+    VBOXSHCLMAINCLIENTID mCurrentClientId;
     /** Whether last clipboard item data is available. */
     bool mfHaveLastItem;
     /** Source of the last clipboard item data. */
@@ -340,17 +346,58 @@ struct Clipboard::Data
     /** Pending non-waitable clipboard data request. */
     struct PendingDataRequest
     {
-        ULONG             mId;
-        ClipboardAction_T mAction;
-        ClipboardSource_T mSource;
-        SHCLFORMAT        mFormat;
+        ULONG                 mId;
+        VBOXSHCLMAINCLIENTID  mClientId;
+        ClipboardAction_T     mAction;
+        ClipboardSource_T     mSource;
+        SHCLFORMAT            mFormat;
     };
     /** Pending non-waitable clipboard data requests. */
     std::vector<PendingDataRequest> mPendingDataRequests;
+    /** Active clipboard session event forwarding record. */
+    struct SessionRecord
+    {
+        SessionRecord(VBOXSHCLMAINCLIENTID aClientId,
+                      ClipboardSession *aSession,
+                      uint32_t fFlags,
+                      const ComPtr<IEventSource> &aEventSource)
+            : mClientId(aClientId)
+            , mSession(aSession)
+            , mfFlags(fFlags)
+            , mEventSource(aEventSource)
+            , mfInitialStateDelivered(false)
+            , mfHaveReflectionFormats(false)
+            , mfReflectionFormats(VBOX_SHCL_FMT_NONE)
+            , mReflectionSource(ClipboardSource_Custom)
+        { }
+
+        /** Session client identifier. */
+        VBOXSHCLMAINCLIENTID mClientId;
+        /** Session object owned by the parent clipboard until close or parent teardown. */
+        ComObjPtr<ClipboardSession> mSession;
+        /** IClipboardSessionFlag mask. */
+        uint32_t mfFlags;
+        /** Session-specific event source. */
+        ComPtr<IEventSource> mEventSource;
+        /** Whether IncludeInitialState has been delivered for this session. */
+        bool mfInitialStateDelivered;
+        /** Whether a one-shot anonymous format reflection candidate is available. */
+        bool mfHaveReflectionFormats;
+        /** Format mask for the reflection candidate. */
+        uint32_t mfReflectionFormats;
+        /** Source for the reflection candidate. */
+        ClipboardSource_T mReflectionSource;
+    };
+    /** Active clipboard sessions. */
+    std::vector<SessionRecord> mSessions;
     /** Next clipboard item identifier to assign. */
     ULONG mNextItemId;
     /** Next clipboard data request identifier to assign. */
     ULONG mNextRequestId;
+    /** Next Main clipboard client identifier to assign. */
+    VBOXSHCLMAINCLIENTID mNextClientId;
+    /** Next clipboard event revision to assign. */
+    LONG64 mNextEventRevision;
 #endif
 };
 
@@ -419,11 +466,11 @@ HRESULT Clipboard::init(Console *aParent)
     AssertComRCReturnRC(hrc);
 
     mData->mTransfers.createObject();
-    hrc = mData->mTransfers->init(mData->mEventSource);
+    hrc = mData->mTransfers->init(mData->mEventSource, this);
     AssertComRCReturnRC(hrc);
 
     mData->mHostClipboard.createObject();
-    hrc = mData->mHostClipboard->init(this);
+    hrc = mData->mHostClipboard->init(VBOX_SHCL_MAIN_CLIENT_NONE, this);
     AssertComRCReturnRC(hrc);
 
     m_fFormats = VBOX_SHCL_FMT_NONE;
@@ -446,30 +493,51 @@ void Clipboard::uninit()
     if (autoUninitSpan.uninitDone())
         return;
 
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-    if (mData)
-    {
-        mData->mParent = NULL;
+    Data *pData = NULL;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-        mData->mFileList.clear();
-        mData->mLastItemBuffer.clear();
-        mData->mPendingDataRequests.clear();
-        mData->mfHaveLastItem = false;
-        if (!mData->mHostClipboard.isNull())
-        {
-            mData->mHostClipboard->uninit();
-            mData->mHostClipboard.setNull();
-        }
-        mData->mTransfers.setNull();
-        if (!mData->mEventSource.isNull())
-        {
-            mData->mEventSource->uninit();
-            mData->mEventSource.setNull();
-        }
+    std::vector<Data::SessionRecord> vecSessions;
+    ComObjPtr<HostClipboard> ptrHostClipboard;
+    ComObjPtr<ClipboardTransferManager> ptrTransfers;
+    ComObjPtr<EventSource> ptrEventSource;
 #endif
-        delete mData;
-        mData = NULL;
+
+    {
+        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData)
+        {
+            pData = mData;
+            mData = NULL;
+            pData->mParent = NULL;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
+            pData->mFileList.clear();
+            pData->mLastItemBuffer.clear();
+            pData->mPendingDataRequests.clear();
+            vecSessions.swap(pData->mSessions);
+            pData->mfHaveLastItem = false;
+            ptrHostClipboard = pData->mHostClipboard;
+            pData->mHostClipboard.setNull();
+            ptrTransfers = pData->mTransfers;
+            pData->mTransfers.setNull();
+            ptrEventSource = pData->mEventSource;
+            pData->mEventSource.setNull();
+#endif
+        }
     }
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
+    for (std::vector<Data::SessionRecord>::iterator it = vecSessions.begin(); it != vecSessions.end(); ++it)
+        if (it->mSession.isNotNull())
+            it->mSession->uninit();
+
+    if (!ptrHostClipboard.isNull())
+        ptrHostClipboard->uninit();
+    if (!ptrTransfers.isNull())
+        ptrTransfers->uninit();
+    if (!ptrEventSource.isNull())
+        ptrEventSource->uninit();
+#endif
+
+    delete pData;
 }
 
 
@@ -614,6 +682,22 @@ void Clipboard::i_removePendingDataRequestLocked(ULONG aRequestId)
         }
     }
 }
+
+
+/**
+ * Removes a pending non-waitable clipboard data request.
+ *
+ * @param   aRequestId      Request identifier to remove.
+ */
+void Clipboard::i_removePendingDataRequest(ULONG aRequestId)
+{
+    if (aRequestId == 0)
+        return;
+
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    if (mData)
+        i_removePendingDataRequestLocked(aRequestId);
+}
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 
 
@@ -642,6 +726,61 @@ HRESULT Clipboard::createFormat(const com::Utf8Str &aMimeType,
     HRESULT hrc = i_createFormat(aMimeType, aFormat);
     if (FAILED(hrc))
         return setError(VBOX_E_SHCL_ERROR, tr("Creating the clipboard format object failed (%Rhrc)"), hrc);
+    return hrc;
+#endif /* VBOX_WITH_SHARED_CLIPBOARD */
+}
+
+
+/**
+ * Creates a client-specific clipboard session.
+ *
+ * @returns COM status code.
+ * @param   aFlags          Session flags.
+ * @param   aSession        Where to return the created session object.
+ */
+HRESULT Clipboard::createSession(const std::vector<IClipboardSessionFlag_T> &aFlags,
+                                 ComPtr<IClipboardSession> &aSession)
+{
+#ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aFlags, aSession);
+    ReturnComNotImplemented();
+#else /* VBOX_WITH_SHARED_CLIPBOARD */
+
+    uint32_t fFlags = 0;
+    for (std::vector<IClipboardSessionFlag_T>::const_iterator it = aFlags.begin(); it != aFlags.end(); ++it)
+    {
+        switch (*it)
+        {
+            case IClipboardSessionFlag_ExcludeOwnChanges:
+            case IClipboardSessionFlag_ExcludeReflections:
+            case IClipboardSessionFlag_IncludeInitialState:
+            case IClipboardSessionFlag_IncludePayload:
+                fFlags |= (uint32_t)*it;
+                break;
+            default:
+                LogFunc(("Rejecting invalid clipboard session flag %RU32\n", (uint32_t)*it));
+                return setError(VBOX_E_SHCL_ERROR, tr("Invalid clipboard session flag %RU32"), (uint32_t)*it);
+        }
+    }
+
+    VBOXSHCLMAINCLIENTID const idClient = i_allocateClientId();
+    if (idClient == VBOX_SHCL_MAIN_CLIENT_NONE)
+        return setError(E_OUTOFMEMORY, tr("No clipboard session client identifiers are available"));
+
+    ComObjPtr<ClipboardSession> ptrSessionObj;
+    HRESULT hrc = ptrSessionObj.createObject();
+    if (FAILED(hrc))
+        return hrc;
+    hrc = ptrSessionObj->init(idClient, fFlags, this);
+    if (FAILED(hrc))
+        return hrc;
+    hrc = ptrSessionObj.queryInterfaceTo(aSession.asOutParam());
+    if (FAILED(hrc))
+    {
+        ptrSessionObj->uninit();
+        return hrc;
+    }
+    Log2Func(("Created clipboard session: idClient=%RU32, fFlags=%#x\n", idClient, fFlags));
     return hrc;
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 }
@@ -956,6 +1095,38 @@ HRESULT Clipboard::readFormats(std::vector<ComPtr<IClipboardFormat> > &aFormats)
 
 
 /**
+ * Reads the currently available clipboard formats for internal session use.
+ *
+ * @returns COM status code.
+ * @param   aFormats        Where to return the available formats.
+ */
+HRESULT Clipboard::i_readFormatObjects(std::vector<ComPtr<IClipboardFormat> > &aFormats)
+{
+    return readFormats(aFormats);
+}
+
+
+/**
+ * Reads raw clipboard data for internal session use.
+ *
+ * @returns COM status code.
+ * @param   aAction             Clipboard action to read for.
+ * @param   aRequestedMimeType  MIME type to read, or empty to auto-select.
+ * @param   aSource             Where to return the clipboard source.
+ * @param   aMimeType           Where to return the MIME type.
+ * @param   aBuffer             Where to return the payload bytes.
+ */
+HRESULT Clipboard::i_readDataRaw(ClipboardAction_T aAction,
+                                 const com::Utf8Str &aRequestedMimeType,
+                                 ClipboardSource_T *aSource,
+                                 com::Utf8Str &aMimeType,
+                                 std::vector<BYTE> &aBuffer)
+{
+    return readDataRaw(aAction, aRequestedMimeType, aSource, aMimeType, aBuffer);
+}
+
+
+/**
  * Writes clipboard data from a clipboard item.
  *
  * @returns COM status code.
@@ -1064,7 +1235,7 @@ HRESULT Clipboard::writeData(ClipboardAction_T aAction,
     ClipboardSource_T enmWrittenSource = ClipboardSource_Host;
     com::Utf8Str strWrittenMimeType;
     std::vector<BYTE> abWrittenBuffer;
-    hrc = i_writeData(aAction, enmSource, strMimeType, abBuffer,
+    hrc = i_writeData(VBOX_SHCL_MAIN_CLIENT_NONE, aAction, enmSource, strMimeType, abBuffer,
                       &enmWrittenSource, strWrittenMimeType, abWrittenBuffer);
     if (FAILED(hrc))
     {
@@ -1257,7 +1428,104 @@ HRESULT Clipboard::writeDataRaw(ClipboardAction_T aAction,
         return setError(VBOX_E_SHCL_NO_DATA, tr("Clipboard write data must not be empty"));
     }
 
-    hrc = i_writeData(aAction, aSource, aMimeType, aBuffer, aWrittenSource, aWrittenMimeType, aWrittenBuffer);
+    hrc = i_writeDataRaw(VBOX_SHCL_MAIN_CLIENT_NONE, aAction, aSource, aMimeType, aBuffer,
+                         aWrittenSource, aWrittenMimeType, aWrittenBuffer);
+    if (FAILED(hrc))
+        return setError(hrc, tr("Writing shared clipboard data failed (%Rhrc)"), hrc);
+    return hrc;
+#endif /* VBOX_WITH_SHARED_CLIPBOARD */
+}
+
+
+/**
+ * Writes raw clipboard data for internal session use.
+ *
+ * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the write.
+ * @param   aAction         Clipboard action to write for.
+ * @param   aSource         Clipboard source.
+ * @param   aMimeType       MIME type of the payload.
+ * @param   aBuffer         Payload bytes.
+ * @param   aWrittenSource  Where to return the written clipboard source.
+ * @param   aWrittenMimeType  Where to return the written MIME type.
+ * @param   aWrittenBuffer  Where to return the written payload bytes.
+ */
+HRESULT Clipboard::i_writeDataRaw(VBOXSHCLMAINCLIENTID aClientId,
+                                  ClipboardAction_T aAction,
+                                  ClipboardSource_T aSource,
+                                  const com::Utf8Str &aMimeType,
+                                  const std::vector<BYTE> &aBuffer,
+                                  ClipboardSource_T *aWrittenSource,
+                                  com::Utf8Str &aWrittenMimeType,
+                                  std::vector<BYTE> &aWrittenBuffer)
+{
+#ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aClientId, aAction, aSource, aMimeType, aBuffer,
+             aWrittenSource, aWrittenMimeType, aWrittenBuffer);
+    ReturnComNotImplemented();
+#else /* VBOX_WITH_SHARED_CLIPBOARD */
+
+    Log2Func(("aClientId=%RU32, aAction=%RU32, aSource=%RU32, aMimeType=%s, cb=%zu\n",
+              aClientId, (uint32_t)aAction, (uint32_t)aSource, aMimeType.c_str(), aBuffer.size()));
+    HRESULT hrc = S_OK;
+    if (!ShClMainIsValidAction(aAction))
+    {
+        LogFunc(("Rejecting invalid clipboard action %RU32\n", (uint32_t)aAction));
+        return setError(VBOX_E_SHCL_ERROR, tr("Invalid clipboard action %RU32"), (uint32_t)aAction);
+    }
+    if (!ShClMainIsValidSource(aSource))
+    {
+        LogFunc(("Rejecting invalid clipboard source %RU32\n", (uint32_t)aSource));
+        return setError(VBOX_E_SHCL_ERROR, tr("Invalid clipboard source %RU32"), (uint32_t)aSource);
+    }
+    if (!aWrittenSource)
+        return setError(VBOX_E_SHCL_ERROR, tr("The written clipboard source output argument must not be NULL"));
+    if (aMimeType.isEmpty())
+    {
+        LogFunc(("Rejecting clipboard write with empty MIME type\n"));
+        return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED, tr("Clipboard MIME type must not be empty"));
+    }
+    if (consoleClipboardMimeTypeToFormat(aMimeType) == VBOX_SHCL_FMT_NONE)
+    {
+        LogFunc(("Rejecting unsupported clipboard MIME type for write: %s\n", aMimeType.c_str()));
+        return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED,
+                        tr("Clipboard MIME type '%s' is not supported"), aMimeType.c_str());
+    }
+    if (aBuffer.size() > s_cbClipboardReadMax)
+    {
+        LogFunc(("Rejecting oversized clipboard write: mime=%s, cb=%zu, max=%RU32\n",
+                 aMimeType.c_str(), aBuffer.size(), s_cbClipboardReadMax));
+        return setError(VBOX_E_SHCL_TOO_MUCH_DATA,
+                        tr("Writing shared clipboard data exceeded the supported size (%RU32 bytes)"),
+                        s_cbClipboardReadMax);
+    }
+
+    ClipboardMode_T enmMode = ClipboardMode_Disabled;
+    Console *pParent = NULL;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
+        pParent = mData->mParent;
+    }
+    hrc = ShClMainGetMode(pParent, &enmMode);
+    if (FAILED(hrc))
+        return setError(VBOX_E_SHCL_ERROR, tr("Getting the Shared Clipboard mode failed (%Rhrc)"), hrc);
+    if (!ShClMainModeAllowsWrite(enmMode, aSource))
+    {
+        LogFunc(("Rejecting write from source %RU32 in clipboard mode %RU32\n", (uint32_t)aSource, (uint32_t)enmMode));
+        return setError(VBOX_E_SHCL_ACCESS_DENIED,
+                        tr("Shared Clipboard mode %RU32 does not allow writing from source %RU32"),
+                        (uint32_t)enmMode, (uint32_t)aSource);
+    }
+    if (aBuffer.empty())
+    {
+        LogFunc(("Rejecting empty clipboard write: mime=%s\n", aMimeType.c_str()));
+        return setError(VBOX_E_SHCL_NO_DATA, tr("Clipboard write data must not be empty"));
+    }
+
+    hrc = i_writeData(aClientId, aAction, aSource, aMimeType, aBuffer,
+                      aWrittenSource, aWrittenMimeType, aWrittenBuffer);
     if (FAILED(hrc))
         return setError(hrc, tr("Writing shared clipboard data failed (%Rhrc)"), hrc);
     return hrc;
@@ -1325,7 +1593,77 @@ HRESULT Clipboard::writeFormats(const std::vector<ComPtr<IClipboardFormat> > &aF
                         tr("Shared Clipboard mode %RU32 does not allow writing host clipboard formats"),
                         (uint32_t)enmMode);
     }
-    hrc = i_writeFormats(aMimeTypes);
+    hrc = i_writeFormats(VBOX_SHCL_MAIN_CLIENT_NONE, aMimeTypes);
+    if (FAILED(hrc))
+        return setError(hrc, tr("Writing shared clipboard formats failed (%Rhrc)"), hrc);
+    return hrc;
+#endif /* VBOX_WITH_SHARED_CLIPBOARD */
+}
+
+
+/**
+ * Writes the available clipboard formats for internal session use.
+ *
+ * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the write.
+ * @param   aFormats        Clipboard formats to write.
+ */
+HRESULT Clipboard::i_writeFormatObjects(VBOXSHCLMAINCLIENTID aClientId,
+                                        const std::vector<ComPtr<IClipboardFormat> > &aFormats)
+{
+#ifndef VBOX_WITH_SHARED_CLIPBOARD
+    RT_NOREF(aClientId, aFormats);
+    ReturnComNotImplemented();
+#else /* VBOX_WITH_SHARED_CLIPBOARD */
+
+    Log2Func(("aClientId=%RU32, cFormats=%zu\n", aClientId, aFormats.size()));
+    HRESULT hrc = S_OK;
+    std::vector<com::Utf8Str> aMimeTypes;
+    for (std::vector<ComPtr<IClipboardFormat> >::const_iterator it = aFormats.begin(); it != aFormats.end(); ++it)
+    {
+        if (it->isNull())
+        {
+            LogFunc(("Invalid NULL clipboard format in writeFormats\n"));
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard format must not be NULL"));
+        }
+
+        com::Bstr bstrMimeType;
+        hrc = (*it)->COMGETTER(MimeType)(bstrMimeType.asOutParam());
+        if (FAILED(hrc))
+            return setError(VBOX_E_SHCL_ERROR, tr("Reading the clipboard format MIME type failed (%Rhrc)"), hrc);
+        com::Utf8Str strMimeType(bstrMimeType);
+        if (strMimeType.isEmpty())
+        {
+            LogFunc(("Rejecting clipboard format with empty MIME type\n"));
+            return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED, tr("Clipboard MIME type must not be empty"));
+        }
+        if (consoleClipboardMimeTypeToFormat(strMimeType) == VBOX_SHCL_FMT_NONE)
+        {
+            LogFunc(("Rejecting unsupported clipboard MIME type for writeFormats: %s\n", strMimeType.c_str()));
+            return setError(VBOX_E_SHCL_FORMAT_NOT_SUPPORTED,
+                            tr("Clipboard MIME type '%s' is not supported"), strMimeType.c_str());
+        }
+        aMimeTypes.push_back(strMimeType);
+    }
+    ClipboardMode_T enmMode = ClipboardMode_Disabled;
+    Console *pParent = NULL;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
+        pParent = mData->mParent;
+    }
+    hrc = ShClMainGetMode(pParent, &enmMode);
+    if (FAILED(hrc))
+        return setError(VBOX_E_SHCL_ERROR, tr("Getting the Shared Clipboard mode failed (%Rhrc)"), hrc);
+    if (!ShClMainModeAllowsWrite(enmMode, ClipboardSource_Host))
+    {
+        LogFunc(("Rejecting format write from host in clipboard mode %RU32\n", (uint32_t)enmMode));
+        return setError(VBOX_E_SHCL_ACCESS_DENIED,
+                        tr("Shared Clipboard mode %RU32 does not allow writing host clipboard formats"),
+                        (uint32_t)enmMode);
+    }
+    hrc = i_writeFormats(aClientId, aMimeTypes);
     if (FAILED(hrc))
         return setError(hrc, tr("Writing shared clipboard formats failed (%Rhrc)"), hrc);
     return hrc;
@@ -1349,17 +1687,23 @@ HRESULT Clipboard::reset()
     if (FAILED(hrc))
         return setError(hrc, tr("Resetting shared clipboard state failed (%Rhrc)"), hrc);
 
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-    if (!mData)
-        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-    Log2Func(("Clearing cached clipboard state: cFiles=%zu, fHaveLastItem=%RTbool, cbLast=%zu\n",
-              mData->mFileList.size(), mData->mfHaveLastItem, mData->mLastItemBuffer.size()));
-    mData->mFileList.clear();
-    mData->mLastItemBuffer.clear();
-    mData->mfHaveLastItem = false;
-    mData->mLastItemSerial++;
-    i_clearPendingDataRequestsLocked();
-    mData->mTransfers->i_reset();
+    ComObjPtr<ClipboardTransferManager> ptrTransfers;
+    {
+        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
+        Log2Func(("Clearing cached clipboard state: cFiles=%zu, fHaveLastItem=%RTbool, cbLast=%zu\n",
+                  mData->mFileList.size(), mData->mfHaveLastItem, mData->mLastItemBuffer.size()));
+        mData->mFileList.clear();
+        mData->mLastItemBuffer.clear();
+        mData->mfHaveLastItem = false;
+        mData->mLastItemSerial++;
+        mData->mCurrentClientId = VBOX_SHCL_MAIN_CLIENT_NONE;
+        i_clearPendingDataRequestsLocked();
+        ptrTransfers = mData->mTransfers;
+    }
+    if (!ptrTransfers.isNull())
+        ptrTransfers->i_reset();
     return S_OK;
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 }
@@ -1641,9 +1985,340 @@ HRESULT Clipboard::i_readFormats(std::vector<com::Utf8Str> &aFormats)
 
 
 /**
+ * Returns the current clipboard state as event objects.
+ *
+ * @returns COM status code.
+ * @param   aSource         Where to return the current clipboard source.
+ * @param   aFormats        Where to return the current format objects.
+ */
+HRESULT Clipboard::i_getCurrentStateForEvent(ClipboardSource_T *aSource,
+                                             std::vector<ComPtr<IClipboardFormat> > &aFormats)
+{
+    AssertPtrReturn(aSource, E_POINTER);
+
+    std::vector<com::Utf8Str> aMimeTypes;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        *aSource = mData->mSource;
+        consoleClipboardFormatsToMimeTypes(m_fFormats, aMimeTypes);
+    }
+
+    aFormats.clear();
+    for (std::vector<com::Utf8Str>::const_iterator it = aMimeTypes.begin(); it != aMimeTypes.end(); ++it)
+    {
+        ComPtr<IClipboardFormat> ptrFormat;
+        HRESULT hrc = i_createFormat(*it, ptrFormat);
+        if (FAILED(hrc))
+            return hrc;
+        aFormats.push_back(ptrFormat);
+    }
+    return S_OK;
+}
+
+
+/**
+ * Allocates the next clipboard event revision.
+ *
+ * @returns Clipboard event revision, never zero.
+ */
+LONG64 Clipboard::i_nextEventRevision()
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertPtrReturn(mData, 0);
+
+    if (mData->mNextEventRevision <= 0)
+        mData->mNextEventRevision = 1;
+    LONG64 const i64Revision = mData->mNextEventRevision;
+    if (mData->mNextEventRevision == INT64_MAX)
+        mData->mNextEventRevision = 1;
+    else
+        mData->mNextEventRevision++;
+    return i64Revision;
+}
+
+
+/**
+ * Allocates the next Main clipboard client ID.
+ *
+ * @returns Main clipboard client ID, never VBOX_SHCL_MAIN_CLIENT_NONE.
+ */
+VBOXSHCLMAINCLIENTID Clipboard::i_allocateClientId()
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertPtrReturn(mData, VBOX_SHCL_MAIN_CLIENT_NONE);
+
+    uint32_t cTries = UINT32_MAX;
+    while (cTries-- > 0)
+    {
+        VBOXSHCLMAINCLIENTID const idClient = mData->mNextClientId++;
+        if (mData->mNextClientId == VBOX_SHCL_MAIN_CLIENT_NONE)
+            mData->mNextClientId = 1;
+        if (idClient == VBOX_SHCL_MAIN_CLIENT_NONE)
+            continue;
+
+        bool fInUse = false;
+        for (std::vector<Data::SessionRecord>::const_iterator it = mData->mSessions.begin();
+             it != mData->mSessions.end(); ++it)
+            if (it->mClientId == idClient)
+            {
+                fInUse = true;
+                break;
+            }
+        if (!fInUse)
+            return idClient;
+    }
+
+    LogFunc(("No free clipboard session client identifiers are available\n"));
+    return VBOX_SHCL_MAIN_CLIENT_NONE;
+}
+
+
+/**
+ * Registers a clipboard session event target.
+ *
+ * @returns COM status code.
+ * @param   aClientId       Session client identifier.
+ * @param   aSession        Session object to retain while registered.
+ * @param   fFlags          IClipboardSessionFlag mask.
+ * @param   aEventSource    Session-specific event source.
+ */
+HRESULT Clipboard::i_registerSession(VBOXSHCLMAINCLIENTID aClientId,
+                                     ClipboardSession *aSession,
+                                     uint32_t fFlags,
+                                     const ComPtr<IEventSource> &aEventSource)
+{
+    AssertReturn(aClientId != VBOX_SHCL_MAIN_CLIENT_NONE, E_INVALIDARG);
+    AssertPtrReturn(aSession, E_INVALIDARG);
+    AssertReturn(aEventSource.isNotNull(), E_INVALIDARG);
+
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertPtrReturn(mData, E_FAIL);
+
+    for (std::vector<Data::SessionRecord>::const_iterator it = mData->mSessions.begin(); it != mData->mSessions.end(); ++it)
+        if (it->mClientId == aClientId)
+            return setError(E_INVALIDARG, tr("Clipboard session client id %RU32 is already registered"), aClientId);
+
+    try
+    {
+        mData->mSessions.push_back(Data::SessionRecord(aClientId, aSession, fFlags, aEventSource));
+    }
+    catch (std::bad_alloc &)
+    {
+        return E_OUTOFMEMORY;
+    }
+
+    Log2Func(("Registered clipboard session: clientId=%RU32, fFlags=%#x, cSessions=%zu\n",
+              aClientId, fFlags, mData->mSessions.size()));
+    return S_OK;
+}
+
+
+/**
+ * Unregisters a clipboard session event target.
+ *
+ * @param   aClientId       Session client identifier.
+ */
+void Clipboard::i_unregisterSession(VBOXSHCLMAINCLIENTID aClientId)
+{
+    if (aClientId == VBOX_SHCL_MAIN_CLIENT_NONE)
+        return;
+
+    ComObjPtr<ClipboardSession> ptrKeepAlive;
+    {
+        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return;
+
+        for (std::vector<Data::SessionRecord>::iterator it = mData->mSessions.begin(); it != mData->mSessions.end(); ++it)
+            if (it->mClientId == aClientId)
+            {
+                ptrKeepAlive = it->mSession;
+                mData->mSessions.erase(it);
+                Log2Func(("Unregistered clipboard session: clientId=%RU32, cSessions=%zu\n",
+                          aClientId, mData->mSessions.size()));
+                return;
+            }
+    }
+    Log3Func(("Clipboard session clientId=%RU32 was not registered\n", aClientId));
+}
+
+
+/**
+ * Collects session event targets after applying session filters.
+ *
+ * @param   aTargets            Where to append matching session targets.
+ * @param   aClientId           Originating client identifier for the event.
+ * @param   fPassive            Whether ExcludeOwnChanges applies to this event.
+ * @param   fCheckReflection    Whether ExcludeReflections can be evaluated from source/formats.
+ * @param   fFormats            Current format mask for reflection checks.
+ * @param   aSource             Current source for reflection checks.
+ */
+void Clipboard::i_getSessionEventTargets(std::vector<SessionEventTarget> &aTargets,
+                                         VBOXSHCLMAINCLIENTID aClientId,
+                                         bool fPassive,
+                                         bool fCheckReflection,
+                                         uint32_t fFormats,
+                                         ClipboardSource_T aSource)
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    if (!mData)
+        return;
+
+    for (std::vector<Data::SessionRecord>::iterator it = mData->mSessions.begin(); it != mData->mSessions.end(); ++it)
+    {
+        if (it->mEventSource.isNull())
+            continue;
+        if (   fPassive
+            && aClientId != VBOX_SHCL_MAIN_CLIENT_NONE
+            && aClientId == it->mClientId
+            && (it->mfFlags & IClipboardSessionFlag_ExcludeOwnChanges))
+        {
+            Log3Func(("Suppressing own clipboard event for session %RU32\n", it->mClientId));
+            continue;
+        }
+        if (   fCheckReflection
+            && aClientId == VBOX_SHCL_MAIN_CLIENT_NONE
+            && (it->mfFlags & IClipboardSessionFlag_ExcludeReflections)
+            && it->mfHaveReflectionFormats)
+        {
+            bool const fSuppressReflection =    it->mfReflectionFormats == fFormats
+                                             && it->mReflectionSource == aSource;
+            it->mfHaveReflectionFormats = false;
+            it->mfReflectionFormats = VBOX_SHCL_FMT_NONE;
+            it->mReflectionSource = ClipboardSource_Custom;
+            if (fSuppressReflection)
+            {
+                Log3Func(("Suppressing reflected clipboard event for session %RU32: source=%s, formats=%#x\n",
+                          it->mClientId, clipboardSourceToLogString(aSource), fFormats));
+                continue;
+            }
+        }
+
+        SessionEventTarget Target;
+        Target.mClientId = it->mClientId;
+        Target.mfFlags = it->mfFlags;
+        Target.mEventSource = it->mEventSource;
+        try
+        {
+            aTargets.push_back(Target);
+        }
+        catch (std::bad_alloc &)
+        {
+            LogFunc(("Out of memory collecting clipboard session event targets\n"));
+            break;
+        }
+    }
+}
+
+
+/**
+ * Fires the current clipboard state to a session event source once.
+ *
+ * @returns COM status code.
+ * @param   aClientId       Session client identifier.
+ */
+HRESULT Clipboard::i_fireSessionInitialState(VBOXSHCLMAINCLIENTID aClientId)
+{
+    ComPtr<IEventSource> ptrEventSource;
+    uint32_t fFlags = 0;
+    uint32_t fFormats = VBOX_SHCL_FMT_NONE;
+    ClipboardSource_T enmSource = ClipboardSource_Custom;
+    bool fHaveLastItem = false;
+    ClipboardAction_T enmLastAction = ClipboardAction_Copy;
+    ClipboardSource_T enmLastSource = ClipboardSource_Custom;
+    com::Utf8Str strLastMimeType;
+    std::vector<BYTE> abLastBuffer;
+
+    {
+        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+
+        Data::SessionRecord *pSession = NULL;
+        for (std::vector<Data::SessionRecord>::iterator it = mData->mSessions.begin(); it != mData->mSessions.end(); ++it)
+            if (it->mClientId == aClientId)
+            {
+                pSession = &*it;
+                break;
+            }
+        if (!pSession)
+            return S_OK;
+        if (!(pSession->mfFlags & IClipboardSessionFlag_IncludeInitialState))
+            return S_OK;
+        if (pSession->mfInitialStateDelivered)
+            return S_OK;
+
+        pSession->mfInitialStateDelivered = true;
+        ptrEventSource = pSession->mEventSource;
+        fFlags = pSession->mfFlags;
+        fFormats = m_fFormats;
+        enmSource = mData->mSource;
+        fHaveLastItem = mData->mfHaveLastItem;
+        enmLastAction = mData->mLastItemAction != ClipboardAction_Invalid ? mData->mLastItemAction : ClipboardAction_Copy;
+        enmLastSource = mData->mLastItemSource;
+        strLastMimeType = mData->mLastItemMimeType;
+        abLastBuffer = mData->mLastItemBuffer;
+    }
+
+    if (ptrEventSource.isNull())
+        return S_OK;
+
+    std::vector<ComPtr<IClipboardFormat> > vecFormats;
+    std::vector<com::Utf8Str> vecMimeTypes;
+    consoleClipboardFormatsToMimeTypes(fFormats, vecMimeTypes);
+    for (std::vector<com::Utf8Str>::const_iterator it = vecMimeTypes.begin(); it != vecMimeTypes.end(); ++it)
+    {
+        ComPtr<IClipboardFormat> ptrFormat;
+        HRESULT hrc = i_createFormat(*it, ptrFormat);
+        if (FAILED(hrc))
+            return hrc;
+        try
+        {
+            vecFormats.push_back(ptrFormat);
+        }
+        catch (std::bad_alloc &)
+        {
+            return E_OUTOFMEMORY;
+        }
+    }
+
+    LONG64 const i64Revision = i_nextEventRevision();
+    Log2Func(("Firing initial session clipboard state: clientId=%RU32, source=%s, formats=%#x, revision=%RI64\n",
+              aClientId, clipboardSourceToLogString(enmSource), fFormats, i64Revision));
+    HRESULT hrc = ::FireClipboardSourceChangedEvent(ptrEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE, enmSource);
+    AssertComRC(hrc);
+
+    com::SafeIfaceArray<IClipboardFormat> aEventFormats(vecFormats);
+    ComPtr<IClipboardItem> ptrEventItem;
+    hrc = ::FireClipboardFormatChangedEvent(ptrEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                            com::Utf8Str(), ptrEventItem, FALSE /* aVeto */, enmSource,
+                                            ComSafeArrayAsInParam(aEventFormats));
+    AssertComRC(hrc);
+
+    if (fHaveLastItem)
+    {
+        if (fFlags & IClipboardSessionFlag_IncludePayload)
+        {
+            hrc = i_createItem(enmLastSource, strLastMimeType, abLastBuffer, ptrEventItem);
+            if (FAILED(hrc))
+                return hrc;
+        }
+        else
+            ptrEventItem.setNull();
+        hrc = ::FireClipboardDataChangedEvent(ptrEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                              com::Utf8Str(), ptrEventItem, FALSE /* aVeto */, enmLastAction);
+        AssertComRC(hrc);
+    }
+
+    return S_OK;
+}
+
+
+/**
  * Writes raw data to the Shared Clipboard service.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the write.
  * @param   aAction         Clipboard action to write for.
  * @param   aSource         Clipboard source.
  * @param   aMimeType       MIME type of the payload.
@@ -1652,7 +2327,8 @@ HRESULT Clipboard::i_readFormats(std::vector<com::Utf8Str> &aFormats)
  * @param   aWrittenMimeType  Where to return the written MIME type.
  * @param   aWrittenBuffer  Where to return the written payload bytes.
  */
-HRESULT Clipboard::i_writeData(ClipboardAction_T aAction,
+HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
+                               ClipboardAction_T aAction,
                                ClipboardSource_T aSource,
                                const com::Utf8Str &aMimeType,
                                const std::vector<BYTE> &aBuffer,
@@ -1660,8 +2336,9 @@ HRESULT Clipboard::i_writeData(ClipboardAction_T aAction,
                                com::Utf8Str &aWrittenMimeType,
                                std::vector<BYTE> &aWrittenBuffer)
 {
-    Log2Func(("action=%s, source=%s, mime=%s, cb=%zu\n",
-              clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource), aMimeType.c_str(), aBuffer.size()));
+    Log2Func(("clientId=%RU32, action=%s, source=%s, mime=%s, cb=%zu\n",
+              aClientId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource),
+              aMimeType.c_str(), aBuffer.size()));
     AssertPtrReturn(aWrittenSource, E_POINTER);
     AssertPtrReturn(mData, E_FAIL);
 
@@ -1720,7 +2397,7 @@ HRESULT Clipboard::i_writeData(ClipboardAction_T aAction,
     aWrittenMimeType = aMimeType;
     aWrittenBuffer = aBuffer;
     i_storeData(aAction, aSource, aMimeType, aBuffer);
-    i_reportFormats(uFormat, aSource);
+    i_reportFormats(aClientId, uFormat, aSource);
 
     GuestShCl *pShCl = GuestShCl::GetInst();
     vrc = pShCl->ReportFormatsToGuest(uFormat);
@@ -1733,7 +2410,7 @@ HRESULT Clipboard::i_writeData(ClipboardAction_T aAction,
     }
     Log2Func(("Reported write format to guest: format=%#x\n", uFormat));
 
-    i_fireDataChanged(aAction, aSource, aMimeType, aBuffer);
+    i_fireDataChanged(aClientId, aAction, aSource, aMimeType, aBuffer);
     Log2Func(("Write completed: source=%s, format=%#x, mime=%s, cb=%zu\n",
               clipboardSourceToLogString(aSource), uFormat, aMimeType.c_str(), aBuffer.size()));
     return S_OK;
@@ -1744,11 +2421,13 @@ HRESULT Clipboard::i_writeData(ClipboardAction_T aAction,
  * Writes raw format names to the Shared Clipboard service.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the write.
  * @param   aFormats        MIME formats to write.
  */
-HRESULT Clipboard::i_writeFormats(const std::vector<com::Utf8Str> &aFormats)
+HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
+                                  const std::vector<com::Utf8Str> &aFormats)
 {
-    Log2Func(("cMimeTypes=%zu\n", aFormats.size()));
+    Log2Func(("clientId=%RU32, cMimeTypes=%zu\n", aClientId, aFormats.size()));
     SHCLFORMATS fFormats;
     HRESULT hrc = consoleClipboardMimeTypesToFormats(aFormats, &fFormats);
     if (FAILED(hrc))
@@ -1766,7 +2445,7 @@ HRESULT Clipboard::i_writeFormats(const std::vector<com::Utf8Str> &aFormats)
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
-    i_reportFormats(fFormats, ClipboardSource_Host, true /* fForceNotify */);
+    i_reportFormats(aClientId, fFormats, ClipboardSource_Host, true /* fForceNotify */);
 
     GuestShCl *pShCl = GuestShCl::GetInst();
     int vrc = pShCl->ReportFormatsToGuest(fFormats);
@@ -1787,16 +2466,18 @@ HRESULT Clipboard::i_writeFormats(const std::vector<com::Utf8Str> &aFormats)
  * Reports guest-owned clipboard formats to the native host clipboard endpoint.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the report.
  * @param   aAction         Clipboard action associated with the formats.
  * @param   aSource         Clipboard source. Only ClipboardSource_Guest is accepted.
  * @param   aFormats        Clipboard formats to publish.
  */
-HRESULT Clipboard::i_hostClipboardReportFormats(ClipboardAction_T aAction,
+HRESULT Clipboard::i_hostClipboardReportFormats(VBOXSHCLMAINCLIENTID aClientId,
+                                                ClipboardAction_T aAction,
                                                 ClipboardSource_T aSource,
                                                 const std::vector<ComPtr<IClipboardFormat> > &aFormats)
 {
-    Log2Func(("action=%s, source=%s, cFormats=%zu\n",
-              clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource), aFormats.size()));
+    Log2Func(("clientId=%RU32, action=%s, source=%s, cFormats=%zu\n",
+              aClientId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource), aFormats.size()));
     if (!ShClMainIsValidAction(aAction))
     {
         LogFunc(("Rejecting invalid host clipboard action %RU32\n", (uint32_t)aAction));
@@ -1876,7 +2557,7 @@ HRESULT Clipboard::i_hostClipboardReportFormats(ClipboardAction_T aAction,
     AssertComRCReturnRC(autoCaller.hrc());
 
     /* Native backends may request lazily rendered data immediately after taking ownership. */
-    i_reportFormats(fFormats, aSource, true /* fForceNotify */);
+    i_reportFormats(aClientId, fFormats, aSource, true /* fForceNotify */);
 
     GuestShCl *pShCl = GuestShCl::GetInst();
     int vrc = pShCl->ReportFormatsToHost(fFormats);
@@ -1898,20 +2579,22 @@ HRESULT Clipboard::i_hostClipboardReportFormats(ClipboardAction_T aAction,
  * Provides guest-owned clipboard data for a host clipboard request.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the pending request.
  * @param   aRequestId      Clipboard request identifier.
  * @param   aAction         Clipboard action associated with the data.
  * @param   aSource         Clipboard source. Only ClipboardSource_Guest is accepted.
  * @param   aMimeType       MIME type of the payload.
  * @param   aBuffer         Payload bytes.
  */
-HRESULT Clipboard::i_hostClipboardProvideData(ULONG aRequestId,
+HRESULT Clipboard::i_hostClipboardProvideData(VBOXSHCLMAINCLIENTID aClientId,
+                                              ULONG aRequestId,
                                               ClipboardAction_T aAction,
                                               ClipboardSource_T aSource,
                                               const com::Utf8Str &aMimeType,
                                               const std::vector<BYTE> &aBuffer)
 {
-    Log2Func(("requestId=%RU32, action=%s, source=%s, mime=%s, cb=%zu\n",
-              (uint32_t)aRequestId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource),
+    Log2Func(("clientId=%RU32, requestId=%RU32, action=%s, source=%s, mime=%s, cb=%zu\n",
+              aClientId, (uint32_t)aRequestId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource),
               aMimeType.c_str(), aBuffer.size()));
     if (aRequestId == 0)
     {
@@ -1958,6 +2641,24 @@ HRESULT Clipboard::i_hostClipboardProvideData(ULONG aRequestId,
         return setError(VBOX_E_SHCL_TOO_MUCH_DATA,
                         tr("Writing shared clipboard data exceeded the supported size (%RU32 bytes)"),
                         s_cbClipboardReadMax);
+    }
+
+    std::vector<BYTE> abProtocolBuffer;
+    int vrc = clipboardMainToProtocolData(uFormat, aBuffer, abProtocolBuffer);
+    if (RT_FAILURE(vrc))
+    {
+        LogFunc(("Converting host clipboard data failed: format=%#x, mime=%s, cb=%zu, vrc=%Rrc\n",
+                 uFormat, aMimeType.c_str(), aBuffer.size(), vrc));
+        return setErrorBoth(VBOX_E_SHCL_ERROR, vrc,
+                            tr("Converting shared clipboard data failed with %Rrc"), vrc);
+    }
+    if (abProtocolBuffer.size() > s_cbClipboardReadMax)
+    {
+        LogFunc(("Converted host clipboard data is too large: format=%#x, cb=%zu, max=%RU32\n",
+                 uFormat, abProtocolBuffer.size(), s_cbClipboardReadMax));
+        return setErrorBoth(VBOX_E_SHCL_TOO_MUCH_DATA, VERR_TOO_MUCH_DATA,
+                            tr("Writing shared clipboard data exceeded the supported size (%RU32 bytes)"),
+                            s_cbClipboardReadMax);
     }
 
     ClipboardMode_T enmMode = ClipboardMode_Disabled;
@@ -2009,10 +2710,12 @@ HRESULT Clipboard::i_hostClipboardProvideData(ULONG aRequestId,
             if (it->mId == aRequestId)
             {
                 fFoundRequest = true;
-                fMatchedRequest =    it->mAction == aAction
+                fMatchedRequest =    it->mClientId == aClientId
+                                  && it->mAction == aAction
                                   && it->mSource == aSource
                                   && it->mFormat == uFormat;
                 fCurrentRequest =    fMatchedRequest
+                                  && mData->mCurrentClientId == aClientId
                                   && mData->mSource == aSource
                                   && (m_fFormats & uFormat);
                 mData->mPendingDataRequests.erase(it);
@@ -2029,8 +2732,8 @@ HRESULT Clipboard::i_hostClipboardProvideData(ULONG aRequestId,
     }
     if (!fMatchedRequest)
     {
-        LogFunc(("Rejecting host clipboard data for mismatched request ID %RU32: action=%s, source=%s, format=%#x\n",
-                 (uint32_t)aRequestId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource), uFormat));
+        LogFunc(("Rejecting host clipboard data for mismatched request ID %RU32: clientId=%RU32, action=%s, source=%s, format=%#x\n",
+                 (uint32_t)aRequestId, aClientId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource), uFormat));
         return setError(VBOX_E_SHCL_ERROR, tr("Clipboard request ID %RU32 does not match the supplied data"),
                         (uint32_t)aRequestId);
     }
@@ -2042,7 +2745,7 @@ HRESULT Clipboard::i_hostClipboardProvideData(ULONG aRequestId,
                         (uint32_t)aRequestId);
     }
 
-    i_fireDataChanged(aAction, aSource, aMimeType, aBuffer);
+    i_fireDataChanged(aClientId, aAction, aSource, aMimeType, aBuffer);
     Log2Func(("Provided host clipboard data: requestId=%RU32, format=%#x, cb=%zu\n",
               (uint32_t)aRequestId, uFormat, aBuffer.size()));
     return S_OK;
@@ -2053,18 +2756,21 @@ HRESULT Clipboard::i_hostClipboardProvideData(ULONG aRequestId,
  * Sets guest-owned clipboard data on the native host clipboard endpoint.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the data.
  * @param   aAction         Clipboard action associated with the data.
  * @param   aSource         Clipboard source. Only ClipboardSource_Guest is accepted.
  * @param   aMimeType       MIME type of the payload.
  * @param   aBuffer         Payload bytes.
  */
-HRESULT Clipboard::i_hostClipboardSetData(ClipboardAction_T aAction,
+HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
+                                          ClipboardAction_T aAction,
                                           ClipboardSource_T aSource,
                                           const com::Utf8Str &aMimeType,
                                           const std::vector<BYTE> &aBuffer)
 {
-    Log2Func(("action=%s, source=%s, mime=%s, cb=%zu\n",
-              clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource), aMimeType.c_str(), aBuffer.size()));
+    Log2Func(("clientId=%RU32, action=%s, source=%s, mime=%s, cb=%zu\n",
+              aClientId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource),
+              aMimeType.c_str(), aBuffer.size()));
     if (!ShClMainIsValidAction(aAction))
     {
         LogFunc(("Rejecting invalid host clipboard action %RU32\n", (uint32_t)aAction));
@@ -2243,7 +2949,7 @@ HRESULT Clipboard::i_reset()
         }
     }
 
-    i_reportFormats(VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
+    i_reportFormats(VBOX_SHCL_MAIN_CLIENT_NONE, VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
     return S_OK;
 }
 
@@ -2317,12 +3023,14 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
 
     ClipboardAction_T const enmRequestAction = ClipboardAction_Copy;
     ClipboardSource_T enmRequestSource;
+    VBOXSHCLMAINCLIENTID idRequestClient;
     uint32_t fCurrentFormats;
     uint64_t uLastItemSerial;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
         AssertPtrReturn(mData, E_FAIL);
         enmRequestSource = mData->mSource;
+        idRequestClient = mData->mCurrentClientId;
         fCurrentFormats = m_fFormats;
         uLastItemSerial = mData->mLastItemSerial;
     }
@@ -2339,7 +3047,7 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
                   uFormat, fCurrentFormats));
         return E_FAIL;
     }
-    ULONG const idRequest = i_fireDataRequested(enmRequestAction, enmRequestSource, uFormat);
+    ULONG const idRequest = i_fireDataRequested(idRequestClient, enmRequestAction, enmRequestSource, uFormat);
     if (idRequest == 0)
         Log2Func(("No pending data request was registered for service request: format=%#x\n", uFormat));
 
@@ -2373,10 +3081,14 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
     if (!fHaveMainBuffer)
     {
         if (enmRequestSource != ClipboardSource_Host)
+        {
+            i_removePendingDataRequest(idRequest);
             return E_FAIL;
+        }
         if (!cbData)
         {
             Log2Func(("Cannot read host backend data without a destination buffer: format=%#x\n", uFormat));
+            i_removePendingDataRequest(idRequest);
             return E_FAIL;
         }
 
@@ -2385,20 +3097,17 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
         if (RT_FAILURE(vrc))
         {
             Log2Func(("Reading native host data for guest request failed: format=%#x, vrc=%Rrc\n", uFormat, vrc));
+            i_removePendingDataRequest(idRequest);
             return E_FAIL;
         }
+        i_removePendingDataRequest(idRequest);
         Log2Func(("Read native host data for guest request: format=%#x, cbActual=%RU32, cbProvided=%RU32\n",
                   uFormat, *pcbActual, cbData));
         return S_OK;
     }
 
-    if (   !fSuppliedForRequest
-        && idRequest != 0)
-    {
-        AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-        if (mData)
-            i_removePendingDataRequestLocked(idRequest);
-    }
+    RT_NOREF(fSuppliedForRequest);
+    i_removePendingDataRequest(idRequest);
 
     std::vector<BYTE> abProtocolBuffer;
     int vrc = clipboardMainToProtocolData((SHCLFORMAT)uFormat, abMainBuffer, abProtocolBuffer);
@@ -2471,11 +3180,13 @@ HRESULT Clipboard::i_requestData(const com::Utf8Str &aMimeType, ULONG *aRequestI
     }
 
     ClipboardSource_T enmRequestSource;
+    VBOXSHCLMAINCLIENTID idRequestClient;
     uint32_t fCurrentFormats;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
         AssertPtrReturn(mData, E_FAIL);
         enmRequestSource = mData->mSource;
+        idRequestClient = mData->mCurrentClientId;
         fCurrentFormats = m_fFormats;
     }
 
@@ -2493,7 +3204,7 @@ HRESULT Clipboard::i_requestData(const com::Utf8Str &aMimeType, ULONG *aRequestI
         return setError(VBOX_E_SHCL_NO_DATA, tr("The requested clipboard format is not currently advertised"));
     }
 
-    ULONG const idRequest = i_fireDataRequested(ClipboardAction_Copy, enmRequestSource, uFormat);
+    ULONG const idRequest = i_fireDataRequested(idRequestClient, ClipboardAction_Copy, enmRequestSource, uFormat);
     if (idRequest == 0)
     {
         LogFunc(("Registering data request failed: source=%s, format=%#x\n",
@@ -2568,8 +3279,8 @@ HRESULT Clipboard::i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSo
 
     com::Utf8Str strMimeType(pszMimeType);
     i_storeData(aAction, aSource, strMimeType, abBuffer);
-    i_reportFormats(uFormat, aSource);
-    i_fireDataChanged(aAction, aSource, strMimeType, abBuffer);
+    i_reportFormats(VBOX_SHCL_MAIN_CLIENT_NONE, uFormat, aSource);
+    i_fireDataChanged(VBOX_SHCL_MAIN_CLIENT_NONE, aAction, aSource, strMimeType, abBuffer);
     Log2Func(("Reported data accepted: source=%s, format=%#x, mime=%s, cb=%zu\n",
               clipboardSourceToLogString(aSource), uFormat, strMimeType.c_str(), abBuffer.size()));
     return S_OK;
@@ -2579,15 +3290,16 @@ HRESULT Clipboard::i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSo
 /**
  * Records the currently available Shared Clipboard formats and notifies listeners.
  *
+ * @param   aClientId       Originating client identifier for the format report.
  * @param   fFormats        Shared Clipboard format mask.
  * @param   aSource         Clipboard source reporting the formats.
  * @param   fForceNotify    Whether to force notification regardless whether the formats or source
  *                          have been changed or not.
  */
-void Clipboard::i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify)
+void Clipboard::i_reportFormats(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify)
 {
-    Log2Func(("fFormats=%#x, source=%s, fForceNotify=%RTbool\n",
-              fFormats, clipboardSourceToLogString(aSource), fForceNotify));
+    Log2Func(("clientId=%RU32, fFormats=%#x, source=%s, fForceNotify=%RTbool\n",
+              aClientId, fFormats, clipboardSourceToLogString(aSource), fForceNotify));
     ComPtr<IEventSource> ptrEventSource;
     uint32_t fOldFormats = VBOX_SHCL_FMT_NONE;
     ClipboardSource_T enmOldSource = ClipboardSource_Custom;
@@ -2603,8 +3315,19 @@ void Clipboard::i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bo
         fSourceChanged = enmOldSource != aSource;
         m_fFormats = fFormats;
         mData->mSource = aSource;
+        mData->mCurrentClientId = fFormats != VBOX_SHCL_FMT_NONE ? aClientId : VBOX_SHCL_MAIN_CLIENT_NONE;
         if (fFormatsChanged || fSourceChanged || fForceNotify)
             i_clearPendingDataRequestsLocked();
+
+        if (aClientId != VBOX_SHCL_MAIN_CLIENT_NONE)
+            for (std::vector<Data::SessionRecord>::iterator it = mData->mSessions.begin(); it != mData->mSessions.end(); ++it)
+                if (it->mClientId == aClientId)
+                {
+                    it->mfHaveReflectionFormats = true;
+                    it->mfReflectionFormats = fFormats;
+                    it->mReflectionSource = aSource;
+                    break;
+                }
 
         SHCLFORMAT const uLastFormat = consoleClipboardMimeTypeToFormat(mData->mLastItemMimeType);
         if (   mData->mfHaveLastItem
@@ -2657,37 +3380,55 @@ void Clipboard::i_reportFormats(uint32_t fFormats, ClipboardSource_T aSource, bo
         }
     }
 
+    LONG64 const i64Revision = fSourceChanged || fNotifyFormats ? i_nextEventRevision() : 0;
+    com::SafeIfaceArray<IClipboardFormat> aEventFormats(vecFormats);
+    ComPtr<IClipboardItem> ptrEventItem;
     if (ptrEventSource.isNotNull())
     {
         if (fSourceChanged)
         {
-            Log2Func(("Firing source changed event: source=%s\n", clipboardSourceToLogString(aSource)));
-            ::FireClipboardSourceChangedEvent(ptrEventSource, aSource);
+            Log2Func(("Firing source changed event: source=%s, revision=%RI64, clientId=%RU32\n",
+                      clipboardSourceToLogString(aSource), i64Revision, aClientId));
+            ::FireClipboardSourceChangedEvent(ptrEventSource, i64Revision, aClientId, aSource);
         }
         if (fNotifyFormats)
         {
-            Log2Func(("Firing format changed event: source=%s, fFormats=%#x, cFormats=%zu\n",
-                      clipboardSourceToLogString(aSource), fFormats, vecFormats.size()));
-            com::SafeIfaceArray<IClipboardFormat> aEventFormats(vecFormats);
-            ComPtr<IClipboardItem> ptrEventItem;
-            ::FireClipboardFormatChangedEvent(ptrEventSource, com::Utf8Str(), ptrEventItem, FALSE /* aVeto */, aSource,
-                                              ComSafeArrayAsInParam(aEventFormats));
+            Log2Func(("Firing format changed event: source=%s, fFormats=%#x, cFormats=%zu, revision=%RI64, clientId=%RU32\n",
+                      clipboardSourceToLogString(aSource), fFormats, vecFormats.size(), i64Revision, aClientId));
+            ::FireClipboardFormatChangedEvent(ptrEventSource, i64Revision, aClientId, com::Utf8Str(), ptrEventItem,
+                                              FALSE /* aVeto */, aSource, ComSafeArrayAsInParam(aEventFormats));
         }
     }
     else
         Log3Func(("No event source for reported formats: fFormats=%#x\n", fFormats));
+
+    if (fSourceChanged || fNotifyFormats)
+    {
+        std::vector<SessionEventTarget> vecTargets;
+        i_getSessionEventTargets(vecTargets, aClientId, true /* fPassive */, true /* fCheckReflection */, fFormats, aSource);
+        for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+        {
+            if (fSourceChanged)
+                ::FireClipboardSourceChangedEvent(it->mEventSource, i64Revision, aClientId, aSource);
+            if (fNotifyFormats)
+                ::FireClipboardFormatChangedEvent(it->mEventSource, i64Revision, aClientId, com::Utf8Str(), ptrEventItem,
+                                                  FALSE /* aVeto */, aSource, ComSafeArrayAsInParam(aEventFormats));
+        }
+    }
 }
 
 
 /**
  * Fires a clipboard data changed event.
  *
+ * @param   aClientId       Originating client identifier for the event.
  * @param   aAction         Clipboard action associated with the data.
  * @param   aSource         Clipboard source.
  * @param   aMimeType       MIME type of the payload.
  * @param   aBuffer         Payload bytes.
  */
-void Clipboard::i_fireDataChanged(ClipboardAction_T aAction,
+void Clipboard::i_fireDataChanged(VBOXSHCLMAINCLIENTID aClientId,
+                                  ClipboardAction_T aAction,
                                   ClipboardSource_T aSource,
                                   const com::Utf8Str &aMimeType,
                                   const std::vector<BYTE> &aBuffer)
@@ -2709,20 +3450,37 @@ void Clipboard::i_fireDataChanged(ClipboardAction_T aAction,
         return;
     }
 
-    Log2Func(("Firing data changed event: action=%RU32, source=%RU32, mime=%s, cb=%zu\n",
-              (uint32_t)aAction, (uint32_t)aSource, aMimeType.c_str(), aBuffer.size()));
-    ::FireClipboardDataChangedEvent(ptrEventSource, com::Utf8Str(), ptrItem, FALSE /* aVeto */, aAction);
+    LONG64 const i64Revision = i_nextEventRevision();
+    Log2Func(("Firing data changed event: action=%RU32, source=%RU32, mime=%s, cb=%zu, revision=%RI64, clientId=%RU32\n",
+              (uint32_t)aAction, (uint32_t)aSource, aMimeType.c_str(), aBuffer.size(), i64Revision, aClientId));
+    ::FireClipboardDataChangedEvent(ptrEventSource, i64Revision, aClientId, com::Utf8Str(), ptrItem,
+                                    FALSE /* aVeto */, aAction);
+
+    SHCLFORMAT const uFormat = consoleClipboardMimeTypeToFormat(aMimeType);
+    std::vector<SessionEventTarget> vecTargets;
+    i_getSessionEventTargets(vecTargets, aClientId, true /* fPassive */, uFormat != VBOX_SHCL_FMT_NONE /* fCheckReflection */,
+                             uFormat, aSource);
+    for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+    {
+        ComPtr<IClipboardItem> ptrSessionItem;
+        if (it->mfFlags & IClipboardSessionFlag_IncludePayload)
+            ptrSessionItem = ptrItem;
+        ::FireClipboardDataChangedEvent(it->mEventSource, i64Revision, aClientId, com::Utf8Str(), ptrSessionItem,
+                                        FALSE /* aVeto */, aAction);
+    }
 }
 
 
 /**
  * Fires a clipboard data requested event.
  *
+ * @param   aClientId       Originating client identifier for the request.
  * @param   aAction         Clipboard action associated with the request.
  * @param   aSource         Clipboard source from which data is requested.
  * @param   uFormat         Shared Clipboard format requested.
  */
-ULONG Clipboard::i_fireDataRequested(ClipboardAction_T aAction,
+ULONG Clipboard::i_fireDataRequested(VBOXSHCLMAINCLIENTID aClientId,
+                                     ClipboardAction_T aAction,
                                      ClipboardSource_T aSource,
                                      uint32_t uFormat)
 {
@@ -2778,17 +3536,28 @@ ULONG Clipboard::i_fireDataRequested(ClipboardAction_T aAction,
 
         Data::PendingDataRequest req;
         req.mId = idRequest;
+        req.mClientId = aClientId;
         req.mAction = aAction;
         req.mSource = aSource;
         req.mFormat = (SHCLFORMAT)uFormat;
-        mData->mPendingDataRequests.push_back(req);
+        try
+        {
+            mData->mPendingDataRequests.push_back(req);
+        }
+        catch (std::bad_alloc &)
+        {
+            LogFunc(("Out of memory registering pending clipboard data request\n"));
+            return 0;
+        }
     }
 
-    Log2Func(("Firing data requested event: requestId=%RU32, action=%RU32, source=%RU32, mime=%s\n",
-              (uint32_t)idRequest, (uint32_t)aAction, (uint32_t)aSource, strMimeType.c_str()));
+    LONG64 const i64Revision = i_nextEventRevision();
+    Log2Func(("Firing data requested event: requestId=%RU32, action=%RU32, source=%RU32, mime=%s, revision=%RI64, clientId=%RU32\n",
+              (uint32_t)idRequest, (uint32_t)aAction, (uint32_t)aSource, strMimeType.c_str(), i64Revision, aClientId));
     ComPtr<IClipboardItem> ptrItem;
     ComPtr<IEvent> ptrEvent;
-    hrc = ::CreateClipboardDataRequestedEvent(ptrEvent.asOutParam(), ptrEventSource, com::Utf8Str(), ptrItem, FALSE /* aVeto */,
+    hrc = ::CreateClipboardDataRequestedEvent(ptrEvent.asOutParam(), ptrEventSource, i64Revision, aClientId,
+                                              com::Utf8Str(), ptrItem, FALSE /* aVeto */,
                                               idRequest, aAction, aSource, ptrFormat);
     if (FAILED(hrc))
     {
@@ -2807,6 +3576,14 @@ ULONG Clipboard::i_fireDataRequested(ClipboardAction_T aAction,
         LogFunc(("Firing data requested event failed: requestId=%RU32, hrc=%#x\n", (uint32_t)idRequest, hrc));
         return 0;
     }
+
+    std::vector<SessionEventTarget> vecTargets;
+    i_getSessionEventTargets(vecTargets, aClientId, false /* fPassive */, false /* fCheckReflection */,
+                             VBOX_SHCL_FMT_NONE, aSource);
+    for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+        ::FireClipboardDataRequestedEvent(it->mEventSource, i64Revision, aClientId, com::Utf8Str(), ptrItem,
+                                          FALSE /* aVeto */, idRequest, aAction, aSource, ptrFormat);
+
     return idRequest;
 }
 
@@ -2824,8 +3601,18 @@ void Clipboard::i_fireClipboardError(const com::Utf8Str &aId, const com::Utf8Str
     HRESULT hrc = getEventSource(ptrEventSource);
     if (SUCCEEDED(hrc) && ptrEventSource.isNotNull())
     {
-        LogFunc(("Firing clipboard error event: id=%s, rc=%RI32, msg=%s\n", aId.c_str(), aRc, aErrMsg.c_str()));
-        ::FireClipboardErrorEvent(ptrEventSource, aId, NULL /* aItem */, FALSE /* aVeto */, aErrMsg, aRc);
+        LONG64 const i64Revision = i_nextEventRevision();
+        LogFunc(("Firing clipboard error event: id=%s, rc=%RI32, msg=%s, revision=%RI64\n",
+                 aId.c_str(), aRc, aErrMsg.c_str(), i64Revision));
+        ::FireClipboardErrorEvent(ptrEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE, aId, NULL /* aItem */,
+                                  FALSE /* aVeto */, aErrMsg, aRc);
+
+        std::vector<SessionEventTarget> vecTargets;
+        i_getSessionEventTargets(vecTargets, VBOX_SHCL_MAIN_CLIENT_NONE, true /* fPassive */, false /* fCheckReflection */,
+                                 VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
+        for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+            ::FireClipboardErrorEvent(it->mEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE, aId, NULL /* aItem */,
+                                      FALSE /* aVeto */, aErrMsg, aRc);
     }
 }
 
@@ -2841,8 +3628,15 @@ void Clipboard::i_fireClipboardModeChanged(ClipboardMode_T aClipboardMode)
     HRESULT hrc = getEventSource(ptrEventSource);
     if (SUCCEEDED(hrc) && ptrEventSource.isNotNull())
     {
-        Log2Func(("Firing mode changed event: mode=%RU32\n", (uint32_t)aClipboardMode));
-        ::FireClipboardModeChangedEvent(ptrEventSource, aClipboardMode);
+        LONG64 const i64Revision = i_nextEventRevision();
+        Log2Func(("Firing mode changed event: mode=%RU32, revision=%RI64\n", (uint32_t)aClipboardMode, i64Revision));
+        ::FireClipboardModeChangedEvent(ptrEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE, aClipboardMode);
+
+        std::vector<SessionEventTarget> vecTargets;
+        i_getSessionEventTargets(vecTargets, VBOX_SHCL_MAIN_CLIENT_NONE, true /* fPassive */, false /* fCheckReflection */,
+                                 VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
+        for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+            ::FireClipboardModeChangedEvent(it->mEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE, aClipboardMode);
     }
 }
 
@@ -2858,9 +3652,54 @@ void Clipboard::i_fireClipboardFileTransferModeChanged(bool fEnabled)
     HRESULT hrc = getEventSource(ptrEventSource);
     if (SUCCEEDED(hrc) && ptrEventSource.isNotNull())
     {
-        Log2Func(("Firing file transfer mode changed event: fEnabled=%RTbool\n", fEnabled));
-        ::FireClipboardFileTransferModeChangedEvent(ptrEventSource, fEnabled ? TRUE : FALSE);
+        LONG64 const i64Revision = i_nextEventRevision();
+        Log2Func(("Firing file transfer mode changed event: fEnabled=%RTbool, revision=%RI64\n", fEnabled, i64Revision));
+        ::FireClipboardFileTransferModeChangedEvent(ptrEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                                    fEnabled ? TRUE : FALSE);
+
+        std::vector<SessionEventTarget> vecTargets;
+        i_getSessionEventTargets(vecTargets, VBOX_SHCL_MAIN_CLIENT_NONE, true /* fPassive */, false /* fCheckReflection */,
+                                 VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
+        for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+            ::FireClipboardFileTransferModeChangedEvent(it->mEventSource, i64Revision, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                                        fEnabled ? TRUE : FALSE);
     }
+}
+
+
+/**
+ * Fires a clipboard transfer event.
+ *
+ * @param   aClientId       Originating client identifier.
+ * @param   aTransfer       Transfer associated with the event.
+ * @param   aState          Transfer state.
+ * @param   aMessage        Optional event message.
+ * @param   aError          Clipboard transfer error code.
+ */
+void Clipboard::i_fireClipboardTransferEvent(VBOXSHCLMAINCLIENTID aClientId,
+                                             IClipboardTransfer *aTransfer,
+                                             ClipboardTransferState_T aState,
+                                             const com::Utf8Str &aMessage,
+                                             ClipboardError_T aError)
+{
+    ComPtr<IEventSource> ptrEventSource;
+    HRESULT hrc = getEventSource(ptrEventSource);
+    if (FAILED(hrc) || ptrEventSource.isNull())
+    {
+        Log3Func(("No event source for transfer event: hrc=%#x\n", hrc));
+        return;
+    }
+
+    LONG64 const i64Revision = i_nextEventRevision();
+    Log2Func(("Firing transfer event: transfer=%p, state=%RU32, revision=%RI64, clientId=%RU32\n",
+              (void *)aTransfer, (uint32_t)aState, i64Revision, aClientId));
+    ::FireClipboardTransferEvent(ptrEventSource, i64Revision, aClientId, aTransfer, aState, aMessage, aError);
+
+    std::vector<SessionEventTarget> vecTargets;
+    i_getSessionEventTargets(vecTargets, aClientId, true /* fPassive */, false /* fCheckReflection */,
+                             VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
+    for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
+        ::FireClipboardTransferEvent(it->mEventSource, i64Revision, aClientId, aTransfer, aState, aMessage, aError);
 }
 
 
@@ -2950,4 +3789,3 @@ int Clipboard::i_changeFileTransferMode(bool fEnabled)
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 
-/* vi: set tabstop=4 shiftwidth=4 expandtab: */

@@ -92,6 +92,23 @@ typedef uint32_t SHCLFORMATS;
 /** Pointer to a bit map of Shared Clipboard formats (VBOX_SHCL_FMT_XXX). */
 typedef SHCLFORMATS *PSHCLFORMATS;
 
+/** Main API Shared Clipboard client/session identifier. */
+typedef uint32_t SHCLMAINCLIENTID;
+/** Pointer to a Main API Shared Clipboard client/session identifier. */
+typedef SHCLMAINCLIENTID *PSHCLMAINCLIENTID;
+/** Main API Shared Clipboard client/session identifier. */
+typedef SHCLMAINCLIENTID VBOXSHCLMAINCLIENTID;
+/** Pointer to a Main API Shared Clipboard client/session identifier. */
+typedef VBOXSHCLMAINCLIENTID *PVBOXSHCLMAINCLIENTID;
+/** No Main API Shared Clipboard client/session.
+ *
+ * Used for events and operations that were not originated by an
+ * IClipboardSession, such as direct IClipboard calls, calls through
+ * IClipboard::hostClipboard, guest/backend-originated events, and internal
+ * clipboard state changes.
+ */
+#define VBOX_SHCL_MAIN_CLIENT_NONE      UINT32_C(0)
+
 /** ClipboardSource_T values. */
 enum
 {

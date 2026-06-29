@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferManagerImpl.cpp 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferManagerImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer manager object.
  */
@@ -30,10 +30,12 @@
 
 #include "VirtualBoxBase.h"
 #include "AutoCaller.h"
+#include "ClipboardImpl.h"
 #include "ClipboardTransferManagerImpl.h"
 #include "VBoxEvents.h"
 
 #include <VBox/com/ErrorInfo.h>
+#include <VBox/GuestHost/SharedClipboard.h>
 
 #include <iprt/errcore.h>
 
@@ -69,13 +71,18 @@ void ClipboardTransferManager::FinalRelease()
  * Initializes a clipboard transfer manager object.
  *
  * @returns COM status code.
+ * @param   aEventSource    Optional event source used to emit anonymous transfer
+ *                          events when no parent clipboard object is available.
+ * @param   aParent         Optional parent clipboard object used to fire transfer
+ *                          events with clipboard revision/session context.
  */
-HRESULT ClipboardTransferManager::init(IEventSource *aEventSource /* = NULL */)
+HRESULT ClipboardTransferManager::init(IEventSource *aEventSource /* = NULL */, Clipboard *aParent /* = NULL */)
 {
-    Log2Func(("aEventSource=%p\n", aEventSource));
+    Log2Func(("aEventSource=%p, aParent=%p\n", aEventSource, aParent));
     AutoInitSpan autoInitSpan(this);
     AssertReturn(autoInitSpan.isOk(), E_FAIL);
 
+    mData.mParent = aParent;
     mData.mEventSource = aEventSource;
     mData.mTransfers.clear();
 
@@ -97,6 +104,7 @@ void ClipboardTransferManager::uninit()
     AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
     mData.mTransfers.clear();
     mData.mEventSource.setNull();
+    mData.mParent = NULL;
 }
 
 
@@ -116,14 +124,61 @@ void ClipboardTransferManager::i_reset()
         Log2Func(("Detached %zu transfers during reset\n", aTransfers.size()));
     }
 
+    RT_NOREF(ptrEventSource);
+    for (std::vector<ComPtr<IClipboardTransfer> >::const_iterator it = aTransfers.begin();
+         it != aTransfers.end(); ++it)
+    {
+        Log2Func(("Firing transfer removed event during reset: transfer=%p\n", (void *)*it));
+        i_fireTransferEvent(*it, ClipboardTransferState_Removed, com::Utf8Str(), ClipboardError_None);
+    }
+}
+
+
+/**
+ * Fires a clipboard transfer event through the parent clipboard object when available.
+ * If there is no parent clipboard object, emits an anonymous event directly on
+ * the stored event source.
+ *
+ * @param   aTransfer       Transfer associated with the event.
+ * @param   aState          Transfer state.
+ * @param   aMessage        Optional event message.
+ * @param   aError          Clipboard transfer error code.
+ */
+void ClipboardTransferManager::i_fireTransferEvent(IClipboardTransfer *aTransfer,
+                                                   ClipboardTransferState_T aState,
+                                                   const com::Utf8Str &aMessage,
+                                                   ClipboardError_T aError)
+{
+    Clipboard *pParent = NULL;
+    ComPtr<IEventSource> ptrEventSource;
+    AutoCaller autoCaller;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        pParent = mData.mParent;
+        if (pParent)
+            autoCaller.attach(pParent);
+        else
+            ptrEventSource = mData.mEventSource;
+    }
+
+    if (pParent)
+    {
+        if (SUCCEEDED(autoCaller.hrc()))
+            pParent->i_fireClipboardTransferEvent(VBOX_SHCL_MAIN_CLIENT_NONE, aTransfer, aState, aMessage, aError);
+        else
+            LogFunc(("Cannot fire clipboard transfer event through parent: hrc=%#x\n", autoCaller.hrc()));
+        return;
+    }
+
     if (ptrEventSource.isNotNull())
-        for (std::vector<ComPtr<IClipboardTransfer> >::const_iterator it = aTransfers.begin();
-             it != aTransfers.end(); ++it)
-        {
-            Log2Func(("Firing transfer removed event during reset: transfer=%p\n", (void *)*it));
-            ::FireClipboardTransferEvent(ptrEventSource, *it, ClipboardTransferState_Removed,
-                                         com::Utf8Str(), ClipboardError_None);
-        }
+    {
+        /*
+         * No parent Clipboard is available to supply a live revision or session
+         * fan-out context. Keep this legacy event anonymous.
+         */
+        ::FireClipboardTransferEvent(ptrEventSource, 0 /* anonymous revision */, VBOX_SHCL_MAIN_CLIENT_NONE,
+                                     aTransfer, aState, aMessage, aError);
+    }
 }
 
 
@@ -157,19 +212,18 @@ HRESULT ClipboardTransferManager::add(const ComPtr<IClipboardTransfer> &aTransfe
         return E_INVALIDARG;
     }
 
-    ComPtr<IEventSource> ptrEventSource;
+    bool fFireEvent = false;
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
         mData.mTransfers.push_back(aTransfer);
         Log2Func(("Added transfer: cTransfers=%zu\n", mData.mTransfers.size()));
-        ptrEventSource = mData.mEventSource;
+        fFireEvent = mData.mParent != NULL || mData.mEventSource.isNotNull();
     }
 
-    if (ptrEventSource.isNotNull())
+    if (fFireEvent)
     {
         Log2Func(("Firing transfer added event: transfer=%p\n", (void *)aTransfer));
-        ::FireClipboardTransferEvent(ptrEventSource, aTransfer, ClipboardTransferState_Added,
-                                     com::Utf8Str(), ClipboardError_None);
+        i_fireTransferEvent(aTransfer, ClipboardTransferState_Added, com::Utf8Str(), ClipboardError_None);
     }
     return S_OK;
 }
@@ -190,8 +244,8 @@ HRESULT ClipboardTransferManager::remove(const ComPtr<IClipboardTransfer> &aTran
         return E_INVALIDARG;
     }
 
-    ComPtr<IEventSource> ptrEventSource;
     bool fRemoved = false;
+    bool fFireEvent = false;
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
         for (std::vector<ComPtr<IClipboardTransfer> >::iterator it = mData.mTransfers.begin();
@@ -200,17 +254,16 @@ HRESULT ClipboardTransferManager::remove(const ComPtr<IClipboardTransfer> &aTran
             {
                 mData.mTransfers.erase(it);
                 Log2Func(("Removed transfer: cTransfers=%zu\n", mData.mTransfers.size()));
-                ptrEventSource = mData.mEventSource;
+                fFireEvent = mData.mParent != NULL || mData.mEventSource.isNotNull();
                 fRemoved = true;
                 break;
             }
     }
 
-    if (fRemoved && ptrEventSource.isNotNull())
+    if (fRemoved && fFireEvent)
     {
         Log2Func(("Firing transfer removed event: transfer=%p\n", (void *)aTransfer));
-        ::FireClipboardTransferEvent(ptrEventSource, aTransfer, ClipboardTransferState_Removed,
-                                     com::Utf8Str(), ClipboardError_None);
+        i_fireTransferEvent(aTransfer, ClipboardTransferState_Removed, com::Utf8Str(), ClipboardError_None);
     }
     else if (!fRemoved)
         Log2Func(("Transfer not found for remove: transfer=%p\n", (void *)aTransfer));
@@ -233,8 +286,8 @@ HRESULT ClipboardTransferManager::cancel(const ComPtr<IClipboardTransfer> &aTran
         return E_INVALIDARG;
     }
 
-    ComPtr<IEventSource> ptrEventSource;
     bool fCanceled = false;
+    bool fFireEvent = false;
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
         for (std::vector<ComPtr<IClipboardTransfer> >::iterator it = mData.mTransfers.begin();
@@ -243,17 +296,16 @@ HRESULT ClipboardTransferManager::cancel(const ComPtr<IClipboardTransfer> &aTran
             {
                 mData.mTransfers.erase(it);
                 Log2Func(("Canceled transfer: cTransfers=%zu\n", mData.mTransfers.size()));
-                ptrEventSource = mData.mEventSource;
+                fFireEvent = mData.mParent != NULL || mData.mEventSource.isNotNull();
                 fCanceled = true;
                 break;
             }
     }
 
-    if (fCanceled && ptrEventSource.isNotNull())
+    if (fCanceled && fFireEvent)
     {
         Log2Func(("Firing transfer canceled event: transfer=%p\n", (void *)aTransfer));
-        ::FireClipboardTransferEvent(ptrEventSource, aTransfer, ClipboardTransferState_Canceled,
-                                     com::Utf8Str(), ClipboardError_None);
+        i_fireTransferEvent(aTransfer, ClipboardTransferState_Canceled, com::Utf8Str(), ClipboardError_None);
     }
     else if (!fCanceled)
         Log2Func(("Transfer not found for cancel: transfer=%p\n", (void *)aTransfer));
@@ -279,13 +331,12 @@ HRESULT ClipboardTransferManager::reset()
         Log2Func(("Detached %zu transfers during public reset\n", aTransfers.size()));
     }
 
-    if (ptrEventSource.isNotNull())
-        for (std::vector<ComPtr<IClipboardTransfer> >::const_iterator it = aTransfers.begin();
-             it != aTransfers.end(); ++it)
-        {
-            Log2Func(("Firing transfer removed event during public reset: transfer=%p\n", (void *)*it));
-            ::FireClipboardTransferEvent(ptrEventSource, *it, ClipboardTransferState_Removed,
-                                         com::Utf8Str(), ClipboardError_None);
-        }
+    RT_NOREF(ptrEventSource);
+    for (std::vector<ComPtr<IClipboardTransfer> >::const_iterator it = aTransfers.begin();
+         it != aTransfers.end(); ++it)
+    {
+        Log2Func(("Firing transfer removed event during public reset: transfer=%p\n", (void *)*it));
+        i_fireTransferEvent(*it, ClipboardTransferState_Removed, com::Utf8Str(), ClipboardError_None);
+    }
     return S_OK;
 }

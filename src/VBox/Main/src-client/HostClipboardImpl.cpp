@@ -1,4 +1,4 @@
-/* $Id: HostClipboardImpl.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: HostClipboardImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Host clipboard API object.
  */
@@ -67,16 +67,18 @@ void HostClipboard::FinalRelease()
  * Initializes a host clipboard object.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID this endpoint is associated with.
  * @param   aParent         Parent clipboard object.
  */
-HRESULT HostClipboard::init(Clipboard *aParent)
+HRESULT HostClipboard::init(VBOXSHCLMAINCLIENTID aClientId, Clipboard *aParent)
 {
-    Log2Func(("aParent=%p\n", aParent));
+    Log2Func(("aClientId=%RU32, aParent=%p\n", aClientId, aParent));
     AssertPtrReturn(aParent, E_INVALIDARG);
 
     AutoInitSpan autoInitSpan(this);
     AssertReturn(autoInitSpan.isOk(), E_FAIL);
 
+    mData.mClientId = aClientId;
     mData.mParent = aParent;
 
     autoInitSpan.setSucceeded();
@@ -95,6 +97,7 @@ void HostClipboard::uninit()
         return;
 
     AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    mData.mClientId = VBOX_SHCL_MAIN_CLIENT_NONE;
     mData.mParent = NULL;
 }
 
@@ -116,10 +119,12 @@ HRESULT HostClipboard::reportFormats(ClipboardAction_T aAction,
     Log2Func(("aAction=%RU32, aSource=%RU32, cFormats=%zu\n",
               (uint32_t)aAction, (uint32_t)aSource, aFormats.size()));
 
+    VBOXSHCLMAINCLIENTID idClient = VBOX_SHCL_MAIN_CLIENT_NONE;
     Clipboard *pParent = NULL;
     AutoCaller autoCaller;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        idClient = mData.mClientId;
         pParent = mData.mParent;
         if (pParent)
             autoCaller.attach(pParent);
@@ -128,7 +133,7 @@ HRESULT HostClipboard::reportFormats(ClipboardAction_T aAction,
         return setError(VBOX_E_SHCL_ERROR, tr("Host clipboard object is not initialized"));
     AssertComRCReturnRC(autoCaller.hrc());
 
-    return pParent->i_hostClipboardReportFormats(aAction, aSource, aFormats);
+    return pParent->i_hostClipboardReportFormats(idClient, aAction, aSource, aFormats);
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 }
 
@@ -152,10 +157,12 @@ HRESULT HostClipboard::provideData(ULONG aRequestId,
     Log2Func(("aRequestId=%RU32, aAction=%RU32, aSource=%RU32, aMimeType=%s, cb=%zu\n",
               (uint32_t)aRequestId, (uint32_t)aAction, (uint32_t)aSource, aMimeType.c_str(), aBuffer.size()));
 
+    VBOXSHCLMAINCLIENTID idClient = VBOX_SHCL_MAIN_CLIENT_NONE;
     Clipboard *pParent = NULL;
     AutoCaller autoCaller;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        idClient = mData.mClientId;
         pParent = mData.mParent;
         if (pParent)
             autoCaller.attach(pParent);
@@ -164,7 +171,7 @@ HRESULT HostClipboard::provideData(ULONG aRequestId,
         return setError(VBOX_E_SHCL_ERROR, tr("Host clipboard object is not initialized"));
     AssertComRCReturnRC(autoCaller.hrc());
 
-    return pParent->i_hostClipboardProvideData(aRequestId, aAction, aSource, aMimeType, aBuffer);
+    return pParent->i_hostClipboardProvideData(idClient, aRequestId, aAction, aSource, aMimeType, aBuffer);
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 }
 
@@ -187,10 +194,12 @@ HRESULT HostClipboard::setData(ClipboardAction_T aAction,
     Log2Func(("aAction=%RU32, aSource=%RU32, aMimeType=%s, cb=%zu\n",
               (uint32_t)aAction, (uint32_t)aSource, aMimeType.c_str(), aBuffer.size()));
 
+    VBOXSHCLMAINCLIENTID idClient = VBOX_SHCL_MAIN_CLIENT_NONE;
     Clipboard *pParent = NULL;
     AutoCaller autoCaller;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        idClient = mData.mClientId;
         pParent = mData.mParent;
         if (pParent)
             autoCaller.attach(pParent);
@@ -199,7 +208,7 @@ HRESULT HostClipboard::setData(ClipboardAction_T aAction,
         return setError(VBOX_E_SHCL_ERROR, tr("Host clipboard object is not initialized"));
     AssertComRCReturnRC(autoCaller.hrc());
 
-    return pParent->i_hostClipboardSetData(aAction, aSource, aMimeType, aBuffer);
+    return pParent->i_hostClipboardSetData(idClient, aAction, aSource, aMimeType, aBuffer);
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 }
 

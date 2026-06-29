@@ -1,4 +1,4 @@
-/* $Id: GuestShClSvcExt.cpp 114557 2026-06-26 13:42:09Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClSvcExt.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard service extension handling for Main.
  */
@@ -401,7 +401,8 @@ int GuestShCl::i_handleSvcExtReportFormatsToHost(PSHCLEXTPARMS pParms, void *pvP
 
     AssertPtr(m_pConsole->i_getClipboard());
     if (m_pConsole->i_getClipboard())
-        m_pConsole->i_getClipboard()->i_reportFormats(fFormats, ClipboardSource_Guest,
+        m_pConsole->i_getClipboard()->i_reportFormats(VBOX_SHCL_MAIN_CLIENT_NONE,
+                                                       fFormats, ClipboardSource_Guest,
                                                        true /* fForceNotify */);
 
     int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST, pvParms, cbParms);

@@ -1,4 +1,4 @@
-/* $Id: SessionImpl.cpp 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $ */
+/* $Id: SessionImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Client Session COM Class implementation in VBoxC.
  */
@@ -982,8 +982,9 @@ HRESULT Session::clipboardWriteData(ClipboardAction_T aAction,
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
-    return mConsole->i_getClipboard()->i_writeData(aAction, aSource, aMimeType, aBuffer,
-                                                      aWrittenSource, aWrittenMimeType, aWrittenBuffer);
+    return mConsole->i_getClipboard()->i_writeData(VBOX_SHCL_MAIN_CLIENT_NONE,
+                                                   aAction, aSource, aMimeType, aBuffer,
+                                                   aWrittenSource, aWrittenMimeType, aWrittenBuffer);
 #else
     RT_NOREF(aAction, aSource, aMimeType, aBuffer, aWrittenSource, aWrittenMimeType, aWrittenBuffer);
     return E_NOTIMPL;
@@ -1007,7 +1008,7 @@ HRESULT Session::clipboardWriteFormats(const std::vector<Utf8Str> &aFormats)
     AssertReturn(mConsole, VBOX_E_INVALID_OBJECT_STATE);
 
     AssertReturn(mConsole->i_getClipboard(), VBOX_E_INVALID_OBJECT_STATE);
-    return mConsole->i_getClipboard()->i_writeFormats(aFormats);
+    return mConsole->i_getClipboard()->i_writeFormats(VBOX_SHCL_MAIN_CLIENT_NONE, aFormats);
 #else
     RT_NOREF(aFormats);
     return E_NOTIMPL;
@@ -1542,4 +1543,3 @@ HRESULT Session::i_unlockMachine(bool aFinalRelease, bool aFromServer, AutoWrite
     return S_OK;
 }
 
-/* vi: set tabstop=4 shiftwidth=4 expandtab: */

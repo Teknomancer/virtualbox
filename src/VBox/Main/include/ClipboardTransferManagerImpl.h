@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferManagerImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferManagerImpl.h 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer manager object.
  */
@@ -35,6 +35,8 @@
 
 #include <vector>
 
+class Clipboard;
+
 /**
  * Clipboard transfer manager object.
  */
@@ -48,13 +50,18 @@ public:
     HRESULT FinalConstruct();
     void FinalRelease();
 
-    HRESULT init(IEventSource *aEventSource = NULL);
+    HRESULT init(IEventSource *aEventSource = NULL, Clipboard *aParent = NULL);
     void uninit();
 
     /** Resets the internally tracked transfer list. */
     void i_reset();
 
 private:
+
+    void i_fireTransferEvent(IClipboardTransfer *aTransfer,
+                             ClipboardTransferState_T aState,
+                             const com::Utf8Str &aMessage,
+                             ClipboardError_T aError);
 
     /** @name Wrapped IClipboardTransferManager properties and methods
      * @{ */
@@ -67,6 +74,12 @@ private:
 
     struct Data
     {
+        Data()
+            : mParent(NULL)
+        { }
+
+        /** Parent clipboard object. */
+        Clipboard *mParent;
         /** Clipboard event source. */
         ComPtr<IEventSource> mEventSource;
         /** Current clipboard transfers. */

@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114557 2026-06-26 13:42:09Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -637,7 +637,8 @@ int GuestShCl::ReportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, S
     {
         AssertPtr(m_pConsole->i_getClipboard());
         if (m_pConsole->i_getClipboard())
-            m_pConsole->i_getClipboard()->i_reportFormats(fFormats, enmClipboardSource, true /* fForceNotify */);
+            m_pConsole->i_getClipboard()->i_reportFormats(VBOX_SHCL_MAIN_CLIENT_NONE,
+                                                          fFormats, enmClipboardSource, true /* fForceNotify */);
     }
     return vrc;
 }

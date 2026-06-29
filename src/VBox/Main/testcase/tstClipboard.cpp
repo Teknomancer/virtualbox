@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -34,6 +34,7 @@
 #include <VBox/com/ErrorInfo.h>
 #include <VBox/com/string.h>
 #include <VBox/com/VirtualBox.h>
+#include <VBox/GuestHost/SharedClipboard.h>
 #include <VBox/log.h>
 
 #include <iprt/log.h>
@@ -55,6 +56,8 @@ using namespace com;
 *********************************************************************************************************************************/
 /** The testcase logger. */
 static PRTLOGGER    g_pLogger;
+
+
 
 
 /*********************************************************************************************************************************
@@ -203,6 +206,484 @@ static bool tstReadDataRawEquals(IClipboard *pClipboard, const char *pszWhat, Cl
 
     return fRc;
 }
+
+
+/**
+ * Creates a clipboard session through the public Main API.
+ */
+static HRESULT tstCreateSession(IClipboard *pClipboard, const IClipboardSessionFlag_T *paFlags, size_t cFlags,
+                                ComPtr<IClipboardSession> &ptrSession)
+{
+    AssertPtrReturn(pClipboard, E_POINTER);
+    if (cFlags && !paFlags)
+        return E_POINTER;
+
+    SafeArray<IClipboardSessionFlag_T> aFlags;
+    for (size_t i = 0; i < cFlags; i++)
+        if (!aFlags.push_back(paFlags[i]))
+            return E_OUTOFMEMORY;
+
+    return pClipboard->CreateSession(ComSafeArrayAsInParam(aFlags), ptrSession.asOutParam());
+}
+
+
+
+/**
+ * Registers a passive listener for the specified event types.
+ */
+static HRESULT tstRegisterClipboardListener(IEventSource *pEventSource, const VBoxEventType_T *paEventTypes, size_t cEventTypes,
+                                            ComPtr<IEventListener> &ptrListener)
+{
+    AssertPtrReturn(pEventSource, E_POINTER);
+    AssertPtrReturn(paEventTypes, E_POINTER);
+    AssertReturn(cEventTypes > 0, E_INVALIDARG);
+
+    ptrListener.setNull();
+    HRESULT hrc = pEventSource->CreateListener(ptrListener.asOutParam());
+    if (FAILED(hrc))
+        return hrc;
+
+    SafeArray<VBoxEventType_T> aEventTypes;
+    for (size_t i = 0; i < cEventTypes; i++)
+        if (!aEventTypes.push_back(paEventTypes[i]))
+            return E_OUTOFMEMORY;
+
+    hrc = pEventSource->RegisterListener(ptrListener, ComSafeArrayAsInParam(aEventTypes), FALSE /* aActive */);
+    if (FAILED(hrc))
+        ptrListener.setNull();
+    return hrc;
+}
+
+
+/**
+ * Marks a waitable event as processed.  Passive clipboard listeners should normally see non-waitable events.
+ */
+static void tstClipboardMaybeProcessEvent(IEventSource *pEventSource, IEventListener *pListener, IEvent *pEvent)
+{
+    AssertPtrReturnVoid(pEventSource);
+    AssertPtrReturnVoid(pListener);
+    AssertPtrReturnVoid(pEvent);
+
+    BOOL fWaitable = FALSE;
+    HRESULT hrc = pEvent->COMGETTER(Waitable)(&fWaitable);
+    if (SUCCEEDED(hrc) && fWaitable)
+        pEventSource->EventProcessed(pListener, pEvent);
+}
+
+
+static bool tstClipboardIsEventTypeExpected(VBoxEventType_T enmType, const VBoxEventType_T *paExpectedTypes, size_t cExpectedTypes)
+{
+    for (size_t i = 0; i < cExpectedTypes; i++)
+        if (paExpectedTypes[i] == enmType)
+            return true;
+    return false;
+}
+
+
+/**
+ * Waits for the next event and verifies that it has one of the expected types.
+ */
+static bool tstClipboardWaitForAnyEvent(IEventSource *pEventSource, IEventListener *pListener,
+                                        const VBoxEventType_T *paExpectedTypes, size_t cExpectedTypes,
+                                        uint32_t cMsTimeout, const char *pszWhat,
+                                        ComPtr<IEvent> &ptrEvent, VBoxEventType_T *penmType)
+{
+    AssertPtrReturn(pEventSource, false);
+    AssertPtrReturn(pListener, false);
+    AssertPtrReturn(paExpectedTypes, false);
+    AssertPtrReturn(pszWhat, false);
+    AssertPtrReturn(penmType, false);
+
+    ptrEvent.setNull();
+    *penmType = VBoxEventType_Invalid;
+
+    HRESULT hrc = pEventSource->GetEvent(pListener, cMsTimeout, ptrEvent.asOutParam());
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: GetEvent failed, hrc=%Rhrc\n", pszWhat, hrc);
+        return false;
+    }
+    if (ptrEvent.isNull())
+    {
+        RTTestIFailed("%s: GetEvent returned no event\n", pszWhat);
+        return false;
+    }
+
+    hrc = ptrEvent->COMGETTER(Type)(penmType);
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(Type) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        tstClipboardMaybeProcessEvent(pEventSource, pListener, ptrEvent);
+        return false;
+    }
+
+    if (!tstClipboardIsEventTypeExpected(*penmType, paExpectedTypes, cExpectedTypes))
+    {
+        RTTestIFailed("%s: GetEvent returned type %d\n", pszWhat, *penmType);
+        tstClipboardMaybeProcessEvent(pEventSource, pListener, ptrEvent);
+        return false;
+    }
+
+    return true;
+}
+
+
+/**
+ * Verifies that a listener has no queued event.
+ */
+static bool tstClipboardExpectNoEvent(IEventSource *pEventSource, IEventListener *pListener, uint32_t cMsTimeout,
+                                      const char *pszWhat)
+{
+    AssertPtrReturn(pEventSource, false);
+    AssertPtrReturn(pListener, false);
+    AssertPtrReturn(pszWhat, false);
+
+    ComPtr<IEvent> ptrEvent;
+    HRESULT hrc = pEventSource->GetEvent(pListener, cMsTimeout, ptrEvent.asOutParam());
+    if (   hrc == VBOX_E_OBJECT_NOT_FOUND
+        || (SUCCEEDED(hrc) && ptrEvent.isNull()))
+        return true;
+
+    VBoxEventType_T enmType = VBoxEventType_Invalid;
+    if (SUCCEEDED(hrc))
+        ptrEvent->COMGETTER(Type)(&enmType);
+    RTTestIFailed("%s: unexpected event, hrc=%Rhrc, type=%d\n", pszWhat, hrc, enmType);
+    if (ptrEvent.isNotNull())
+        tstClipboardMaybeProcessEvent(pEventSource, pListener, ptrEvent);
+    return false;
+}
+
+
+/**
+ * Verifies the metadata common to clipboard event interfaces.
+ */
+template <typename EventT>
+static bool tstClipboardCheckEventMetadata(EventT *pEvent, const char *pszWhat, ULONG idExpectedClient,
+                                           LONG64 *pi64Revision = NULL)
+{
+    AssertPtrReturn(pEvent, false);
+    AssertPtrReturn(pszWhat, false);
+
+    bool fRc = true;
+    LONG64 i64Revision = 0;
+    HRESULT hrc = pEvent->COMGETTER(Revision)(&i64Revision);
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(Revision) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (i64Revision <= 0)
+    {
+        RTTestIFailed("%s: revision is %RI64\n", pszWhat, i64Revision);
+        fRc = false;
+    }
+
+    ULONG idClient = UINT32_MAX;
+    hrc = pEvent->COMGETTER(ClientId)(&idClient);
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(ClientId) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (idClient != idExpectedClient)
+    {
+        RTTestIFailed("%s: client ID %RU32, expected %RU32\n", pszWhat, (uint32_t)idClient, (uint32_t)idExpectedClient);
+        fRc = false;
+    }
+
+    if (pi64Revision)
+        *pi64Revision = i64Revision;
+    return fRc;
+}
+
+
+template <typename EventT>
+static bool tstClipboardCheckEventMetadata(const ComPtr<EventT> &ptrEvent, const char *pszWhat, ULONG idExpectedClient,
+                                           LONG64 *pi64Revision = NULL)
+{
+    return tstClipboardCheckEventMetadata((EventT *)ptrEvent, pszWhat, idExpectedClient, pi64Revision);
+}
+
+
+/**
+ * Checks whether a format array contains exactly the expected MIME type.
+ */
+static bool tstClipboardCheckSingleFormat(SafeIfaceArray<IClipboardFormat> &aFormats, const char *pszExpectedMimeType,
+                                          const char *pszWhat)
+{
+    AssertPtrReturn(pszExpectedMimeType, false);
+    AssertPtrReturn(pszWhat, false);
+
+    if (aFormats.size() != 1)
+    {
+        RTTestIFailed("%s: got %zu formats, expected 1\n", pszWhat, aFormats.size());
+        return false;
+    }
+
+    Bstr bstrMimeType;
+    HRESULT hrc = aFormats[0]->COMGETTER(MimeType)(bstrMimeType.asOutParam());
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(MimeType) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        return false;
+    }
+
+    Utf8Str strMimeType(bstrMimeType);
+    if (!RTStrCmp(strMimeType.c_str(), pszExpectedMimeType))
+        return true;
+
+    RTTestIFailed("%s: format MIME '%s', expected '%s'\n", pszWhat, strMimeType.c_str(), pszExpectedMimeType);
+    return false;
+}
+
+
+/**
+ * Verifies a clipboard item payload.
+ */
+static bool tstClipboardCheckItemPayload(IClipboardItem *pItem, const char *pszWhat, ClipboardSource_T enmExpectedSource,
+                                         const char *pszExpectedMimeType, const std::vector<BYTE> &abExpected)
+{
+    AssertPtrReturn(pItem, false);
+    AssertPtrReturn(pszWhat, false);
+    AssertPtrReturn(pszExpectedMimeType, false);
+
+    bool fRc = true;
+    ClipboardSource_T enmSource = ClipboardSource_Custom;
+    HRESULT hrc = pItem->COMGETTER(Source)(&enmSource);
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: IClipboardItem::COMGETTER(Source) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (enmSource != enmExpectedSource)
+    {
+        RTTestIFailed("%s: item source %d, expected %d\n", pszWhat, enmSource, enmExpectedSource);
+        fRc = false;
+    }
+
+    ComPtr<IClipboardFormat> ptrFormat;
+    hrc = pItem->COMGETTER(Format)(ptrFormat.asOutParam());
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: IClipboardItem::COMGETTER(Format) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (ptrFormat.isNull())
+    {
+        RTTestIFailed("%s: item has no format\n", pszWhat);
+        fRc = false;
+    }
+    else
+    {
+        Bstr bstrMimeType;
+        hrc = ptrFormat->COMGETTER(MimeType)(bstrMimeType.asOutParam());
+        if (FAILED(hrc))
+        {
+            RTTestIFailed("%s: IClipboardFormat::COMGETTER(MimeType) failed, hrc=%Rhrc\n", pszWhat, hrc);
+            fRc = false;
+        }
+        else
+        {
+            Utf8Str strMimeType(bstrMimeType);
+            if (RTStrCmp(strMimeType.c_str(), pszExpectedMimeType))
+            {
+                RTTestIFailed("%s: item MIME '%s', expected '%s'\n", pszWhat, strMimeType.c_str(), pszExpectedMimeType);
+                fRc = false;
+            }
+        }
+    }
+
+    SafeArray<BYTE> aBuffer;
+    hrc = pItem->COMGETTER(Buffer)(ComSafeArrayAsOutParam(aBuffer));
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: IClipboardItem::COMGETTER(Buffer) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (!tstByteArrayEquals(aBuffer, abExpected))
+    {
+        RTTestIFailed("%s: item payload has %zu bytes, expected %zu\n", pszWhat, aBuffer.size(), abExpected.size());
+        fRc = false;
+    }
+
+    return fRc;
+}
+
+
+/**
+ * Reads the possibly-null IClipboardEvent::item payload from a concrete clipboard event.
+ */
+static bool tstClipboardGetEventItem(IEvent *pEvent, const char *pszWhat, ComPtr<IClipboardItem> &ptrItem)
+{
+    AssertPtrReturn(pEvent, false);
+    AssertPtrReturn(pszWhat, false);
+
+    ptrItem.setNull();
+    ComPtr<IClipboardEvent> ptrClipboardEvent(pEvent);
+    if (ptrClipboardEvent.isNull())
+    {
+        RTTestIFailed("%s: event does not implement IClipboardEvent\n", pszWhat);
+        return false;
+    }
+
+    HRESULT hrc = ptrClipboardEvent->COMGETTER(Item)(ptrItem.asOutParam());
+    if (SUCCEEDED(hrc))
+        return true;
+
+    RTTestIFailed("%s: IClipboardEvent::COMGETTER(Item) failed, hrc=%Rhrc\n", pszWhat, hrc);
+    return false;
+}
+
+
+/**
+ * Verifies an OnClipboardDataChanged event and optionally returns its inherited item.
+ */
+static bool tstClipboardCheckDataChangedEvent(IEvent *pEvent, const char *pszWhat, ULONG idExpectedClient,
+                                              ClipboardAction_T enmExpectedAction, ComPtr<IClipboardItem> *pptrItem,
+                                              LONG64 *pi64Revision = NULL)
+{
+    AssertPtrReturn(pEvent, false);
+    AssertPtrReturn(pszWhat, false);
+
+    ComPtr<IClipboardDataChangedEvent> ptrDataEvent(pEvent);
+    if (ptrDataEvent.isNull())
+    {
+        RTTestIFailed("%s: event does not implement IClipboardDataChangedEvent\n", pszWhat);
+        return false;
+    }
+
+    bool fRc = tstClipboardCheckEventMetadata(ptrDataEvent, pszWhat, idExpectedClient, pi64Revision);
+
+    ClipboardAction_T enmAction = ClipboardAction_Custom;
+    HRESULT hrc = ptrDataEvent->COMGETTER(Action)(&enmAction);
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(Action) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (enmAction != enmExpectedAction)
+    {
+        RTTestIFailed("%s: action %d, expected %d\n", pszWhat, enmAction, enmExpectedAction);
+        fRc = false;
+    }
+
+    if (pptrItem && !tstClipboardGetEventItem(pEvent, pszWhat, *pptrItem))
+        fRc = false;
+    return fRc;
+}
+
+
+/**
+ * Verifies an OnClipboardFormatChanged event.
+ */
+static bool tstClipboardCheckFormatChangedEvent(IEvent *pEvent, const char *pszWhat, ULONG idExpectedClient,
+                                                ClipboardSource_T enmExpectedSource, const char *pszExpectedMimeType,
+                                                LONG64 *pi64Revision = NULL)
+{
+    AssertPtrReturn(pEvent, false);
+    AssertPtrReturn(pszWhat, false);
+    AssertPtrReturn(pszExpectedMimeType, false);
+
+    ComPtr<IClipboardFormatChangedEvent> ptrFormatEvent(pEvent);
+    if (ptrFormatEvent.isNull())
+    {
+        RTTestIFailed("%s: event does not implement IClipboardFormatChangedEvent\n", pszWhat);
+        return false;
+    }
+
+    bool fRc = tstClipboardCheckEventMetadata(ptrFormatEvent, pszWhat, idExpectedClient, pi64Revision);
+
+    ClipboardSource_T enmSource = ClipboardSource_Custom;
+    HRESULT hrc = ptrFormatEvent->COMGETTER(ClipboardSource)(&enmSource);
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(ClipboardSource) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (enmSource != enmExpectedSource)
+    {
+        RTTestIFailed("%s: source %d, expected %d\n", pszWhat, enmSource, enmExpectedSource);
+        fRc = false;
+    }
+
+    SafeIfaceArray<IClipboardFormat> aFormats;
+    hrc = ptrFormatEvent->COMGETTER(Formats)(ComSafeArrayAsOutParam(aFormats));
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: COMGETTER(Formats) failed, hrc=%Rhrc\n", pszWhat, hrc);
+        fRc = false;
+    }
+    else if (!tstClipboardCheckSingleFormat(aFormats, pszExpectedMimeType, pszWhat))
+        fRc = false;
+
+    return fRc;
+}
+
+
+/**
+ * Reads raw clipboard data through a clipboard session and checks the source, MIME type, and payload.
+ */
+static bool tstReadSessionDataRawEquals(IClipboardSession *pSession, const char *pszWhat,
+                                        ClipboardSource_T enmExpectedSource, const char *pszExpectedMimeType,
+                                        const std::vector<BYTE> &abExpected)
+{
+    AssertPtrReturn(pSession, false);
+    AssertPtrReturn(pszWhat, false);
+    AssertPtrReturn(pszExpectedMimeType, false);
+
+    ClipboardSource_T enmReadSource = ClipboardSource_Custom;
+    Bstr bstrRequestedMimeType("");
+    Bstr bstrReadMimeType;
+    SafeArray<BYTE> aReadBuffer;
+    HRESULT hrc = pSession->ReadDataRaw(ClipboardAction_Copy, bstrRequestedMimeType.raw(), &enmReadSource,
+                                        bstrReadMimeType.asOutParam(), ComSafeArrayAsOutParam(aReadBuffer));
+    if (FAILED(hrc))
+    {
+        RTTestIFailed("%s: IClipboardSession::ReadDataRaw failed, hrc=%Rhrc\n", pszWhat, hrc);
+        return false;
+    }
+
+    bool fRc = true;
+    if (enmReadSource != enmExpectedSource)
+    {
+        RTTestIFailed("%s: session ReadDataRaw source %d, expected %d\n", pszWhat, enmReadSource, enmExpectedSource);
+        fRc = false;
+    }
+
+    Utf8Str strReadMimeType(bstrReadMimeType);
+    if (RTStrCmp(strReadMimeType.c_str(), pszExpectedMimeType))
+    {
+        RTTestIFailed("%s: session ReadDataRaw MIME '%s', expected '%s'\n", pszWhat, strReadMimeType.c_str(),
+                      pszExpectedMimeType);
+        fRc = false;
+    }
+
+    if (!tstByteArrayEquals(aReadBuffer, abExpected))
+    {
+        RTTestIFailed("%s: session ReadDataRaw returned %zu bytes, expected %zu\n", pszWhat, aReadBuffer.size(),
+                      abExpected.size());
+        fRc = false;
+    }
+
+    return fRc;
+}
+
+
+/**
+ * Closes and releases a clipboard session.
+ */
+static void tstClipboardCloseSession(ComPtr<IClipboardSession> &ptrSession, const char *pszWhat)
+{
+    AssertPtrReturnVoid(pszWhat);
+
+    if (ptrSession.isNull())
+        return;
+
+    HRESULT hrc = ptrSession->Close();
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("%s: IClipboardSession::Close failed, hrc=%Rhrc\n", pszWhat, hrc));
+    ptrSession.setNull();
+}
+
 
 
 /**
@@ -428,6 +909,9 @@ static void tstHostClipboard(RTTEST hTest, IClipboard *pClipboard, IClipboardSet
         RTTESTI_CHECK(!ptrDataRequestedEvent.isNull());
         if (ptrDataRequestedEvent.isNotNull())
         {
+            RTTESTI_CHECK(tstClipboardCheckEventMetadata(ptrDataRequestedEvent, "data requested event",
+                                                        VBOX_SHCL_MAIN_CLIENT_NONE));
+
             ULONG idEventRequest = 0;
             hrc = ptrDataRequestedEvent->COMGETTER(RequestId)(&idEventRequest);
             RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(RequestId) failed, hrc=%Rhrc\n", hrc));
@@ -540,6 +1024,9 @@ static void tstHostClipboard(RTTEST hTest, IClipboard *pClipboard, IClipboardSet
         RTTESTI_CHECK(!ptrLazyDataRequestedEvent.isNull());
         if (ptrLazyDataRequestedEvent.isNotNull())
         {
+            RTTESTI_CHECK(tstClipboardCheckEventMetadata(ptrLazyDataRequestedEvent, "lazy data requested event",
+                                                        VBOX_SHCL_MAIN_CLIENT_NONE));
+
             ULONG idLazyEventRequest = 0;
             hrc = ptrLazyDataRequestedEvent->COMGETTER(RequestId)(&idLazyEventRequest);
             RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(RequestId)(lazy host request) failed, hrc=%Rhrc\n", hrc));
@@ -864,6 +1351,662 @@ static void tstClipboardPublicObjects(RTTEST hTest, IClipboard *pClipboard)
 
 
 /**
+ * Tests the public clipboard session API.
+ *
+ * @param   hTest               Test handle.
+ * @param   pClipboard          Live console clipboard object.
+ * @param   pClipboardSettings  Live clipboard settings object.
+ * @param   pEventSource        Live console clipboard event source.
+ */
+static void tstClipboardPublicSessionApi(RTTEST hTest, IClipboard *pClipboard, IClipboardSettings *pClipboardSettings,
+                                         IEventSource *pEventSource)
+{
+    RTTestSub(hTest, "Clipboard public session API");
+
+    RTTESTI_CHECK_RETV(pClipboard != NULL);
+    RTTESTI_CHECK_RETV(pClipboardSettings != NULL);
+    RTTESTI_CHECK_RETV(pEventSource != NULL);
+
+    RTTESTI_CHECK_MSG(VBOX_SHCL_MAIN_CLIENT_NONE == 0,
+                      ("VBOX_SHCL_MAIN_CLIENT_NONE is %RU32, expected 0\n", (uint32_t)VBOX_SHCL_MAIN_CLIENT_NONE));
+
+    HRESULT hrc = pClipboardSettings->COMSETTER(Mode)(ClipboardMode_Bidirectional);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("COMSETTER(Mode)(Bidirectional) before sessions failed, hrc=%Rhrc\n", hrc));
+
+    hrc = pClipboard->Reset();
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("Reset before sessions failed, hrc=%Rhrc\n", hrc));
+
+    ComPtr<IClipboardFormat> ptrTextFormat;
+    hrc = tstCreateFormat(pClipboard, "text/plain;charset=utf-8", ptrTextFormat);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("CreateFormat(session text) failed, hrc=%Rhrc\n", hrc));
+
+    ComPtr<IClipboardFormat> ptrHtmlFormat;
+    hrc = tstCreateFormat(pClipboard, "text/html", ptrHtmlFormat);
+    RTTESTI_CHECK_MSG_RETV(SUCCEEDED(hrc), ("CreateFormat(session html) failed, hrc=%Rhrc\n", hrc));
+
+    std::vector<ComPtr<IClipboardFormat> > vecTextFormats;
+    vecTextFormats.push_back(ptrTextFormat);
+    SafeIfaceArray<IClipboardFormat> aTextFormats(vecTextFormats);
+
+    std::vector<ComPtr<IClipboardFormat> > vecHtmlFormats;
+    vecHtmlFormats.push_back(ptrHtmlFormat);
+    SafeIfaceArray<IClipboardFormat> aHtmlFormats(vecHtmlFormats);
+
+
+    /* Basic session construction, identity, accessors, raw data, format offer, and close. */
+    {
+        ComPtr<IClipboardSession> ptrSessionA;
+        ComPtr<IClipboardSession> ptrSessionB;
+        ComPtr<IEventSource> ptrObserverEventSource;
+        ComPtr<IEventListener> ptrObserverListener;
+        bool fObserverListenerRegistered = false;
+        do
+        {
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrSessionA);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(empty A) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrSessionA.isNull(), ("CreateSession(empty A) returned NULL\n"));
+
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrSessionB);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(empty B) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrSessionB.isNull(), ("CreateSession(empty B) returned NULL\n"));
+
+            ULONG idSessionA = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrSessionA->COMGETTER(Id)(&idSessionA);
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::COMGETTER(Id)(A) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idSessionA != VBOX_SHCL_MAIN_CLIENT_NONE,
+                              ("Session A returned anonymous/zero client ID\n"));
+
+            ULONG idSessionB = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrSessionB->COMGETTER(Id)(&idSessionB);
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::COMGETTER(Id)(B) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idSessionB != VBOX_SHCL_MAIN_CLIENT_NONE,
+                              ("Session B returned anonymous/zero client ID\n"));
+            RTTESTI_CHECK_MSG(idSessionA != idSessionB,
+                              ("Session IDs are not distinct: %RU32\n", (uint32_t)idSessionA));
+
+            ComPtr<IEventSource> ptrSessionEventSource;
+            hrc = ptrSessionA->COMGETTER(EventSource)(ptrSessionEventSource.asOutParam());
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::COMGETTER(EventSource) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(!ptrSessionEventSource.isNull());
+
+            ComPtr<IHostClipboard> ptrSessionHostClipboard;
+            hrc = ptrSessionA->COMGETTER(HostClipboard)(ptrSessionHostClipboard.asOutParam());
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::COMGETTER(HostClipboard) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(!ptrSessionHostClipboard.isNull());
+
+            hrc = ptrSessionB->COMGETTER(EventSource)(ptrObserverEventSource.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("IClipboardSession::COMGETTER(EventSource)(observer) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrObserverEventSource.isNull(), ("IClipboardSession::COMGETTER(EventSource)(observer) returned NULL\n"));
+
+            static VBoxEventType_T const s_aBasicEventTypes[] =
+            {
+                VBoxEventType_OnClipboardFormatChanged,
+                VBoxEventType_OnClipboardDataChanged
+            };
+            hrc = tstRegisterClipboardListener(ptrObserverEventSource, s_aBasicEventTypes, RT_ELEMENTS(s_aBasicEventTypes),
+                                               ptrObserverListener);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(session observer) failed, hrc=%Rhrc\n", hrc));
+            fObserverListenerRegistered = true;
+
+            SafeIfaceArray<IClipboardFormat> aReadFormats;
+            hrc = ptrSessionA->ReadFormats(ComSafeArrayAsOutParam(aReadFormats));
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::ReadFormats(empty) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(aReadFormats.size() == 0);
+
+            hrc = ptrSessionA->WriteFormats(ComSafeArrayAsInParam(aTextFormats));
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::WriteFormats failed, hrc=%Rhrc\n", hrc));
+
+            LONG64 i64FormatRevision = 0;
+            ComPtr<IEvent> ptrFormatEvent;
+            VBoxEventType_T enmFormatEventType = VBoxEventType_Invalid;
+            bool fRc = tstClipboardWaitForAnyEvent(ptrObserverEventSource, ptrObserverListener, s_aBasicEventTypes,
+                                                   RT_ELEMENTS(s_aBasicEventTypes), 1000 /* cMsTimeout */,
+                                                   "session observer format", ptrFormatEvent, &enmFormatEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+            {
+                RTTESTI_CHECK(enmFormatEventType == VBoxEventType_OnClipboardFormatChanged);
+                if (enmFormatEventType == VBoxEventType_OnClipboardFormatChanged)
+                    RTTESTI_CHECK(tstClipboardCheckFormatChangedEvent(ptrFormatEvent, "session observer format event",
+                                                                      idSessionA, ClipboardSource_Host,
+                                                                      "text/plain;charset=utf-8", &i64FormatRevision));
+            }
+
+            aReadFormats.setNull();
+            hrc = ptrSessionA->ReadFormats(ComSafeArrayAsOutParam(aReadFormats));
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::ReadFormats(after WriteFormats) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(tstClipboardCheckSingleFormat(aReadFormats, "text/plain;charset=utf-8",
+                                                        "session ReadFormats after WriteFormats"));
+
+            static const char s_szSessionRawText[] = "tstClipboard session raw data";
+            std::vector<BYTE> abSessionRawData = tstBytesFromString(s_szSessionRawText);
+            SafeArray<BYTE> aSessionRawData;
+            hrc = tstSafeArrayFromBytes(abSessionRawData, aSessionRawData);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("SafeArray initFrom(session raw data) failed, hrc=%Rhrc\n", hrc));
+
+            ClipboardSource_T enmWrittenSource = ClipboardSource_Custom;
+            Bstr bstrWrittenMimeType;
+            SafeArray<BYTE> aWrittenBuffer;
+            hrc = ptrSessionA->WriteDataRaw(ClipboardAction_Copy, ClipboardSource_Host,
+                                            Bstr("text/plain;charset=utf-8").raw(),
+                                            ComSafeArrayAsInParam(aSessionRawData), &enmWrittenSource,
+                                            bstrWrittenMimeType.asOutParam(), ComSafeArrayAsOutParam(aWrittenBuffer));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("IClipboardSession::WriteDataRaw failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(enmWrittenSource == ClipboardSource_Host);
+            RTTESTI_CHECK(!RTStrCmp(Utf8Str(bstrWrittenMimeType).c_str(), "text/plain;charset=utf-8"));
+            RTTESTI_CHECK(tstByteArrayEquals(aWrittenBuffer, abSessionRawData));
+
+            LONG64 i64DataRevision = 0;
+            ComPtr<IEvent> ptrDataEvent;
+            VBoxEventType_T enmDataEventType = VBoxEventType_Invalid;
+            fRc = tstClipboardWaitForAnyEvent(ptrObserverEventSource, ptrObserverListener, s_aBasicEventTypes,
+                                              RT_ELEMENTS(s_aBasicEventTypes), 1000 /* cMsTimeout */,
+                                              "session observer data", ptrDataEvent, &enmDataEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+            {
+                RTTESTI_CHECK(enmDataEventType == VBoxEventType_OnClipboardDataChanged);
+                if (enmDataEventType == VBoxEventType_OnClipboardDataChanged)
+                    RTTESTI_CHECK(tstClipboardCheckDataChangedEvent(ptrDataEvent, "session observer data event", idSessionA,
+                                                                    ClipboardAction_Copy, NULL /* pptrItem */, &i64DataRevision));
+            }
+            if (i64FormatRevision > 0 && i64DataRevision > 0)
+                RTTESTI_CHECK_MSG(i64DataRevision > i64FormatRevision,
+                                  ("session data revision %RI64, expected greater than format revision %RI64\n",
+                                   i64DataRevision, i64FormatRevision));
+            RTTESTI_CHECK(tstReadSessionDataRawEquals(ptrSessionA, "session raw round-trip", ClipboardSource_Host,
+                                                      "text/plain;charset=utf-8", abSessionRawData));
+
+            hrc = ptrSessionA->Close();
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::Close(basic session A) failed, hrc=%Rhrc\n", hrc));
+            ULONG idSessionAAfterClose = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrSessionA->COMGETTER(Id)(&idSessionAAfterClose);
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(Id)(basic session A after Close) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idSessionAAfterClose == idSessionA,
+                              ("Closed session ID changed from %RU32 to %RU32\n",
+                               (uint32_t)idSessionA, (uint32_t)idSessionAAfterClose));
+        } while (0);
+
+        if (fObserverListenerRegistered && ptrObserverEventSource.isNotNull() && ptrObserverListener.isNotNull())
+            ptrObserverEventSource->UnregisterListener(ptrObserverListener);
+        ptrObserverListener.setNull();
+
+        tstClipboardCloseSession(ptrSessionA, "basic session A");
+        tstClipboardCloseSession(ptrSessionB, "basic session B");
+        hrc = pClipboard->Reset();
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after basic session test failed, hrc=%Rhrc\n", hrc));
+    }
+
+
+    /* Session host clipboard endpoints tag lazy native-host requests with the session client ID. */
+    {
+        ComPtr<IClipboardSession> ptrHostSession;
+        ComPtr<IHostClipboard> ptrSessionHostClipboard;
+        ComPtr<IEventListener> ptrRequestListener;
+        bool fRequestListenerRegistered = false;
+        do
+        {
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrHostSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(host clipboard) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrHostSession.isNull(), ("CreateSession(host clipboard) returned NULL\n"));
+
+            ULONG idHostSession = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrHostSession->COMGETTER(Id)(&idHostSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(Id)(host clipboard session) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idHostSession != VBOX_SHCL_MAIN_CLIENT_NONE,
+                              ("Host clipboard session returned zero client ID\n"));
+
+            hrc = ptrHostSession->COMGETTER(HostClipboard)(ptrSessionHostClipboard.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(HostClipboard)(session) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrSessionHostClipboard.isNull(), ("COMGETTER(HostClipboard)(session) returned NULL\n"));
+
+            hrc = ptrSessionHostClipboard->ReportFormats(ClipboardAction_Copy, ClipboardSource_Guest,
+                                                         ComSafeArrayAsInParam(aTextFormats));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("Session HostClipboard::ReportFormats failed, hrc=%Rhrc\n", hrc));
+
+            hrc = pEventSource->CreateListener(ptrRequestListener.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateListener(session host request) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrRequestListener.isNull(), ("CreateListener(session host request) returned NULL\n"));
+            SafeArray<VBoxEventType_T> aRequestEventTypes;
+            aRequestEventTypes.push_back(VBoxEventType_OnClipboardDataRequested);
+            hrc = pEventSource->RegisterListener(ptrRequestListener, ComSafeArrayAsInParam(aRequestEventTypes), FALSE /* aActive */);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(session host request) failed, hrc=%Rhrc\n", hrc));
+            fRequestListenerRegistered = true;
+
+            ComPtr<IInternalClipboardControl> ptrInternalClipboardControl(pClipboard);
+            RTTESTI_CHECK_MSG_BREAK(!ptrInternalClipboardControl.isNull(), ("Query IInternalClipboardControl(session host) returned NULL\n"));
+
+            ULONG idRequest = 0;
+            Bstr bstrMimeType("text/plain;charset=utf-8");
+            hrc = ptrInternalClipboardControl->RequestData(bstrMimeType.raw(), &idRequest);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("IInternalClipboardControl::RequestData(session host) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idRequest != 0, ("IInternalClipboardControl::RequestData(session host) returned zero request ID\n"));
+
+            ComPtr<IEvent> ptrRequestEvent;
+            hrc = pEventSource->GetEvent(ptrRequestListener, 1000 /* aTimeout */, ptrRequestEvent.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("GetEvent(session host request) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrRequestEvent.isNull(), ("GetEvent(session host request) returned no event\n"));
+
+            ComPtr<IClipboardDataRequestedEvent> ptrDataRequestedEvent = ptrRequestEvent;
+            RTTESTI_CHECK(!ptrDataRequestedEvent.isNull());
+            if (ptrDataRequestedEvent.isNotNull())
+            {
+                RTTESTI_CHECK(tstClipboardCheckEventMetadata(ptrDataRequestedEvent, "session host data requested event",
+                                                            idHostSession));
+
+                ULONG idEventRequest = 0;
+                hrc = ptrDataRequestedEvent->COMGETTER(RequestId)(&idEventRequest);
+                RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(RequestId)(session host) failed, hrc=%Rhrc\n", hrc));
+                RTTESTI_CHECK_MSG(idEventRequest == idRequest,
+                                  ("Session host request event ID %RU32, expected %RU32\n",
+                                   (uint32_t)idEventRequest, (uint32_t)idRequest));
+
+                ClipboardSource_T enmRequestSource = ClipboardSource_Custom;
+                hrc = ptrDataRequestedEvent->COMGETTER(ClipboardSource)(&enmRequestSource);
+                RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(ClipboardSource)(session host) failed, hrc=%Rhrc\n", hrc));
+                RTTESTI_CHECK(enmRequestSource == ClipboardSource_Guest);
+            }
+
+            static const char s_szSessionHostText[] = "tstClipboard session host clipboard data";
+            std::vector<BYTE> abSessionHostData = tstBytesFromString(s_szSessionHostText);
+            SafeArray<BYTE> aSessionHostData;
+            hrc = tstSafeArrayFromBytes(abSessionHostData, aSessionHostData);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("SafeArray initFrom(session host data) failed, hrc=%Rhrc\n", hrc));
+
+            hrc = ptrSessionHostClipboard->ProvideData(idRequest, ClipboardAction_Copy, ClipboardSource_Guest,
+                                                       bstrMimeType.raw(), ComSafeArrayAsInParam(aSessionHostData));
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Session HostClipboard::ProvideData failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(tstReadSessionDataRawEquals(ptrHostSession, "session HostClipboard ProvideData readback",
+                                                      ClipboardSource_Guest, "text/plain;charset=utf-8", abSessionHostData));
+        } while (0);
+
+        if (fRequestListenerRegistered && ptrRequestListener.isNotNull())
+            pEventSource->UnregisterListener(ptrRequestListener);
+        ptrRequestListener.setNull();
+
+        tstClipboardCloseSession(ptrHostSession, "session HostClipboard session");
+        hrc = pClipboard->Reset();
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after session HostClipboard test failed, hrc=%Rhrc\n", hrc));
+    }
+
+
+    /* IncludeInitialState replays the state current when a session listener registers. */
+    {
+        ComPtr<IClipboardSession> ptrInitialSession;
+        ComPtr<IEventSource> ptrInitialEventSource;
+        ComPtr<IEventListener> ptrInitialListener;
+        bool fInitialListenerRegistered = false;
+        do
+        {
+            hrc = pClipboard->WriteFormats(ComSafeArrayAsInParam(aTextFormats));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("WriteFormats(seed initial state) failed, hrc=%Rhrc\n", hrc));
+
+            static IClipboardSessionFlag_T const s_aInitialFlags[] =
+            {
+                IClipboardSessionFlag_IncludeInitialState
+            };
+            hrc = tstCreateSession(pClipboard, s_aInitialFlags, RT_ELEMENTS(s_aInitialFlags), ptrInitialSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(IncludeInitialState) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrInitialSession.isNull(), ("CreateSession(IncludeInitialState) returned NULL\n"));
+
+            hrc = ptrInitialSession->COMGETTER(EventSource)(ptrInitialEventSource.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(initial) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG_BREAK(!ptrInitialEventSource.isNull(), ("COMGETTER(EventSource)(initial) returned NULL\n"));
+
+            hrc = pClipboard->WriteFormats(ComSafeArrayAsInParam(aHtmlFormats));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("WriteFormats(update initial state before listener) failed, hrc=%Rhrc\n", hrc));
+
+            static VBoxEventType_T const s_aInitialEventTypes[] =
+            {
+                VBoxEventType_OnClipboardFormatChanged
+            };
+            hrc = tstRegisterClipboardListener(ptrInitialEventSource, s_aInitialEventTypes, RT_ELEMENTS(s_aInitialEventTypes),
+                                               ptrInitialListener);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(initial state) failed, hrc=%Rhrc\n", hrc));
+            fInitialListenerRegistered = true;
+
+            ComPtr<IEvent> ptrInitialEvent;
+            VBoxEventType_T enmInitialEventType = VBoxEventType_Invalid;
+            bool fRc = tstClipboardWaitForAnyEvent(ptrInitialEventSource, ptrInitialListener, s_aInitialEventTypes,
+                                                   RT_ELEMENTS(s_aInitialEventTypes), 1000 /* cMsTimeout */,
+                                                   "IncludeInitialState", ptrInitialEvent, &enmInitialEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+            {
+                RTTESTI_CHECK(enmInitialEventType == VBoxEventType_OnClipboardFormatChanged);
+                RTTESTI_CHECK(tstClipboardCheckFormatChangedEvent(ptrInitialEvent, "IncludeInitialState format event",
+                                                                  VBOX_SHCL_MAIN_CLIENT_NONE, ClipboardSource_Host,
+                                                                  "text/html"));
+            }
+
+            SafeIfaceArray<IClipboardFormat> aInitialReadFormats;
+            hrc = ptrInitialSession->ReadFormats(ComSafeArrayAsOutParam(aInitialReadFormats));
+            RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardSession::ReadFormats(IncludeInitialState) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK(tstClipboardCheckSingleFormat(aInitialReadFormats, "text/html",
+                                                        "IncludeInitialState current formats"));
+        } while (0);
+
+        if (fInitialListenerRegistered && ptrInitialEventSource.isNotNull() && ptrInitialListener.isNotNull())
+            ptrInitialEventSource->UnregisterListener(ptrInitialListener);
+        ptrInitialListener.setNull();
+
+        tstClipboardCloseSession(ptrInitialSession, "IncludeInitialState session");
+        hrc = pClipboard->Reset();
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after IncludeInitialState test failed, hrc=%Rhrc\n", hrc));
+    }
+
+
+    /* ExcludeOwnChanges suppresses events for the writing session while other sessions see its client ID. */
+    {
+        ComPtr<IClipboardSession> ptrSessionA;
+        ComPtr<IClipboardSession> ptrSessionB;
+        ComPtr<IEventSource> ptrEventSourceA;
+        ComPtr<IEventSource> ptrEventSourceB;
+        ComPtr<IEventListener> ptrListenerA;
+        ComPtr<IEventListener> ptrListenerB;
+        bool fListenerARegistered = false;
+        bool fListenerBRegistered = false;
+        do
+        {
+            static IClipboardSessionFlag_T const s_aExcludeOwnFlags[] =
+            {
+                IClipboardSessionFlag_ExcludeOwnChanges
+            };
+            hrc = tstCreateSession(pClipboard, s_aExcludeOwnFlags, RT_ELEMENTS(s_aExcludeOwnFlags), ptrSessionA);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(ExcludeOwnChanges) failed, hrc=%Rhrc\n", hrc));
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrSessionB);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(observer) failed, hrc=%Rhrc\n", hrc));
+
+            ULONG idSessionA = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrSessionA->COMGETTER(Id)(&idSessionA);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(Id)(ExcludeOwnChanges) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idSessionA != VBOX_SHCL_MAIN_CLIENT_NONE,
+                              ("ExcludeOwnChanges session returned zero client ID\n"));
+
+            hrc = ptrSessionA->COMGETTER(EventSource)(ptrEventSourceA.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(A) failed, hrc=%Rhrc\n", hrc));
+            hrc = ptrSessionB->COMGETTER(EventSource)(ptrEventSourceB.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(B) failed, hrc=%Rhrc\n", hrc));
+
+            static VBoxEventType_T const s_aOwnEventTypes[] =
+            {
+                VBoxEventType_OnClipboardFormatChanged,
+                VBoxEventType_OnClipboardDataChanged
+            };
+            hrc = tstRegisterClipboardListener(ptrEventSourceA, s_aOwnEventTypes, RT_ELEMENTS(s_aOwnEventTypes), ptrListenerA);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(A own changes) failed, hrc=%Rhrc\n", hrc));
+            fListenerARegistered = true;
+
+            static VBoxEventType_T const s_aDataEventTypes[] =
+            {
+                VBoxEventType_OnClipboardDataChanged
+            };
+            hrc = tstRegisterClipboardListener(ptrEventSourceB, s_aDataEventTypes, RT_ELEMENTS(s_aDataEventTypes), ptrListenerB);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(B observer) failed, hrc=%Rhrc\n", hrc));
+            fListenerBRegistered = true;
+
+            static const char s_szSessionAText[] = "tstClipboard session A writes";
+            std::vector<BYTE> abSessionAData = tstBytesFromString(s_szSessionAText);
+            SafeArray<BYTE> aSessionAData;
+            hrc = tstSafeArrayFromBytes(abSessionAData, aSessionAData);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("SafeArray initFrom(session A data) failed, hrc=%Rhrc\n", hrc));
+
+            ClipboardSource_T enmWrittenSource = ClipboardSource_Custom;
+            Bstr bstrWrittenMimeType;
+            SafeArray<BYTE> aWrittenBuffer;
+            hrc = ptrSessionA->WriteDataRaw(ClipboardAction_Copy, ClipboardSource_Host,
+                                            Bstr("text/plain;charset=utf-8").raw(),
+                                            ComSafeArrayAsInParam(aSessionAData), &enmWrittenSource,
+                                            bstrWrittenMimeType.asOutParam(), ComSafeArrayAsOutParam(aWrittenBuffer));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("Session A WriteDataRaw failed, hrc=%Rhrc\n", hrc));
+
+            ComPtr<IEvent> ptrObservedEvent;
+            VBoxEventType_T enmObservedEventType = VBoxEventType_Invalid;
+            bool fRc = tstClipboardWaitForAnyEvent(ptrEventSourceB, ptrListenerB, s_aDataEventTypes,
+                                                   RT_ELEMENTS(s_aDataEventTypes), 1000 /* cMsTimeout */,
+                                                   "ExcludeOwnChanges observer", ptrObservedEvent, &enmObservedEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+                RTTESTI_CHECK(tstClipboardCheckDataChangedEvent(ptrObservedEvent, "ExcludeOwnChanges observer data event",
+                                                                idSessionA, ClipboardAction_Copy, NULL /* pptrItem */));
+            RTTESTI_CHECK(tstClipboardExpectNoEvent(ptrEventSourceA, ptrListenerA, 250 /* cMsTimeout */,
+                                                    "ExcludeOwnChanges writer"));
+        } while (0);
+
+        if (fListenerARegistered && ptrEventSourceA.isNotNull() && ptrListenerA.isNotNull())
+            ptrEventSourceA->UnregisterListener(ptrListenerA);
+        if (fListenerBRegistered && ptrEventSourceB.isNotNull() && ptrListenerB.isNotNull())
+            ptrEventSourceB->UnregisterListener(ptrListenerB);
+        ptrListenerA.setNull();
+        ptrListenerB.setNull();
+
+        tstClipboardCloseSession(ptrSessionA, "ExcludeOwnChanges session A");
+        tstClipboardCloseSession(ptrSessionB, "ExcludeOwnChanges session B");
+        hrc = pClipboard->Reset();
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after ExcludeOwnChanges test failed, hrc=%Rhrc\n", hrc));
+    }
+
+
+    /* IncludePayload attaches the item payload to data events for sessions that request it. */
+    {
+        ComPtr<IClipboardSession> ptrWriterSession;
+        ComPtr<IClipboardSession> ptrPayloadSession;
+        ComPtr<IClipboardSession> ptrNoPayloadSession;
+        ComPtr<IEventSource> ptrPayloadEventSource;
+        ComPtr<IEventSource> ptrNoPayloadEventSource;
+        ComPtr<IEventListener> ptrPayloadListener;
+        ComPtr<IEventListener> ptrNoPayloadListener;
+        bool fPayloadListenerRegistered = false;
+        bool fNoPayloadListenerRegistered = false;
+        do
+        {
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrWriterSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(payload writer) failed, hrc=%Rhrc\n", hrc));
+            ULONG idWriterSession = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrWriterSession->COMGETTER(Id)(&idWriterSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(Id)(payload writer) failed, hrc=%Rhrc\n", hrc));
+
+            static IClipboardSessionFlag_T const s_aPayloadFlags[] =
+            {
+                IClipboardSessionFlag_IncludePayload
+            };
+            hrc = tstCreateSession(pClipboard, s_aPayloadFlags, RT_ELEMENTS(s_aPayloadFlags), ptrPayloadSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(IncludePayload) failed, hrc=%Rhrc\n", hrc));
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrNoPayloadSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(no payload observer) failed, hrc=%Rhrc\n", hrc));
+
+            hrc = ptrPayloadSession->COMGETTER(EventSource)(ptrPayloadEventSource.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(IncludePayload) failed, hrc=%Rhrc\n", hrc));
+            hrc = ptrNoPayloadSession->COMGETTER(EventSource)(ptrNoPayloadEventSource.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(no payload) failed, hrc=%Rhrc\n", hrc));
+
+            static VBoxEventType_T const s_aDataEventTypes[] =
+            {
+                VBoxEventType_OnClipboardDataChanged
+            };
+            hrc = tstRegisterClipboardListener(ptrPayloadEventSource, s_aDataEventTypes, RT_ELEMENTS(s_aDataEventTypes),
+                                               ptrPayloadListener);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(IncludePayload) failed, hrc=%Rhrc\n", hrc));
+            fPayloadListenerRegistered = true;
+            hrc = tstRegisterClipboardListener(ptrNoPayloadEventSource, s_aDataEventTypes, RT_ELEMENTS(s_aDataEventTypes),
+                                               ptrNoPayloadListener);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(no payload) failed, hrc=%Rhrc\n", hrc));
+            fNoPayloadListenerRegistered = true;
+
+            static const char s_szPayloadText[] = "tstClipboard session payload data";
+            std::vector<BYTE> abPayloadData = tstBytesFromString(s_szPayloadText);
+            SafeArray<BYTE> aPayloadData;
+            hrc = tstSafeArrayFromBytes(abPayloadData, aPayloadData);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("SafeArray initFrom(payload data) failed, hrc=%Rhrc\n", hrc));
+
+            ClipboardSource_T enmWrittenSource = ClipboardSource_Custom;
+            Bstr bstrWrittenMimeType;
+            SafeArray<BYTE> aWrittenBuffer;
+            hrc = ptrWriterSession->WriteDataRaw(ClipboardAction_Copy, ClipboardSource_Host,
+                                                 Bstr("text/plain;charset=utf-8").raw(),
+                                                 ComSafeArrayAsInParam(aPayloadData), &enmWrittenSource,
+                                                 bstrWrittenMimeType.asOutParam(), ComSafeArrayAsOutParam(aWrittenBuffer));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("Payload writer WriteDataRaw failed, hrc=%Rhrc\n", hrc));
+
+            ComPtr<IEvent> ptrPayloadEvent;
+            VBoxEventType_T enmPayloadEventType = VBoxEventType_Invalid;
+            bool fRc = tstClipboardWaitForAnyEvent(ptrPayloadEventSource, ptrPayloadListener, s_aDataEventTypes,
+                                                   RT_ELEMENTS(s_aDataEventTypes), 1000 /* cMsTimeout */,
+                                                   "IncludePayload listener", ptrPayloadEvent, &enmPayloadEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+            {
+                ComPtr<IClipboardItem> ptrPayloadItem;
+                RTTESTI_CHECK(tstClipboardCheckDataChangedEvent(ptrPayloadEvent, "IncludePayload data event", idWriterSession,
+                                                                ClipboardAction_Copy, &ptrPayloadItem));
+                RTTESTI_CHECK_MSG(!ptrPayloadItem.isNull(), ("IncludePayload data event did not include an item\n"));
+                if (ptrPayloadItem.isNotNull())
+                    RTTESTI_CHECK(tstClipboardCheckItemPayload(ptrPayloadItem, "IncludePayload event item",
+                                                               ClipboardSource_Host, "text/plain;charset=utf-8", abPayloadData));
+            }
+
+            ComPtr<IEvent> ptrNoPayloadEvent;
+            VBoxEventType_T enmNoPayloadEventType = VBoxEventType_Invalid;
+            fRc = tstClipboardWaitForAnyEvent(ptrNoPayloadEventSource, ptrNoPayloadListener, s_aDataEventTypes,
+                                              RT_ELEMENTS(s_aDataEventTypes), 1000 /* cMsTimeout */,
+                                              "No IncludePayload listener", ptrNoPayloadEvent, &enmNoPayloadEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+            {
+                ComPtr<IClipboardItem> ptrNoPayloadItem;
+                RTTESTI_CHECK(tstClipboardCheckDataChangedEvent(ptrNoPayloadEvent, "No IncludePayload data event",
+                                                                idWriterSession, ClipboardAction_Copy, &ptrNoPayloadItem));
+                RTTESTI_CHECK_MSG(ptrNoPayloadItem.isNull(),
+                                  ("No IncludePayload data event unexpectedly included an item\n"));
+            }
+        } while (0);
+
+        if (fPayloadListenerRegistered && ptrPayloadEventSource.isNotNull() && ptrPayloadListener.isNotNull())
+            ptrPayloadEventSource->UnregisterListener(ptrPayloadListener);
+        if (fNoPayloadListenerRegistered && ptrNoPayloadEventSource.isNotNull() && ptrNoPayloadListener.isNotNull())
+            ptrNoPayloadEventSource->UnregisterListener(ptrNoPayloadListener);
+        ptrPayloadListener.setNull();
+        ptrNoPayloadListener.setNull();
+
+        tstClipboardCloseSession(ptrWriterSession, "IncludePayload writer session");
+        tstClipboardCloseSession(ptrPayloadSession, "IncludePayload observer session");
+        tstClipboardCloseSession(ptrNoPayloadSession, "No IncludePayload observer session");
+        hrc = pClipboard->Reset();
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after IncludePayload test failed, hrc=%Rhrc\n", hrc));
+    }
+
+
+    /* ExcludeReflections suppresses matching anonymous format reflections, not direct session events. */
+    {
+        ComPtr<IClipboardSession> ptrReflectSession;
+        ComPtr<IClipboardSession> ptrObserverSession;
+        ComPtr<IEventSource> ptrReflectEventSource;
+        ComPtr<IEventSource> ptrObserverEventSource;
+        ComPtr<IEventListener> ptrReflectListener;
+        ComPtr<IEventListener> ptrObserverListener;
+        bool fReflectListenerRegistered = false;
+        bool fObserverListenerRegistered = false;
+        do
+        {
+            static IClipboardSessionFlag_T const s_aExcludeReflectionFlags[] =
+            {
+                IClipboardSessionFlag_ExcludeReflections
+            };
+            hrc = tstCreateSession(pClipboard, s_aExcludeReflectionFlags, RT_ELEMENTS(s_aExcludeReflectionFlags),
+                                   ptrReflectSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(ExcludeReflections) failed, hrc=%Rhrc\n", hrc));
+            hrc = tstCreateSession(pClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrObserverSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(reflection observer) failed, hrc=%Rhrc\n", hrc));
+
+            ULONG idReflectSession = VBOX_SHCL_MAIN_CLIENT_NONE;
+            hrc = ptrReflectSession->COMGETTER(Id)(&idReflectSession);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(Id)(ExcludeReflections) failed, hrc=%Rhrc\n", hrc));
+            RTTESTI_CHECK_MSG(idReflectSession != VBOX_SHCL_MAIN_CLIENT_NONE,
+                              ("ExcludeReflections session returned zero client ID\n"));
+
+            hrc = ptrReflectSession->COMGETTER(EventSource)(ptrReflectEventSource.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(ExcludeReflections) failed, hrc=%Rhrc\n", hrc));
+            hrc = ptrObserverSession->COMGETTER(EventSource)(ptrObserverEventSource.asOutParam());
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(EventSource)(reflection observer) failed, hrc=%Rhrc\n", hrc));
+
+            static VBoxEventType_T const s_aFormatEventTypes[] =
+            {
+                VBoxEventType_OnClipboardFormatChanged
+            };
+            hrc = tstRegisterClipboardListener(ptrReflectEventSource, s_aFormatEventTypes, RT_ELEMENTS(s_aFormatEventTypes),
+                                               ptrReflectListener);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(reflection writer) failed, hrc=%Rhrc\n", hrc));
+            fReflectListenerRegistered = true;
+            hrc = tstRegisterClipboardListener(ptrObserverEventSource, s_aFormatEventTypes, RT_ELEMENTS(s_aFormatEventTypes),
+                                               ptrObserverListener);
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("RegisterListener(reflection observer) failed, hrc=%Rhrc\n", hrc));
+            fObserverListenerRegistered = true;
+
+            hrc = ptrReflectSession->WriteFormats(ComSafeArrayAsInParam(aTextFormats));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("Session WriteFormats(ExcludeReflections) failed, hrc=%Rhrc\n", hrc));
+
+            ComPtr<IEvent> ptrReflectEvent;
+            VBoxEventType_T enmReflectEventType = VBoxEventType_Invalid;
+            bool fRc = tstClipboardWaitForAnyEvent(ptrReflectEventSource, ptrReflectListener, s_aFormatEventTypes,
+                                                   RT_ELEMENTS(s_aFormatEventTypes), 1000 /* cMsTimeout */,
+                                                   "ExcludeReflections direct writer", ptrReflectEvent, &enmReflectEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+                RTTESTI_CHECK(tstClipboardCheckFormatChangedEvent(ptrReflectEvent, "ExcludeReflections direct writer format event",
+                                                                  idReflectSession, ClipboardSource_Host,
+                                                                  "text/plain;charset=utf-8"));
+
+            ComPtr<IEvent> ptrObserverEvent;
+            VBoxEventType_T enmObserverEventType = VBoxEventType_Invalid;
+            fRc = tstClipboardWaitForAnyEvent(ptrObserverEventSource, ptrObserverListener, s_aFormatEventTypes,
+                                              RT_ELEMENTS(s_aFormatEventTypes), 1000 /* cMsTimeout */,
+                                              "ExcludeReflections observer", ptrObserverEvent, &enmObserverEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+                RTTESTI_CHECK(tstClipboardCheckFormatChangedEvent(ptrObserverEvent, "ExcludeReflections observer format event",
+                                                                  idReflectSession, ClipboardSource_Host,
+                                                                  "text/plain;charset=utf-8"));
+
+            hrc = pClipboard->WriteFormats(ComSafeArrayAsInParam(aTextFormats));
+            RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("Anonymous WriteFormats(ExcludeReflections echo) failed, hrc=%Rhrc\n", hrc));
+
+            ComPtr<IEvent> ptrObserverEchoEvent;
+            VBoxEventType_T enmObserverEchoEventType = VBoxEventType_Invalid;
+            fRc = tstClipboardWaitForAnyEvent(ptrObserverEventSource, ptrObserverListener, s_aFormatEventTypes,
+                                              RT_ELEMENTS(s_aFormatEventTypes), 1000 /* cMsTimeout */,
+                                              "ExcludeReflections observer echo", ptrObserverEchoEvent, &enmObserverEchoEventType);
+            RTTESTI_CHECK(fRc);
+            if (fRc)
+                RTTESTI_CHECK(tstClipboardCheckFormatChangedEvent(ptrObserverEchoEvent,
+                                                                  "ExcludeReflections observer anonymous echo event",
+                                                                  VBOX_SHCL_MAIN_CLIENT_NONE, ClipboardSource_Host,
+                                                                  "text/plain;charset=utf-8"));
+            RTTESTI_CHECK(tstClipboardExpectNoEvent(ptrReflectEventSource, ptrReflectListener, 250 /* cMsTimeout */,
+                                                    "ExcludeReflections anonymous echo"));
+        } while (0);
+
+        if (fReflectListenerRegistered && ptrReflectEventSource.isNotNull() && ptrReflectListener.isNotNull())
+            ptrReflectEventSource->UnregisterListener(ptrReflectListener);
+        if (fObserverListenerRegistered && ptrObserverEventSource.isNotNull() && ptrObserverListener.isNotNull())
+            ptrObserverEventSource->UnregisterListener(ptrObserverListener);
+        ptrReflectListener.setNull();
+        ptrObserverListener.setNull();
+
+        tstClipboardCloseSession(ptrReflectSession, "ExcludeReflections session");
+        tstClipboardCloseSession(ptrObserverSession, "ExcludeReflections observer session");
+        hrc = pClipboard->Reset();
+        RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after ExcludeReflections test failed, hrc=%Rhrc\n", hrc));
+    }
+
+    hrc = pClipboardSettings->COMSETTER(Mode)(ClipboardMode_Bidirectional);
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMSETTER(Mode)(Bidirectional) after sessions failed, hrc=%Rhrc\n", hrc));
+    hrc = pClipboard->Reset();
+    RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("Reset after session API subtest failed, hrc=%Rhrc\n", hrc));
+}
+
+
+
+/**
  * Tests the public console clipboard API.
  *
  * @param   hTest           Test handle.
@@ -884,6 +2027,8 @@ static void tstClipboardPublicApi(RTTEST hTest)
     ComPtr<IClipboard> ptrClipboard;
     ComPtr<IEventSource> ptrEventSource;
     ComPtr<IEventListener> ptrListener;
+    ComPtr<IClipboardSession> ptrSurvivingSession;
+    ULONG idSurvivingSession = VBOX_SHCL_MAIN_CLIENT_NONE;
 
     do
     {
@@ -988,7 +2133,7 @@ static void tstClipboardPublicApi(RTTEST hTest)
 
         /* Verify object construction helpers before exercising live clipboard state. */
         tstClipboardPublicObjects(hTest, ptrClipboard);
-        RTTestSub(hTest, "Clipboard public API operations");
+        RTTestSub(hTest, "Clipboard public API setup");
 
         /* Verify file-list storage and the auxiliary transfer/event-source getters. */
         SafeArray<BSTR> aFileList;
@@ -1019,6 +2164,9 @@ static void tstClipboardPublicApi(RTTEST hTest)
         hrc = ptrClipboard->COMGETTER(EventSource)(ptrEventSource.asOutParam());
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(EventSource) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(!ptrEventSource.isNull());
+
+        tstClipboardPublicSessionApi(hTest, ptrClipboard, ptrClipboardSettings, ptrEventSource);
+        RTTestSub(hTest, "Clipboard public API operations");
 
         /* Register a broad passive listener for mode changes and explicit host-origin writes. */
         hrc = ptrEventSource->CreateListener(ptrListener.asOutParam());
@@ -1156,6 +2304,9 @@ static void tstClipboardPublicApi(RTTEST hTest)
                 RTTESTI_CHECK(!ptrFormatEvent.isNull());
                 if (ptrFormatEvent.isNotNull())
                 {
+                    RTTESTI_CHECK(tstClipboardCheckEventMetadata(ptrFormatEvent, "public API format event",
+                                                                VBOX_SHCL_MAIN_CLIENT_NONE));
+
                     ClipboardSource_T enmSource = ClipboardSource_Custom;
                     hrc = ptrFormatEvent->COMGETTER(ClipboardSource)(&enmSource);
                     RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("COMGETTER(ClipboardSource)(format event) failed, hrc=%Rhrc\n", hrc));
@@ -1176,6 +2327,10 @@ static void tstClipboardPublicApi(RTTEST hTest)
                     }
                 }
             }
+            else if (enmType == VBoxEventType_OnClipboardDataChanged)
+                RTTESTI_CHECK(tstClipboardCheckDataChangedEvent(ptrEvent, "public API data event",
+                                                                VBOX_SHCL_MAIN_CLIENT_NONE, ClipboardAction_Copy,
+                                                                NULL /* pptrItem */));
         }
 
         ComPtr<IEvent> ptrUnexpectedAfterWrite;
@@ -1365,6 +2520,15 @@ static void tstClipboardPublicApi(RTTEST hTest)
         hrc = ptrClipboard->ReadFormats(ComSafeArrayAsOutParam(aReadFormats));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("ReadFormats after Reset failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(aReadFormats.size() == 0);
+
+        RTTestSub(hTest, "Clipboard session survives console teardown setup");
+        hrc = tstCreateSession(ptrClipboard, NULL /* paFlags */, 0 /* cFlags */, ptrSurvivingSession);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("CreateSession(surviving) failed, hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK_MSG_BREAK(!ptrSurvivingSession.isNull(), ("CreateSession(surviving) returned NULL\n"));
+        hrc = ptrSurvivingSession->COMGETTER(Id)(&idSurvivingSession);
+        RTTESTI_CHECK_MSG_BREAK(SUCCEEDED(hrc), ("COMGETTER(Id)(surviving) failed, hrc=%Rhrc\n", hrc));
+        RTTESTI_CHECK_MSG(idSurvivingSession != VBOX_SHCL_MAIN_CLIENT_NONE,
+                          ("Surviving session returned anonymous/zero client ID before teardown\n"));
     } while (0);
 
     /* Clean up listeners and VM state regardless of which subtest exited early. */
@@ -1414,6 +2578,28 @@ static void tstClipboardPublicApi(RTTEST hTest)
                 RTTESTI_CHECK_MSG(SUCCEEDED(hrcCleanup), ("WaitForCompletion(DeleteConfig) failed, hrc=%Rhrc\n", hrcCleanup));
             }
         }
+    }
+
+    if (ptrSurvivingSession.isNotNull())
+    {
+        RTTestSub(hTest, "Clipboard session after console teardown");
+
+        ULONG idAfterTeardown = VBOX_SHCL_MAIN_CLIENT_NONE;
+        hrc = ptrSurvivingSession->COMGETTER(Id)(&idAfterTeardown);
+        RTTESTI_CHECK_MSG(   FAILED(hrc)
+                           || idAfterTeardown == idSurvivingSession,
+                           ("Surviving session ID changed from %RU32 to %RU32, hrc=%Rhrc\n",
+                            (uint32_t)idSurvivingSession, (uint32_t)idAfterTeardown, hrc));
+        RTTESTI_CHECK_MSG(   FAILED(hrc)
+                           || idAfterTeardown != VBOX_SHCL_MAIN_CLIENT_NONE,
+                           ("Surviving session returned anonymous/zero client ID after teardown\n"));
+
+        SafeIfaceArray<IClipboardFormat> aFormats;
+        hrc = ptrSurvivingSession->ReadFormats(ComSafeArrayAsOutParam(aFormats));
+        RTTESTI_CHECK_MSG(FAILED(hrc),
+                          ("ReadFormats on surviving session after console teardown unexpectedly succeeded\n"));
+
+        ptrSurvivingSession.setNull();
     }
 }
 

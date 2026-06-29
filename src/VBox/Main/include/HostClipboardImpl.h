@@ -1,4 +1,4 @@
-/* $Id: HostClipboardImpl.h 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: HostClipboardImpl.h 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Host clipboard API object.
  */
@@ -33,6 +33,8 @@
 
 #include "HostClipboardWrap.h"
 
+#include <VBox/GuestHost/SharedClipboard.h>
+
 #include <vector>
 
 class Clipboard;
@@ -50,7 +52,7 @@ public:
     HRESULT FinalConstruct();
     void FinalRelease();
 
-    HRESULT init(Clipboard *aParent);
+    HRESULT init(VBOXSHCLMAINCLIENTID aClientId, Clipboard *aParent);
     void uninit();
 
 private:
@@ -75,9 +77,12 @@ private:
     struct Data
     {
         Data()
-            : mParent(NULL)
+            : mClientId(VBOX_SHCL_MAIN_CLIENT_NONE)
+            , mParent(NULL)
         { }
 
+        /** Main clipboard client ID this endpoint is associated with. */
+        VBOXSHCLMAINCLIENTID mClientId;
         /** Parent clipboard object. */
         Clipboard *mParent;
     } mData;

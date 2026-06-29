@@ -3267,10 +3267,13 @@ es.unregisterListener(listener); </screen></para>
       </itemizedlist>
 
       <para>API clients should not expect Main to synthesize host clipboard
-      changes, poll the host clipboard, access platform-native clipboard APIs,
-      or retain a live provider after the client stops handling events. Main can
-      cache data that was explicitly written through the API, but guest-facing
-      reads only use data supplied in response to the current guest request.</para>
+      changes or retain a live provider after the client stops handling events.
+      Native host clipboard integration is exposed through
+      <link linkend="IHostClipboard">IHostClipboard</link> for clients that
+      implement a host bridge; Main does not implicitly poll or synchronize the
+      platform clipboard for other API clients. Main can cache data that was
+      explicitly written through the API, but lazy guest-facing reads require a
+      current provider to answer the matching request.</para>
     </sect1>
 
     <sect1 id="vboxclipboardapi-console">
@@ -3292,6 +3295,17 @@ es.unregisterListener(listener); </screen></para>
           clipboard object returned by <link linkend="IConsole__clipboard">IConsole::clipboard</link>.</para>
         </listitem>
         <listitem>
+          <para><link linkend="IClipboardSession">IClipboardSession</link>, a
+          client-specific session which tags operations with a non-zero client
+          identifier and provides a filtered event source and host clipboard
+          endpoint for that client.</para>
+        </listitem>
+        <listitem>
+          <para><link linkend="IHostClipboard">IHostClipboard</link>, the native
+          host clipboard endpoint associated with an <link linkend="IClipboard">IClipboard</link>
+          object or <link linkend="IClipboardSession">IClipboardSession</link>.</para>
+        </listitem>
+        <listitem>
           <para><link linkend="IClipboardFormat">IClipboardFormat</link>, which
           describes a clipboard MIME format.</para>
         </listitem>
@@ -3309,20 +3323,39 @@ es.unregisterListener(listener); </screen></para>
       <para>The console clipboard API also adds the
       <link linkend="ClipboardAction">ClipboardAction</link>,
       <link linkend="ClipboardSource">ClipboardSource</link>,
-      <link linkend="ClipboardTransferState">ClipboardTransferState</link>, and
-      <link linkend="ClipboardError">ClipboardError</link> enumerations.</para>
+      <link linkend="ClipboardTransferState">ClipboardTransferState</link>,
+      <link linkend="ClipboardError">ClipboardError</link>, and
+      <link linkend="IClipboardSessionFlag">IClipboardSessionFlag</link>
+      enumerations.</para>
+
+      <para>Clipboard events include a monotonic <literal>revision</literal>
+      value for the live console clipboard and a <literal>clientId</literal> value
+      identifying the originating clipboard API session. Multiple events for the
+      same visible state update may share a revision. A <literal>clientId</literal>
+      value of <literal>0</literal> means that no
+      <link linkend="IClipboardSession">IClipboardSession</link> originated the
+      event, for example a direct <link linkend="IClipboard">IClipboard</link>
+      call, a call through
+      <link linkend="IClipboard__hostClipboard">IClipboard::hostClipboard</link>,
+      a guest/backend-originated event, or an internal clipboard state change.
+      Real clipboard session identifiers are non-zero.</para>
 
       <para>Clipboard providers which announce formats before payload data is
-      available should listen for the waitable
+      available should listen for
       <link linkend="IClipboardDataRequestedEvent">IClipboardDataRequestedEvent</link>
-      event.  When this event is delivered, the provider can decide whether to
-      satisfy the request and publish matching data by calling
-      <link linkend="IClipboard__writeData">IClipboard::writeData</link> or
+      events. Native host clipboard requests created after
+      <link linkend="IHostClipboard__reportFormats">IHostClipboard::reportFormats</link>
+      are completed by calling
+      <link linkend="IHostClipboard__provideData">IHostClipboard::provideData</link>
+      with the event request id. Guest-facing generic clipboard requests are
+      satisfied by publishing matching data through
+      <link linkend="IClipboardSession__writeDataRaw">IClipboardSession::writeDataRaw</link>,
+      <link linkend="IClipboard__writeData">IClipboard::writeData</link>, or
       <link linkend="IClipboard__writeDataRaw">IClipboard::writeDataRaw</link>
-      with the requested action, source, and format.  Passive listeners must call
+      with the requested action, source, and format. Passive listeners must call
       <link linkend="IEventSource__eventProcessed">IEventSource::eventProcessed</link>
-      when handling is complete, including when no data is supplied, so that the
-      requesting side can continue.</para>
+      when handling a waitable event is complete, including when no data is
+      supplied, so that the requesting side can continue.</para>
     </sect1>
 
     <sect1 id="vboxclipboardapi-provider">
@@ -3330,10 +3363,22 @@ es.unregisterListener(listener); </screen></para>
 
       <para>A clipboard provider is an API client that owns or can retrieve
       clipboard payload data and makes it available to the guest through
-      <link linkend="IClipboard">IClipboard</link>. A graphical front-end will
-      usually bridge the host operating system clipboard. A command-line tool or
-      test program may instead provide data from a file, standard input, or an
-      application-specific source.</para>
+      <link linkend="IClipboard">IClipboard</link>, preferably by creating an
+      <link linkend="IClipboardSession">IClipboardSession</link> for new code.
+      A graphical front-end will usually bridge the host operating system
+      clipboard. A command-line tool or test program may instead provide data
+      from a file, standard input, or an application-specific source.</para>
+
+      <para>Session-aware providers can use
+      <literal>IClipboardSessionFlag_ExcludeOwnChanges</literal> and
+      <literal>IClipboardSessionFlag_ExcludeReflections</literal> to avoid
+      handling events caused by their own writes or conservative reflected
+      updates. They should use the session's event source and clipboard methods
+      when event origin tracking matters. Direct calls through
+      <link linkend="IClipboard">IClipboard</link> remain supported as the core
+      clipboard API primitives. Calls not associated with an
+      <link linkend="IClipboardSession">IClipboardSession</link> are anonymous
+      and produce <literal>clientId == 0</literal> in clipboard events.</para>
 
       <para>A typical eager provider uses the following pattern:</para>
 
@@ -3348,17 +3393,21 @@ es.unregisterListener(listener); </screen></para>
           so that the intended transfer direction is allowed.</para>
         </listitem>
         <listitem>
-          <para>Register a listener on
+          <para>Create an <link linkend="IClipboardSession">IClipboardSession</link>
+          if the provider needs event identity or own-event/reflection filtering.</para>
+        </listitem>
+        <listitem>
+          <para>Register a listener on the session event source, or on
           <link linkend="IClipboard__eventSource">IClipboard::eventSource</link>
-          for
+          for clients that do not use an <link linkend="IClipboardSession">IClipboardSession</link>, for
           <computeroutput>OnClipboardDataRequested</computeroutput> and,
           optionally,
           <computeroutput>OnClipboardError</computeroutput>.</para>
         </listitem>
         <listitem>
           <para>Create one or more <link linkend="IClipboardFormat">IClipboardFormat</link>
-          objects and call
-          <link linkend="IClipboard__writeFormats">IClipboard::writeFormats</link>
+          objects and call <link linkend="IClipboardSession__writeFormats">IClipboardSession::writeFormats</link>
+          or <link linkend="IClipboard__writeFormats">IClipboard::writeFormats</link>
           to announce the formats which can be supplied.</para>
         </listitem>
         <listitem>
@@ -3369,7 +3418,8 @@ es.unregisterListener(listener); </screen></para>
         </listitem>
         <listitem>
           <para>Retrieve or convert the payload data, then call
-          <link linkend="IClipboard__writeData">IClipboard::writeData</link> or
+          <link linkend="IClipboardSession__writeDataRaw">IClipboardSession::writeDataRaw</link>,
+          <link linkend="IClipboard__writeData">IClipboard::writeData</link>, or
           <link linkend="IClipboard__writeDataRaw">IClipboard::writeDataRaw</link>
           using the requested action, source, and MIME type.</para>
         </listitem>
@@ -3392,13 +3442,15 @@ es.unregisterListener(listener); </screen></para>
 <programlisting>clipboard = console.clipboard
 source = ClipboardSource_Host
 format = clipboard.createFormat("text/plain;charset=utf-8")
-eventSource = clipboard.eventSource
+session = clipboard.createSession([ IClipboardSessionFlag_ExcludeOwnChanges,
+                                    IClipboardSessionFlag_ExcludeReflections ])
+eventSource = session.eventSource
 listener = eventSource.createListener()
 eventSource.registerListener(listener,
                              [ OnClipboardDataRequested, OnClipboardError ],
                              false /* passive */)
 
-clipboard.writeFormats([ format ])
+session.writeFormats([ format ])
 
 while providerIsRunning:
     event = eventSource.getEvent(listener, timeout)
@@ -3406,10 +3458,10 @@ while providerIsRunning:
         request = IClipboardDataRequestedEvent(event)
         if request.clipboardSource == source and request.format.mimeType == format.mimeType:
             data = readOrConvertHostClipboardData(request.format.mimeType)
-            clipboard.writeDataRaw(request.action,
-                                   request.clipboardSource,
-                                   request.format.mimeType,
-                                   data)
+            session.writeDataRaw(request.action,
+                                 request.clipboardSource,
+                                 request.format.mimeType,
+                                 data)
         if event.waitable:
             eventSource.eventProcessed(listener, event)</programlisting>
 
@@ -3425,17 +3477,28 @@ while providerIsRunning:
       <title>Consuming guest clipboard data</title>
 
       <para>To implement guest-to-host clipboard behavior, listen for clipboard
-      source, format, and data events from
-      <link linkend="IClipboard__eventSource">IClipboard::eventSource</link>.
+      source, format, and data events from an
+      <link linkend="IClipboardSession__eventSource">IClipboardSession::eventSource</link>
+      or from <link linkend="IClipboard__eventSource">IClipboard::eventSource</link>
+      for clients that do not use an <link linkend="IClipboardSession">IClipboardSession</link>.
       When guest data is available, call
-      <link linkend="IClipboard__readData">IClipboard::readData</link> or
+      <link linkend="IClipboardSession__readDataRaw">IClipboardSession::readDataRaw</link>,
+      <link linkend="IClipboard__readData">IClipboard::readData</link>, or
       <link linkend="IClipboard__readDataRaw">IClipboard::readDataRaw</link>
       and then decide whether to place the returned payload into the host
-      operating system clipboard. Pass an empty requested MIME type to
-      <link linkend="IClipboard__readDataRaw">IClipboard::readDataRaw</link>
-      to let Main choose the preferred available format, or pass a specific
-      MIME type to read that format. The returned MIME type identifies the
-      actual payload representation.</para>
+      operating system clipboard. Pass an empty requested MIME type to the raw
+      read method to let Main choose the preferred available format, or pass a
+      specific MIME type to read that format. The returned MIME type identifies
+      the actual payload representation.</para>
+
+      <para>Consumers which need the current state immediately after registering
+      a listener can create the session with
+      <literal>IClipboardSessionFlag_IncludeInitialState</literal>. Consumers
+      which benefit from payload data in data-change events can request
+      <literal>IClipboardSessionFlag_IncludePayload</literal>. Event
+      <literal>revision</literal> and <literal>clientId</literal> metadata can be
+      used to order observed clipboard changes and correlate them with session
+      origins.</para>
     </sect1>
 
     <sect1 id="vboxclipboardapi-settings">
@@ -3455,7 +3518,7 @@ while providerIsRunning:
       <title>Compatibility notes and known issues</title>
 
       <para>The clipboard API changes are not backwards compatible for API
-      clients that used the old clipboard-related Main interfaces. In
+      clients written against the previous clipboard-related Main API layout. In
       particular, <link linkend="IMachine__clipboard">IMachine::clipboard</link>
       now returns <link linkend="IClipboardSettings">IClipboardSettings</link>
       for persistent VM configuration, while the live console clipboard object is
@@ -3466,16 +3529,19 @@ while providerIsRunning:
 
       <para>The former implicit host clipboard handling and the
       <computeroutput>useHostClipboard</computeroutput> control are removed from
-      the public API. Appplications which relied on Main to synchronize the host
+      the public API. Applications which relied on Main to synchronize the host
       operating system clipboard must now implement that synchronization
       explicitly by listening for clipboard events and calling the corresponding
       read and write methods.</para>
 
       <para>Older Guest Additions are still supported by the host service where
-      possible, including legacy protocol details needed by existing guests.
-      However, older API clients are not expected to receive the new event
+      possible, including compatibility protocol details needed by existing
+      guests. However, older API clients are not expected to receive the new event
       metadata or request/response behavior until they are rebuilt or updated for
-      the new interfaces.</para>
+      the new interfaces. The clipboard event interfaces have new interface
+      identifiers because the revision and clientId attributes were added, so
+      clients using generated bindings, COM QueryInterface calls, or cached
+      interface metadata must be rebuilt or regenerated against the updated SDK.</para>
 
       <para>Known limitations and issues to consider:</para>
 
@@ -3499,7 +3565,7 @@ while providerIsRunning:
         </listitem>
         <listitem>
           <para>Host platform clipboard APIs often have thread-affinity or user
-          session restictions. For example, graphical front-ends may need to
+          session restrictions. For example, graphical front-ends may need to
           access the host clipboard on their UI thread and then answer Main API
           requests from that event loop.</para>
         </listitem>
