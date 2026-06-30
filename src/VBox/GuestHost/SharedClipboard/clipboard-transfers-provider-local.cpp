@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers-provider-local.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-transfers-provider-local.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Transfers interface implementation for local file systems.
  */
@@ -77,13 +77,13 @@ static int shclTransferLocalListHdrFromDir(PSHCLLISTHDR pHdr, const char *pcszPa
     LogFlowFunc(("pcszPathAbs=%s\n", pcszPathAbs));
 
     RTFSOBJINFO objInfo;
-    int rc = RTPathQueryInfo(pcszPathAbs, &objInfo, RTFSOBJATTRADD_NOTHING);
+    int rc = RTPathQueryInfoEx(pcszPathAbs, &objInfo, RTFSOBJATTRADD_NOTHING, RTPATH_F_ON_LINK);
     if (RT_SUCCESS(rc))
     {
         if (RTFS_IS_DIRECTORY(objInfo.Attr.fMode))
         {
             RTDIR hDir;
-            rc = RTDirOpen(&hDir, pcszPathAbs);
+            rc = RTDirOpenFiltered(&hDir, pcszPathAbs, RTDIRFILTER_NONE, RTDIR_F_NO_FOLLOW);
             if (RT_SUCCESS(rc))
             {
                 size_t        cbDirEntry = 0;
@@ -143,9 +143,7 @@ static int shclTransferLocalListHdrFromDir(PSHCLLISTHDR pHdr, const char *pcszPa
             rc = shclTransferLocalListHdrAddFile(pHdr, pcszPathAbs);
         }
         else if (RTFS_IS_SYMLINK(objInfo.Attr.fMode))
-        {
-            /** @todo Not implemented yet. */
-        }
+            rc = VERR_IS_A_SYMLINK;
         else
             rc = VERR_NOT_SUPPORTED;
     }
@@ -166,6 +164,55 @@ DECLINLINE(SHCLLISTHANDLE) shClTransferLocalListHandleNew(PSHCLTRANSFER pTransfe
 }
 
 /**
+ * Checks all components in a local absolute path for symbolic links.
+ *
+ * @returns VBox status code.
+ * @param   pszPathAbs          Absolute path to check.
+ */
+static int shClTransferLocalPathEnsureNoSymlinks(const char *pszPathAbs)
+{
+    AssertPtrReturn(pszPathAbs, VERR_INVALID_POINTER);
+
+    union
+    {
+        RTPATHPARSED    Parsed;
+        uint8_t         ab[RTPATH_MAX + sizeof(RTPATHPARSED)];
+    } u;
+
+    int rc = RTPathParse(pszPathAbs, &u.Parsed, sizeof(u), RTPATH_STR_F_STYLE_HOST);
+    if (RT_FAILURE(rc))
+        return rc;
+
+    uint16_t const cComps = u.Parsed.cComps;
+    uint16_t idxComp = RTPATH_PROP_HAS_ROOT_SPEC(u.Parsed.fProps) ? 2 : 1;
+    if (idxComp > cComps)
+        idxComp = cComps;
+
+    for (; idxComp <= cComps; idxComp++)
+    {
+        u.Parsed.cComps = idxComp;
+
+        char szPath[RTPATH_MAX];
+        rc = RTPathParsedReassemble(pszPathAbs, &u.Parsed, RTPATH_STR_F_STYLE_HOST, szPath, sizeof(szPath));
+        if (RT_FAILURE(rc))
+            break;
+
+        RTFSOBJINFO ObjInfo;
+        rc = RTPathQueryInfoEx(szPath, &ObjInfo, RTFSOBJATTRADD_NOTHING, RTPATH_F_ON_LINK);
+        if (RT_FAILURE(rc))
+            break;
+        if (RTFS_IS_SYMLINK(ObjInfo.Attr.fMode))
+        {
+            LogRelMax(64, ("Shared Clipboard: Path component '%s' is a symbolic link\n", szPath));
+            rc = VERR_IS_A_SYMLINK;
+            break;
+        }
+    }
+
+    return rc;
+}
+
+/**
  * Queries information about a local list entry.
  *
  * @returns VBox status code.
@@ -178,13 +225,19 @@ static int shClTransferLocalListEntryQueryFsInfo(const char *pszPathRootAbs, PSH
     AssertPtrReturn(pszPathRootAbs, VERR_INVALID_POINTER);
     AssertPtrReturn(pListEntry, VERR_INVALID_POINTER);
 
-    const char *pszSrcPathAbs = RTPathJoinA(pszPathRootAbs, pListEntry->pszName);
+    char *pszSrcPathAbs = RTPathJoinA(pszPathRootAbs, pListEntry->pszName);
     AssertPtrReturn(pszSrcPathAbs, VERR_NO_MEMORY);
 
-    RTFSOBJINFO fsObjInfo;
-    int rc = RTPathQueryInfo(pszSrcPathAbs, &fsObjInfo, RTFSOBJATTRADD_NOTHING);
+    int rc = shClTransferLocalPathEnsureNoSymlinks(pszSrcPathAbs);
     if (RT_SUCCESS(rc))
-        rc = ShClFsObjInfoFromIPRT(pFsObjInfo, &fsObjInfo);
+    {
+        RTFSOBJINFO fsObjInfo;
+        rc = RTPathQueryInfoEx(pszSrcPathAbs, &fsObjInfo, RTFSOBJATTRADD_NOTHING, RTPATH_F_ON_LINK);
+        if (RT_SUCCESS(rc))
+            rc = ShClFsObjInfoFromIPRT(pFsObjInfo, &fsObjInfo);
+    }
+
+    RTStrFree(pszSrcPathAbs);
 
     return rc;
 }
@@ -230,63 +283,70 @@ static DECLCALLBACK(int) shclTransferIfaceLocalListOpen(PSHCLTXPROVIDERCTX pCtx,
             rc = ShClTransferResolvePathAbs(pTransfer, pOpenParms->pszPath, 0 /* fFlags */, &pInfo->pszPathLocalAbs);
             if (RT_SUCCESS(rc))
             {
-                RTFSOBJINFO objInfo;
-                rc = RTPathQueryInfo(pInfo->pszPathLocalAbs, &objInfo, RTFSOBJATTRADD_NOTHING);
+                rc = shClTransferLocalPathEnsureNoSymlinks(pInfo->pszPathLocalAbs);
                 if (RT_SUCCESS(rc))
                 {
-                    if (RTFS_IS_DIRECTORY(objInfo.Attr.fMode))
-                    {
-                        rc = RTDirOpen(&pInfo->u.Local.hDir, pInfo->pszPathLocalAbs);
-                        if (RT_SUCCESS(rc))
-                        {
-                            pInfo->enmType = SHCLOBJTYPE_DIRECTORY;
-
-                            LogRel2(("Shared Clipboard: Opening directory '%s'\n", pInfo->pszPathLocalAbs));
-                        }
-                        else
-                            LogRel(("Shared Clipboard: Opening directory '%s' failed with %Rrc\n", pInfo->pszPathLocalAbs, rc));
-
-                    }
-                    else if (RTFS_IS_FILE(objInfo.Attr.fMode))
-                    {
-                        rc = RTFileOpen(&pInfo->u.Local.hFile, pInfo->pszPathLocalAbs,
-                                        RTFILE_O_OPEN | RTFILE_O_READ | RTFILE_O_DENY_WRITE);
-                        if (RT_SUCCESS(rc))
-                        {
-                            pInfo->enmType = SHCLOBJTYPE_FILE;
-
-                            LogRel2(("Shared Clipboard: Opening file '%s'\n", pInfo->pszPathLocalAbs));
-                        }
-                        else
-                            LogRel(("Shared Clipboard: Opening file '%s' failed with %Rrc\n", pInfo->pszPathLocalAbs, rc));
-                    }
-                    else
-                        rc = VERR_NOT_SUPPORTED;
-
+                    RTFSOBJINFO objInfo;
+                    rc = RTPathQueryInfoEx(pInfo->pszPathLocalAbs, &objInfo, RTFSOBJATTRADD_NOTHING, RTPATH_F_ON_LINK);
                     if (RT_SUCCESS(rc))
-                    {
-                        pInfo->hList = shClTransferLocalListHandleNew(pTransfer);
-
-                        RTListAppend(&pTransfer->lstHandles, &pInfo->Node);
-                        pTransfer->cListHandles++;
-
-                        if (phList)
-                            *phList = pInfo->hList;
-
-                        LogFlowFunc(("pszPathLocalAbs=%s, hList=%RU64, cListHandles=%RU32\n",
-                                     pInfo->pszPathLocalAbs, pInfo->hList, pTransfer->cListHandles));
-                    }
-                    else
                     {
                         if (RTFS_IS_DIRECTORY(objInfo.Attr.fMode))
                         {
-                            if (RTDirIsValid(pInfo->u.Local.hDir))
-                                RTDirClose(pInfo->u.Local.hDir);
+                            rc = RTDirOpenFiltered(&pInfo->u.Local.hDir, pInfo->pszPathLocalAbs,
+                                                   RTDIRFILTER_NONE, RTDIR_F_NO_FOLLOW);
+                            if (RT_SUCCESS(rc))
+                            {
+                                pInfo->enmType = SHCLOBJTYPE_DIRECTORY;
+
+                                LogRel2(("Shared Clipboard: Opening directory '%s'\n", pInfo->pszPathLocalAbs));
+                            }
+                            else
+                                LogRel(("Shared Clipboard: Opening directory '%s' failed with %Rrc\n", pInfo->pszPathLocalAbs, rc));
+
                         }
                         else if (RTFS_IS_FILE(objInfo.Attr.fMode))
                         {
-                            if (RTFileIsValid(pInfo->u.Local.hFile))
-                                RTFileClose(pInfo->u.Local.hFile);
+                            rc = RTFileOpen(&pInfo->u.Local.hFile, pInfo->pszPathLocalAbs,
+                                            RTFILE_O_OPEN | RTFILE_O_READ | RTFILE_O_DENY_WRITE | RTFILE_O_NO_SYMLINKS);
+                            if (RT_SUCCESS(rc))
+                            {
+                                pInfo->enmType = SHCLOBJTYPE_FILE;
+
+                                LogRel2(("Shared Clipboard: Opening file '%s'\n", pInfo->pszPathLocalAbs));
+                            }
+                            else
+                                LogRel(("Shared Clipboard: Opening file '%s' failed with %Rrc\n", pInfo->pszPathLocalAbs, rc));
+                        }
+                        else if (RTFS_IS_SYMLINK(objInfo.Attr.fMode))
+                            rc = VERR_IS_A_SYMLINK;
+                        else
+                            rc = VERR_NOT_SUPPORTED;
+
+                        if (RT_SUCCESS(rc))
+                        {
+                            pInfo->hList = shClTransferLocalListHandleNew(pTransfer);
+
+                            RTListAppend(&pTransfer->lstHandles, &pInfo->Node);
+                            pTransfer->cListHandles++;
+
+                            if (phList)
+                                *phList = pInfo->hList;
+
+                            LogFlowFunc(("pszPathLocalAbs=%s, hList=%RU64, cListHandles=%RU32\n",
+                                         pInfo->pszPathLocalAbs, pInfo->hList, pTransfer->cListHandles));
+                        }
+                        else
+                        {
+                            if (RTFS_IS_DIRECTORY(objInfo.Attr.fMode))
+                            {
+                                if (RTDirIsValid(pInfo->u.Local.hDir))
+                                    RTDirClose(pInfo->u.Local.hDir);
+                            }
+                            else if (RTFS_IS_FILE(objInfo.Attr.fMode))
+                            {
+                                if (RTFileIsValid(pInfo->u.Local.hFile))
+                                    RTFileClose(pInfo->u.Local.hFile);
+                            }
                         }
                     }
                 }
@@ -569,11 +629,27 @@ static DECLCALLBACK(int) shclTransferIfaceLocalObjOpen(PSHCLTXPROVIDERCTX pCtx,
                                                 &pInfo->pszPathLocalAbs);
                 if (RT_SUCCESS(rc))
                 {
-                    rc = RTFileOpen(&pInfo->u.Local.hFile, pInfo->pszPathLocalAbs, fOpen);
+                    rc = shClTransferLocalPathEnsureNoSymlinks(pInfo->pszPathLocalAbs);
                     if (RT_SUCCESS(rc))
-                        LogRel2(("Shared Clipboard: Opened file '%s'\n", pInfo->pszPathLocalAbs));
-                    else
-                        LogRel(("Shared Clipboard: Error opening file '%s': rc=%Rrc\n", pInfo->pszPathLocalAbs, rc));
+                    {
+                        RTFSOBJINFO objInfo;
+                        rc = RTPathQueryInfoEx(pInfo->pszPathLocalAbs, &objInfo, RTFSOBJATTRADD_NOTHING, RTPATH_F_ON_LINK);
+                        if (RT_SUCCESS(rc))
+                        {
+                            if (RTFS_IS_SYMLINK(objInfo.Attr.fMode))
+                                rc = VERR_IS_A_SYMLINK;
+                            else if (!RTFS_IS_FILE(objInfo.Attr.fMode))
+                                rc = VERR_NOT_A_FILE;
+                        }
+                        if (RT_SUCCESS(rc))
+                        {
+                            rc = RTFileOpen(&pInfo->u.Local.hFile, pInfo->pszPathLocalAbs, fOpen | RTFILE_O_NO_SYMLINKS);
+                            if (RT_SUCCESS(rc))
+                                LogRel2(("Shared Clipboard: Opened file '%s'\n", pInfo->pszPathLocalAbs));
+                            else
+                                LogRel(("Shared Clipboard: Error opening file '%s': rc=%Rrc\n", pInfo->pszPathLocalAbs, rc));
+                        }
+                    }
                 }
             }
         }

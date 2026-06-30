@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114427 2026-06-18 08:48:19Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the Shared Clipboard Host Service testcases.
 #
@@ -86,6 +86,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   	$(if $(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP),VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP,)
   tstClipboardMockHGCM_SOURCES += \
   	../VBoxSharedClipboardSvc-transfers.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardPath.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp
   if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP)
@@ -159,6 +160,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   tstClipboardServiceHost_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
   tstClipboardServiceHost_SOURCES += \
   	../VBoxSharedClipboardSvc-transfers.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardPath.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp
  endif
@@ -193,6 +195,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   tstClipboardTransfers_SOURCES  = \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardPath.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp \
   	tstClipboardTransfers.cpp
@@ -207,6 +210,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-common.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-helper.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-win.cpp \
+  	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardPath.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp \
   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardDataObjectImpl-win.cpp \

@@ -1,4 +1,4 @@
-/* $Id: ClipboardPath.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: ClipboardPath.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Path handling.
  */
@@ -74,8 +74,8 @@ int ShClPathSanitizeFilename(char *pszPath, size_t cbPath)
 }
 
 /**
- * Sanitizes a given path regarding invalid / unhandled characters.
- * Currently not implemented.
+ * Sanitizes a given path regarding invalid / unhandled characters and rejects
+ * dot path components.
  *
  * @returns VBox status code.
  * @param   pszPath             Path to sanitize. UTF-8.
@@ -83,9 +83,54 @@ int ShClPathSanitizeFilename(char *pszPath, size_t cbPath)
  */
 int ShClPathSanitize(char *pszPath, size_t cbPath)
 {
-    RT_NOREF(pszPath, cbPath);
+    AssertPtrReturn(pszPath, VERR_INVALID_POINTER);
+    AssertReturn(cbPath, VERR_INVALID_PARAMETER);
 
-    /** @todo */
+    size_t const cchPath = RTStrNLen(pszPath, cbPath);
+    if (cchPath >= cbPath)
+        return VERR_BUFFER_OVERFLOW;
+
+    int rc = RTStrValidateEncodingEx(pszPath, cchPath + 1, RTSTR_VALIDATE_ENCODING_ZERO_TERMINATED);
+    if (RT_FAILURE(rc))
+        return rc;
+
+    if (!cchPath)
+        return VINF_SUCCESS;
+
+#if defined(RT_OS_WINDOWS) || defined(RT_OS_OS2)
+    RTPathChangeToUnixSlashes(pszPath, true /* fForce */);
+#endif
+
+    char *pszComponent = pszPath;
+    for (size_t off = 0; off <= cchPath; off++)
+    {
+        if (   pszPath[off] == '/'
+            || pszPath[off] == '\0')
+        {
+            char const chSaved = pszPath[off];
+            pszPath[off] = '\0';
+
+            if (*pszComponent)
+            {
+                if (   !RTStrCmp(pszComponent, ".")
+                    || !RTStrCmp(pszComponent, ".."))
+                {
+                    pszPath[off] = chSaved;
+                    return VERR_INVALID_PARAMETER;
+                }
+
+                rc = ShClPathSanitizeFilename(pszComponent, strlen(pszComponent) + 1);
+                if (RT_FAILURE(rc))
+                {
+                    pszPath[off] = chSaved;
+                    return rc;
+                }
+            }
+
+            pszPath[off] = chSaved;
+            pszComponent = &pszPath[off + 1];
+        }
+    }
 
     return VINF_SUCCESS;
 }

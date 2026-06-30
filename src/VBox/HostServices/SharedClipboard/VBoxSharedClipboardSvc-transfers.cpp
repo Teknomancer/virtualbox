@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114423 2026-06-18 07:53:57Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -54,6 +54,121 @@
 *   Internal Functions                                                                                                           *
 *********************************************************************************************************************************/
 static int shClSvcTransferModeSet(uint32_t fMode);
+
+
+/**
+ * Looks up a transfer by ID across all connected clients.
+ *
+ * @returns VBox status code.
+ * @param   idTransfer          Transfer ID to look up.
+ * @param   ppClient            Where to return the owning client.
+ * @param   ppTransfer          Where to return the transfer.
+ */
+static int shClSvcTransferFindById(SHCLTRANSFERID idTransfer, PSHCLCLIENT *ppClient, PSHCLTRANSFER *ppTransfer)
+{
+    AssertPtrReturn(ppClient, VERR_INVALID_POINTER);
+    AssertPtrReturn(ppTransfer, VERR_INVALID_POINTER);
+    AssertReturn(   idTransfer != NIL_SHCLTRANSFERID
+                 && idTransfer > 0
+                 && idTransfer < VBOX_SHCL_MAX_TRANSFERS - 1, VERR_INVALID_PARAMETER);
+
+    *ppClient   = NULL;
+    *ppTransfer = NULL;
+
+    int rc = RTCritSectEnter(&g_CritSect);
+    if (RT_FAILURE(rc))
+        return rc;
+
+    ClipboardClientMap::const_iterator itClient = g_mapClients.begin();
+    while (itClient != g_mapClients.end())
+    {
+        PSHCLCLIENT pClient = itClient->second;
+        if (pClient)
+        {
+            PSHCLTRANSFER pTransfer = ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
+            if (pTransfer)
+            {
+                if (*ppTransfer)
+                {
+                    rc = VERR_DUPLICATE;
+                    break;
+                }
+
+                *ppClient   = pClient;
+                *ppTransfer = pTransfer;
+            }
+        }
+
+        ++itClient;
+    }
+
+    int rc2 = RTCritSectLeave(&g_CritSect);
+    AssertRC(rc2);
+    if (RT_SUCCESS(rc))
+        rc = rc2;
+
+    if (   RT_SUCCESS(rc)
+        && !*ppTransfer)
+        rc = VERR_SHCLPB_TRANSFER_ID_NOT_FOUND;
+
+    return rc;
+}
+
+
+/**
+ * Aborts a transfer from a host request and tears it down locally.
+ *
+ * @returns VBox status code.
+ * @param   idTransfer          Transfer ID to abort.
+ * @param   enmStatus           Terminal abort status to report.
+ * @param   rcTransfer          Transfer result code to report.
+ */
+static int shClSvcTransferAbortByHost(SHCLTRANSFERID idTransfer, SHCLTRANSFERSTATUS enmStatus, int rcTransfer)
+{
+    AssertReturn(   enmStatus == SHCLTRANSFERSTATUS_CANCELED
+                 || enmStatus == SHCLTRANSFERSTATUS_ERROR, VERR_INVALID_PARAMETER);
+
+    PSHCLCLIENT   pClient;
+    PSHCLTRANSFER pTransfer;
+    int rc = shClSvcTransferFindById(idTransfer, &pClient, &pTransfer);
+    if (RT_FAILURE(rc))
+        return rc;
+
+    ShClSvcClientLock(pClient);
+
+    pTransfer = ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
+    if (!pTransfer)
+    {
+        ShClSvcClientUnlock(pClient);
+        return VERR_SHCLPB_TRANSFER_ID_NOT_FOUND;
+    }
+
+    int rcState;
+    if (enmStatus == SHCLTRANSFERSTATUS_CANCELED)
+        rcState = ShClTransferCancel(pTransfer);
+    else
+        rcState = ShClTransferError(pTransfer, rcTransfer);
+
+    int rcStatus = VINF_SUCCESS;
+    if (RT_SUCCESS(rcState))
+        rcStatus = shClSvcTransferSendStatusAsync(pClient, pTransfer, enmStatus, rcTransfer, NULL /* ppEvent */);
+
+    int rcUnregister = ShClTransferCtxUnregisterById(&pClient->Transfers.Ctx, idTransfer);
+
+    ShClSvcClientUnlock(pClient);
+
+    int rcDestroy = ShClTransferDestroy(pTransfer);
+    if (RT_SUCCESS(rc))
+        rc = rcState;
+    if (RT_SUCCESS(rc))
+        rc = rcStatus;
+    if (RT_SUCCESS(rc))
+        rc = rcUnregister;
+    if (RT_SUCCESS(rc))
+        rc = rcDestroy;
+
+    return rc;
+}
 
 
 /**
@@ -271,6 +386,12 @@ static int shClSvcTransferMsgGetRootListHdr(uint32_t cParms, VBOXHGCMSVCPARM aPa
         rc = HGCMSvcGetU32(&aParms[1], &pRootLstHdr->fFeatures);
         if (RT_SUCCESS(rc))
             rc = HGCMSvcGetU64(&aParms[2], &pRootLstHdr->cEntries);
+        if (RT_SUCCESS(rc))
+        {
+            pRootLstHdr->cbTotalSize = 0;
+            if (!ShClTransferListHdrIsValid(pRootLstHdr))
+                rc = VERR_INVALID_PARAMETER;
+        }
     }
     else
         rc = VERR_INVALID_PARAMETER;
@@ -308,6 +429,11 @@ static int shClSvcTransferMsgGetRootListEntry(uint32_t cParms, VBOXHGCMSVCPARM a
                 AssertReturn(cbInfo == pListEntry->cbInfo, VERR_INVALID_PARAMETER);
             }
         }
+        if (RT_SUCCESS(rc))
+        {
+            if (!ShClTransferListEntryIsValid(pListEntry))
+                rc = VERR_INVALID_PARAMETER;
+        }
     }
     else
         rc = VERR_INVALID_PARAMETER;
@@ -337,7 +463,16 @@ static int shClSvcTransferMsgGetListOpen(uint32_t cParms, VBOXHGCMSVCPARM aParms
         if (RT_SUCCESS(rc))
             rc = HGCMSvcGetStr(&aParms[3], &pOpenParms->pszPath, &pOpenParms->cbPath);
 
-        /** @todo Some more validation. */
+        if (RT_SUCCESS(rc))
+        {
+            if (pOpenParms->fList & ~VBOX_SHCL_LIST_F_VALID_MASK)
+                rc = VERR_INVALID_FLAGS;
+            else if (   pOpenParms->pszFilter
+                     && !RTStrIsValidEncoding(pOpenParms->pszFilter))
+                rc = VERR_INVALID_UTF8_ENCODING;
+            else if (pOpenParms->pszPath)
+                rc = ShClTransferValidatePath(pOpenParms->pszPath, false /* fMustExist */);
+        }
     }
     else
         rc = VERR_INVALID_PARAMETER;
@@ -375,6 +510,8 @@ static int shClSvcTransferMsgGetListHdr(uint32_t cParms, VBOXHGCMSVCPARM aParms[
         {
             /** @todo Validate pvMetaFmt + cbMetaFmt. */
             /** @todo Validate header checksum. */
+            if (!ShClTransferListHdrIsValid(pListHdr))
+                rc = VERR_INVALID_PARAMETER;
         }
     }
     else
@@ -879,6 +1016,10 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
     const SHCLTRANSFERID idTransfer = VBOX_SHCL_CONTEXTID_GET_TRANSFER(uCID);
     PSHCLTRANSFER        pTransfer  = ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
 
+    if (   u32Function != VBOX_SHCL_GUEST_FN_REPLY
+        && !pTransfer)
+        return VERR_SHCLPB_TRANSFER_ID_NOT_FOUND;
+
     rc = VERR_INVALID_PARAMETER; /* Play safe. */
 
     switch (u32Function)
@@ -1212,6 +1353,7 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                 && (   !cbBuf
                     || !cbToRead
                     ||  cbBuf < cbToRead
+                    ||  cbToRead > pTransfer->cbMaxChunkSize
                    )
                )
             {
@@ -1237,6 +1379,9 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
             SHCLOBJDATACHUNK dataChunk;
 
             rc = shClSvcTransferGetObjDataChunk(cParms, aParms, &dataChunk);
+            if (   RT_SUCCESS(rc)
+                && dataChunk.cbData > pTransfer->cbMaxChunkSize)
+                rc = VERR_BUFFER_OVERFLOW;
             if (RT_SUCCESS(rc))
             {
                 void    *pvData = ShClTransferObjDataChunkDup(&dataChunk);
@@ -1316,11 +1461,47 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
             break;
         }
 
-        case VBOX_SHCL_HOST_FN_CANCEL: /** @todo BUGBUG Implement this. */
+        case VBOX_SHCL_HOST_FN_CANCEL:
+        {
+            if (cParms != 1)
+                rc = VERR_INVALID_PARAMETER;
+            else
+            {
+                uint32_t idTransfer;
+                rc = HGCMSvcGetU32(&aParms[0], &idTransfer);
+                if (RT_SUCCESS(rc))
+                    rc = shClSvcTransferAbortByHost((SHCLTRANSFERID)idTransfer,
+                                                    SHCLTRANSFERSTATUS_CANCELED, VERR_CANCELLED);
+            }
             break;
+        }
 
-        case VBOX_SHCL_HOST_FN_ERROR: /** @todo BUGBUG Implement this. */
+        case VBOX_SHCL_HOST_FN_ERROR:
+        {
+            if (cParms != 2)
+                rc = VERR_INVALID_PARAMETER;
+            else
+            {
+                uint32_t idTransfer;
+                rc = HGCMSvcGetU32(&aParms[0], &idTransfer);
+                if (RT_SUCCESS(rc))
+                {
+                    uint32_t uRcTransfer;
+                    rc = HGCMSvcGetU32(&aParms[1], &uRcTransfer);
+                    if (RT_SUCCESS(rc))
+                    {
+                        int const rcTransfer = (int32_t)uRcTransfer;
+                        if (   RT_FAILURE(rcTransfer)
+                            && rcTransfer != VERR_CANCELLED)
+                            rc = shClSvcTransferAbortByHost((SHCLTRANSFERID)idTransfer,
+                                                            SHCLTRANSFERSTATUS_ERROR, rcTransfer);
+                        else
+                            rc = VERR_INVALID_PARAMETER;
+                    }
+                }
+            }
             break;
+        }
 
         default:
             break;

@@ -1,4 +1,4 @@
-/* $Id: tstClipboardTransfers.cpp 114409 2026-06-17 21:04:54Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardTransfers.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard transfers test case.
  */
@@ -33,6 +33,7 @@
 #include <iprt/file.h>
 #include <iprt/path.h>
 #include <iprt/string.h>
+#include <iprt/symlink.h>
 #include <iprt/test.h>
 
 
@@ -295,6 +296,37 @@ static void testTransferObjOpenSingle(RTTEST hTest,
     RTTESTI_CHECK_RC_OK(rc);
 }
 
+static void testPathSanitize(void)
+{
+    RTTestISub("Testing path sanitizing");
+
+    /* Valid dotted names: expect success and no path changes. */
+    char szValid[] = "dir.with.dots/file...txt";
+    int rc = ShClPathSanitize(szValid, sizeof(szValid));
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+    RTTESTI_CHECK(!strcmp(szValid, "dir.with.dots/file...txt"));
+
+    /* Current-directory components are not transferable. */
+    char szDot[] = "dir/./file.txt";
+    rc = ShClPathSanitize(szDot, sizeof(szDot));
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+
+    /* Parent-directory components are not transferable. */
+    char szDotDot[] = "dir/../file.txt";
+    rc = ShClPathSanitize(szDotDot, sizeof(szDotDot));
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+
+    /* Malformed UTF-8 paths are rejected before use. */
+    char szInvalidUtf8[] = { (char)0xc0, (char)0xaf, '\0' };
+    rc = ShClPathSanitize(szInvalidUtf8, sizeof(szInvalidUtf8));
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_UTF8_ENCODING);
+
+    /* Unterminated bounded path buffers are rejected. */
+    char szUnterminated[] = { 'a', 'b' };
+    rc = ShClPathSanitize(szUnterminated, sizeof(szUnterminated));
+    RTTESTI_CHECK_RC(rc, VERR_BUFFER_OVERFLOW);
+}
+
 static void testEvents(void)
 {
     RTTestISub("Testing events");
@@ -391,6 +423,291 @@ static void testTransferRootsSet(RTTEST hTest)
     lstBreakout.clear();
     lstBase.append(TESTTRANSFERROOTENTRY("../does-not-exist"));
     testTransferRootsSetSingle(hTest, lstBase, lstBreakout, VERR_INVALID_PARAMETER);
+
+    RTCList<TESTTRANSFERROOTENTRY> lstBoundaryBase;
+    lstBoundaryBase.append(TESTTRANSFERROOTENTRY("my-transfer-1/file1.txt"));
+
+    RTCList<TESTTRANSFERROOTENTRY> lstBoundaryBreakout;
+    lstBoundaryBreakout.append(TESTTRANSFERROOTENTRY("my-transfer-10/file2.txt"));
+    /* Sibling prefix confusion is rejected (my-transfer-1 vs my-transfer-10). */
+    testTransferRootsSetSingle(hTest, lstBoundaryBase, lstBoundaryBreakout, VERR_PATH_DOES_NOT_START_WITH_ROOT);
+}
+
+static void testTransferObjOpenPrefixBoundary(RTTEST hTest)
+{
+    RTTestISub("Testing transfer object root prefix boundaries");
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    SHCLTXPROVIDER Provider;
+    ShClTransferProviderLocalQueryInterface(&Provider);
+
+    rc = ShClTransferSetProvider(pTransfer, &Provider);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char szTestTransferObjOpenDir[RTPATH_MAX];
+    rc = testCreateTempDir(hTest, "testTransferObjOpenPrefixBoundary", szTestTransferObjOpenDir,
+                           sizeof(szTestTransferObjOpenDir));
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    RTCList<TESTTRANSFERROOTENTRY> lstRoots;
+    lstRoots.append(TESTTRANSFERROOTENTRY("my-transfer-1/foo"));
+
+    RTCList<TESTTRANSFERROOTENTRY> lstToExtendEmpty;
+
+    char *pszRoots;
+    rc = testAddRootEntries(hTest, szTestTransferObjOpenDir, lstRoots, lstToExtendEmpty, &pszRoots);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = testCreateFile(hTest, szTestTransferObjOpenDir, "my-transfer-1/foobar", 0, 0, NULL);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferRootsSetFromStringList(pTransfer, pszRoots, strlen(pszRoots) + 1);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferInit(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RTStrFree(pszRoots);
+
+    SHCLOBJOPENCREATEPARMS openCreateParms;
+    rc = ShClTransferObjOpenParmsInit(&openCreateParms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = RTStrCopy(openCreateParms.pszPath, openCreateParms.cbPath, "foo");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    /* Exact authorized root entry opens successfully. */
+    SHCLOBJHANDLE hObj;
+    rc = ShClTransferObjOpen(pTransfer, &openCreateParms, &hObj);
+    RTTESTI_CHECK_RC_OK(rc);
+    if (RT_SUCCESS(rc))
+    {
+        rc = ShClTransferObjClose(pTransfer, hObj);
+        RTTESTI_CHECK_RC_OK(rc);
+    }
+
+    rc = RTStrCopy(openCreateParms.pszPath, openCreateParms.cbPath, "foobar");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    /* Sibling path sharing the same string prefix is not authorized. */
+    rc = ShClTransferObjOpen(pTransfer, &openCreateParms, &hObj);
+    RTTESTI_CHECK_RC(rc, VERR_PATH_NOT_FOUND);
+
+    ShClTransferObjOpenParmsDestroy(&openCreateParms);
+
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+}
+
+static void testTransferObjReadWriteValidation(void)
+{
+    RTTestISub("Testing transfer object read/write validation");
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreateEx(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, 4 /* cbMaxChunkSize */,
+                                  SHCL_TRANSFER_DEFAULT_MAX_LIST_HANDLES, SHCL_TRANSFER_DEFAULT_MAX_OBJ_HANDLES, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char abBuf[8];
+    uint32_t cbActual = 0;
+
+    /* Invalid read handles, pointers, sizes, chunks and flags are rejected with their precise status codes. */
+    rc = ShClTransferObjRead(pTransfer, NIL_SHCLOBJHANDLE, abBuf, 1, 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_HANDLE);
+    rc = ShClTransferObjRead(pTransfer, 1, NULL, 1, 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_POINTER);
+    rc = ShClTransferObjRead(pTransfer, 1, abBuf, 0, 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+    rc = ShClTransferObjRead(pTransfer, 1, abBuf, sizeof(abBuf), 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_BUFFER_OVERFLOW);
+    rc = ShClTransferObjRead(pTransfer, 1, abBuf, 1, 1 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_FLAGS);
+
+    /* Invalid write handles, pointers, sizes, chunks and flags are rejected with their precise status codes. */
+    rc = ShClTransferObjWrite(pTransfer, NIL_SHCLOBJHANDLE, abBuf, 1, 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_HANDLE);
+    rc = ShClTransferObjWrite(pTransfer, 1, NULL, 1, 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_POINTER);
+    rc = ShClTransferObjWrite(pTransfer, 1, abBuf, 0, 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+    rc = ShClTransferObjWrite(pTransfer, 1, abBuf, sizeof(abBuf), 0 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_BUFFER_OVERFLOW);
+    rc = ShClTransferObjWrite(pTransfer, 1, abBuf, 1, 1 /* fFlags */, &cbActual);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_FLAGS);
+
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+}
+
+static void testTransferListOpenEmptyPath(RTTEST hTest)
+{
+    RTTestISub("Testing transfer list empty-path rejection");
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    SHCLTXPROVIDER Provider;
+    ShClTransferProviderLocalQueryInterface(&Provider);
+
+    rc = ShClTransferSetProvider(pTransfer, &Provider);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char szTestTransferListOpenDir[RTPATH_MAX];
+    rc = testCreateTempDir(hTest, "testTransferListOpenEmptyPath", szTestTransferListOpenDir,
+                           sizeof(szTestTransferListOpenDir));
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char szRootDir[RTPATH_MAX];
+    rc = RTPathJoin(szRootDir, sizeof(szRootDir), szTestTransferListOpenDir, "my-transfer-1/dir");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = testCreateDir(hTest, szRootDir);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = testCreateFile(hTest, szTestTransferListOpenDir, "my-transfer-1/dir/file1.txt", 0, 0, NULL);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char *pszRoots = RTStrDup(szRootDir);
+    RTTESTI_CHECK_RETV(pszRoots);
+    rc = RTStrAAppend(&pszRoots, "\r\n");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = ShClTransferRootsSetFromStringList(pTransfer, pszRoots, strlen(pszRoots) + 1);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferInit(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RTStrFree(pszRoots);
+
+    SHCLLISTOPENPARMS openParms;
+    rc = ShClTransferListOpenParmsInit(&openParms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = RTStrCopy(openParms.pszPath, openParms.cbPath, "");
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = RTStrCopy(openParms.pszFilter, openParms.cbFilter, "");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    /* Empty list-open paths must not enumerate the common root. */
+    SHCLLISTHANDLE hList;
+    rc = ShClTransferListOpen(pTransfer, &openParms, &hList);
+    RTTESTI_CHECK_RC(rc, VERR_PATH_NOT_FOUND);
+
+    ShClTransferListOpenParmsDestroy(&openParms);
+
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+}
+
+static void testTransferSymlinkRejection(RTTEST hTest)
+{
+    RTTestISub("Testing transfer symlink rejection");
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    SHCLTXPROVIDER Provider;
+    ShClTransferProviderLocalQueryInterface(&Provider);
+
+    rc = ShClTransferSetProvider(pTransfer, &Provider);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char szTestTransferSymlinkDir[RTPATH_MAX];
+    rc = testCreateTempDir(hTest, "testTransferSymlinkRejection", szTestTransferSymlinkDir,
+                           sizeof(szTestTransferSymlinkDir));
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char szRootDir[RTPATH_MAX];
+    rc = RTPathJoin(szRootDir, sizeof(szRootDir), szTestTransferSymlinkDir, "my-transfer-1/dir");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = testCreateDir(hTest, szRootDir);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char *pszTargetFileAbs = NULL;
+    rc = testCreateFile(hTest, szTestTransferSymlinkDir, "my-transfer-1/target.txt", 0, 0, &pszTargetFileAbs);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char szLinkFile[RTPATH_MAX];
+    rc = RTPathJoin(szLinkFile, sizeof(szLinkFile), szRootDir, "link-file");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = RTSymlinkCreate(szLinkFile, pszTargetFileAbs, RTSYMLINKTYPE_FILE, 0 /* fCreate */);
+    if (RT_FAILURE(rc))
+    {
+        RTTestSkipped(hTest, "RTSymlinkCreate(file) failed: %Rrc", rc);
+        RTStrFree(pszTargetFileAbs);
+        RTTESTI_CHECK_RC_OK(ShClTransferDestroy(pTransfer));
+        return;
+    }
+
+    char szEscapeDir[RTPATH_MAX];
+    rc = RTPathJoin(szEscapeDir, sizeof(szEscapeDir), szTestTransferSymlinkDir, "escape");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = testCreateDir(hTest, szEscapeDir);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = testCreateFile(hTest, szTestTransferSymlinkDir, "escape/secret.txt", 0, 0, NULL);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char szLinkDir[RTPATH_MAX];
+    rc = RTPathJoin(szLinkDir, sizeof(szLinkDir), szRootDir, "link-out");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = RTSymlinkCreate(szLinkDir, szEscapeDir, RTSYMLINKTYPE_DIR, 0 /* fCreate */);
+    if (RT_FAILURE(rc))
+    {
+        RTTestSkipped(hTest, "RTSymlinkCreate(dir) failed: %Rrc", rc);
+        RTTESTI_CHECK_RC_OK(RTSymlinkDelete(szLinkFile, 0 /* fDelete */));
+        RTStrFree(pszTargetFileAbs);
+        RTTESTI_CHECK_RC_OK(ShClTransferDestroy(pTransfer));
+        return;
+    }
+
+    char *pszRoots = RTStrDup(szRootDir);
+    RTTESTI_CHECK_RETV(pszRoots);
+    rc = RTStrAAppend(&pszRoots, "\r\n");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = ShClTransferRootsSetFromStringList(pTransfer, pszRoots, strlen(pszRoots) + 1);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferInit(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RTStrFree(pszRoots);
+
+    SHCLOBJOPENCREATEPARMS openCreateParms;
+    rc = ShClTransferObjOpenParmsInit(&openCreateParms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = RTStrCopy(openCreateParms.pszPath, openCreateParms.cbPath, "dir/link-file");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    /* Final-component symlinks are rejected before file open. */
+    SHCLOBJHANDLE hObj;
+    rc = ShClTransferObjOpen(pTransfer, &openCreateParms, &hObj);
+    RTTESTI_CHECK_RC(rc, VERR_IS_A_SYMLINK);
+
+    rc = RTStrCopy(openCreateParms.pszPath, openCreateParms.cbPath, "dir/link-out/secret.txt");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    /* Intermediate directory symlink breakout is rejected. */
+    rc = ShClTransferObjOpen(pTransfer, &openCreateParms, &hObj);
+    RTTESTI_CHECK_RC(rc, VERR_IS_A_SYMLINK);
+
+    ShClTransferObjOpenParmsDestroy(&openCreateParms);
+    RTStrFree(pszTargetFileAbs);
+    RTTESTI_CHECK_RC_OK(RTSymlinkDelete(szLinkFile, 0 /* fDelete */));
+    RTTESTI_CHECK_RC_OK(RTSymlinkDelete(szLinkDir, 0 /* fDelete */));
+
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
 }
 
 static void testTransferObjOpen(RTTEST hTest)
@@ -438,9 +755,14 @@ int main(int argc, char *argv[])
     bool const fMayPanic = RTAssertSetMayPanic(false);
     bool const fQuiet    = RTAssertSetQuiet(true);
 
+    testPathSanitize();
     testEvents();
     testTransferBasics();
     testTransferRootsSet(hTest);
+    testTransferObjOpenPrefixBoundary(hTest);
+    testTransferObjReadWriteValidation();
+    testTransferListOpenEmptyPath(hTest);
+    testTransferSymlinkRejection(hTest);
     testTransferObjOpen(hTest);
 
     int rc = testRemoveTempDir(hTest);
