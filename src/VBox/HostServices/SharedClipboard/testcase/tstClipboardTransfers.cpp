@@ -1,4 +1,4 @@
-/* $Id: tstClipboardTransfers.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardTransfers.cpp 114574 2026-06-30 15:41:02Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard transfers test case.
  */
@@ -317,8 +317,8 @@ static void testPathSanitize(void)
     RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
 
     /* Malformed UTF-8 paths are rejected before use. */
-    char szInvalidUtf8[] = { (char)0xc0, (char)0xaf, '\0' };
-    rc = ShClPathSanitize(szInvalidUtf8, sizeof(szInvalidUtf8));
+    uint8_t abInvalidUtf8[] = { 0xc0, 0xaf, 0 };
+    rc = ShClPathSanitize((char *)abInvalidUtf8, sizeof(abInvalidUtf8));
     RTTESTI_CHECK_RC(rc, VERR_INVALID_UTF8_ENCODING);
 
     /* Unterminated bounded path buffers are rejected. */
