@@ -1,4 +1,4 @@
-/* $Id: vboxwl.cpp 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: vboxwl.cpp 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland helper for grabbing input focus, drag-n-drop and clipboard sharing.
  */
@@ -836,7 +836,7 @@ int main(int argc, char *argv[])
      *       will also have to set the append flag to prevent this.
      */
     /** @todo r=bird: Does this need to be fatal? */
-    VBOXWL_INIT(VBClLogCreateEx("", false),             "cannot create logger instance");
+    VBOXWL_INIT(VBClLogCreateEx("", false, false),      "cannot create logger instance");
     VBOXWL_INIT(VBClLogModify("stdout", g_cVerbosity),  "cannot setup log");
     VBClLogSetLogPrefix(s_pszLogPrefix);
 

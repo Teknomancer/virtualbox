@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114530 2026-06-25 10:47:49Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -931,6 +931,8 @@ DECLINLINE(void) shClCacheEntryReInit(PSHCLCACHEENTRY pCacheEntry)
         pCacheEntry->pvData = NULL;
         pCacheEntry->cbData = 0;
     }
+    else
+        Assert(pCacheEntry->cbData == 0);
 }
 
 /**
@@ -1015,6 +1017,37 @@ VBGH_DECL(PSHCLCACHEENTRY) ShClCacheGet(PSHCLCACHE pCache, SHCLFORMAT uFmt)
     AssertMsgReturn((unsigned)idxFmt < RT_ELEMENTS(pCache->aEntries), ("%#x/%d\n", uFmt, idxFmt), NULL);
 
     return shClCacheEntryIsValid(&pCache->aEntries[idxFmt]) ? &pCache->aEntries[idxFmt] : NULL;
+}
+
+/**
+ * Enteres a clipboard format into the cache before the data is read, returning
+ * a buffer for the user to fill.
+ *
+ * @returns VBox status code.
+ * @retval  VERR_ALREADY_EXISTS if the cache entry is not empty.
+ * @param   pCache              Cache to set data for.
+ * @param   uFmt                Clipboard format to set data for.
+ * @param   cbData              Size (in bytes) of data to prep for.
+ * @param   ppvData             Where to return the buffer (zeroed) prepared for
+ *                              the data.  Caller must fill this.
+ */
+VBGH_DECL(int) ShClCachePrep(PSHCLCACHE pCache, SHCLFORMAT uFmt, size_t cbData, void **ppvData)
+{
+    AssertPtrReturn(pCache, VERR_INVALID_POINTER);
+    AssertMsgReturn(pCache->u32Magic == SHCLCACHE_MAGIC, ("%#x\n", pCache->u32Magic), VERR_INVALID_MAGIC);
+    int const idxFmt = ShClFormatToBitNo(uFmt);
+    AssertMsgReturn((unsigned)idxFmt < RT_ELEMENTS(pCache->aEntries), ("%#x/%d\n", uFmt, idxFmt), VERR_INVALID_PARAMETER);
+    /* must be empty */
+    AssertReturn(!shClCacheEntryIsValid(&pCache->aEntries[idxFmt]), VERR_ALREADY_EXISTS);
+
+    pCache->aEntries[idxFmt].pvData = *ppvData = RTMemAllocZ(RT_MAX(cbData, 1));
+    if (pCache->aEntries[idxFmt].pvData)
+    {
+        pCache->aEntries[idxFmt].cbData = cbData;
+        return VINF_SUCCESS;
+    }
+    pCache->aEntries[idxFmt].cbData = 0;
+    return VERR_NO_MEMORY;
 }
 
 /**
@@ -1131,6 +1164,62 @@ VBGH_DECL(int) ShClCacheSetMultiple(PSHCLCACHE pCache, SHCLFORMATS uFmts, const 
 
     return rc;
 }
+
+/**
+ * Compares the content of two caches.
+ *
+ * @returns true if they have the same content, false if not.
+ * @param   pCache              The first cache.
+ * @param   pOtherCache         The second cache.
+ */
+VBGH_DECL(bool) ShClCacheEquals(SHCLCACHE const *pCache, SHCLCACHE const *pOtherCache)
+{
+    AssertPtrReturn(pCache, false);
+    AssertMsgReturn(pCache->u32Magic == SHCLCACHE_MAGIC, ("%#x\n", pCache->u32Magic), false);
+    AssertPtrReturn(pOtherCache, false);
+    AssertMsgReturn(pOtherCache->u32Magic == SHCLCACHE_MAGIC, ("%#x\n", pOtherCache->u32Magic), false);
+
+    for (unsigned i = 0; i < RT_ELEMENTS(pCache->aEntries); i++)
+        if (pCache->aEntries[i].cbData != pOtherCache->aEntries[i].cbData)
+            return false;
+
+    for (unsigned i = 0; i < RT_ELEMENTS(pCache->aEntries); i++)
+        if (   pCache->aEntries[i].cbData > 0
+            && memcmp(pCache->aEntries[i].pvData, pOtherCache->aEntries[i].pvData, pCache->aEntries[i].cbData) != 0)
+            return false;
+
+    return true;
+}
+
+
+/**
+ * Transfers the content of @a pOtherCache into @a pCache, resetting the former.
+ *
+ * The buffers are simply moved from one cache to the other, no new allocations
+ * or data copying takes place here.
+ *
+ * @returns VBox status code.
+ * @param   pCache              The destination cache.
+ * @param   pOtherCache         The source cache.
+ */
+VBGH_DECL(int) ShClCacheTransferAll(PSHCLCACHE pCache, PSHCLCACHE pOtherCache)
+{
+    AssertPtrReturn(pCache, false);
+    AssertMsgReturn(pCache->u32Magic == SHCLCACHE_MAGIC, ("%#x\n", pCache->u32Magic), false);
+    AssertPtrReturn(pOtherCache, false);
+    AssertMsgReturn(pOtherCache->u32Magic == SHCLCACHE_MAGIC, ("%#x\n", pOtherCache->u32Magic), false);
+
+    for (unsigned i = 0; i < RT_ELEMENTS(pCache->aEntries); i++)
+    {
+        shClCacheEntryReInit(&pCache->aEntries[i]);
+        pCache->aEntries[i].cbData = pOtherCache->aEntries[i].cbData;
+        pCache->aEntries[i].pvData = pOtherCache->aEntries[i].pvData;
+        pOtherCache->aEntries[i].cbData = 0;
+        pOtherCache->aEntries[i].pvData = NULL;
+    }
+    return VINF_SUCCESS;
+}
+
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_HOST
 /**
