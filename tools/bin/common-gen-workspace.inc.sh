@@ -1,5 +1,5 @@
 #!/usr/bin/env kmk_ash
-# $Id: common-gen-workspace.inc.sh 114391 2026-06-16 15:24:27Z andreas.loeffler@oracle.com $
+# $Id: common-gen-workspace.inc.sh 114571 2026-06-30 12:17:27Z knut.osmundsen@oracle.com $
 ## @file
 # Script for generating a SlickEdit workspace.
 #
@@ -268,7 +268,9 @@ my_generate_all_projects()
     my_generate_project "Add-os2"       "src/VBox/Additions/os2"                --begin-incs "include" "src/VBox/Additions/os2"                 --end-includes "src/VBox/Additions/os2"
     my_generate_project "Add-solaris"   "src/VBox/Additions/solaris"            --begin-incs "include" "src/VBox/Additions/solaris"             --end-includes "src/VBox/Additions/solaris"
     if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "Add-x11"   "src/VBox/Additions/x11"                --begin-incs "include" "src/VBox/Additions/x11"                 --end-includes "src/VBox/Additions/x11"
+        my_generate_project "Add-x11"   "src/VBox/Additions/x11"                --begin-incs "include" "src/VBox/Additions/x11" "src/VBox/Additions/x11/wlInclude" --end-includes "src/VBox/Additions/x11"
+    else
+        my_generate_project "Add-x11"   "src/VBox/Additions/x11"                --begin-incs "include" "src/VBox/Additions/x11" "src/VBox/Additions/x11/wlInclude" --end-includes "src/VBox/Additions/x11/Installer" "src/VBox/Additions/x11/VBoxClient" "src/VBox/Additions/x11/vboxmouse" "src/VBox/Additions/x11/vboxvideo" "src/VBox/Additions/x11/wlInclude"
     fi
     my_generate_project "Add-Control"   "src/VBox/Additions/common/VBoxControl" --begin-incs "include" "src/VBox/Additions/common/VBoxControl"  --end-includes "src/VBox/Additions/common/VBoxControl"
     my_generate_project "Add-VBoxGuest" "src/VBox/Additions/common/VBoxGuest"   --begin-incs "include" "src/VBox/Additions/common/VBoxGuest"    --end-includes "src/VBox/Additions/common/VBoxGuest"      "include/VBox/VBoxGuest*.*"
@@ -346,9 +348,7 @@ my_generate_all_projects()
     my_generate_project "HS-common"     "src/VBox/HostServices/common"          --begin-incs "include" "src/VBox/HostServices/common"           --end-includes "src/VBox/HostServices/common"
     my_generate_project "HS-testcase"   "src/VBox/HostServices/testcase"        --begin-incs "include" "src/VBox/HostServices/testcase"         --end-includes "src/VBox/HostServices/testcase"
     my_generate_project "HS-GstCtl"     "src/VBox/HostServices/GuestControl"    --begin-incs "include" "src/VBox/HostServices/GuestControl"     --end-includes "src/VBox/HostServices/GuestControl"
-    if test -z "$MY_OPT_MINIMAL"; then
-        my_generate_project "HS-DragAndDrop" "src/VBox/HostServices/DragAndDrop" --begin-incs "include" "src/VBox/HostServices/DragAndDrop"     --end-includes "src/VBox/HostServices/DragAndDrop"
-    fi
+    my_generate_project "HS-DragAndDrop" "src/VBox/HostServices/DragAndDrop"    --begin-incs "include" "src/VBox/HostServices/DragAndDrop"      --end-includes "src/VBox/HostServices/DragAndDrop"
     my_generate_project "HS-GuestProps" "src/VBox/HostServices/GuestProperties" --begin-incs "include" "src/VBox/HostServices/GuestProperties"  --end-includes "src/VBox/HostServices/GuestProperties"
     my_generate_project "HS-ShClip"     "src/VBox/HostServices/SharedClipboard" --begin-incs "include" "src/VBox/HostServices/SharedClipboard"  --end-includes "src/VBox/HostServices/SharedClipboard"
     my_generate_project "HS-ShFolders"  "src/VBox/HostServices/SharedFolders"   --begin-incs "include" "src/VBox/HostServices/SharedFolders"    --end-includes "src/VBox/HostServices/SharedFolders" "include/VBox/shflsvc.h"
