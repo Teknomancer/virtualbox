@@ -1,4 +1,4 @@
-/* $Id: WaylandPopup.h 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
+/* $Id: WaylandPopup.h 114568 2026-06-30 11:58:54Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest / Host common code - Wayland Popup (for focus grabbing).
  */
@@ -47,6 +47,7 @@
 struct wl_compositor;
 struct wl_buffer;
 struct wl_keyboard;
+struct wl_registry;
 struct wl_shm;
 struct wl_shm_pool;
 struct wl_shell;
