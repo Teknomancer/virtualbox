@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114570 2026-06-30 12:16:39Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -232,9 +232,11 @@ int VBClExplicitLoadClientLibrariesForDisplayServer(VBGHDISPLAYSERVERTYPE enmTyp
             break;
 
         case VBGHDISPLAYSERVERTYPE_PURE_WAYLAND:
+#ifdef VBOX_WITH_WAYLAND_ADDITIONS
             rc = ExplicitlyLoadlibwayland_client(true /*fResolveAllImports*/, RTErrInfoInitStatic(&ErrInfo));
             if (RT_FAILURE(rc))
                 VBClLogError("ExplicitlyLoadlibwayland_client failed: %Rrc%#RTeim\n", rc, &ErrInfo.Core);
+#endif
             break;
 
         case VBGHDISPLAYSERVERTYPE_AUTO:
