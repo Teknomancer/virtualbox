@@ -1,4 +1,4 @@
-/* $Id: ClipboardMIME.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-mime.cpp 114575 2026-06-30 15:58:06Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Path list class.
  */

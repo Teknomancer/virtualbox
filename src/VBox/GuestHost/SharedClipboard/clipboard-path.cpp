@@ -1,4 +1,4 @@
-/* $Id: ClipboardPath.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-path.cpp 114575 2026-06-30 15:58:06Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Path handling.
  */

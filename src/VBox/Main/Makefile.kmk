@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114575 2026-06-30 15:58:06Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VBox Main module.
 #
@@ -1354,7 +1354,7 @@ if !defined(VBOX_ONLY_SDK) && !defined(VBOX_ONLY_EXTPACKS) # Note this goes on f
    endif
    VBoxC_SOURCES += \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers-provider-local.cpp \
-   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardPath.cpp \
+   	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-path.cpp \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/clipboard-transfers.cpp
    VBoxC_SOURCES.win += \
    	$(PATH_ROOT)/src/VBox/GuestHost/SharedClipboard/ClipboardDataObjectImpl-win.cpp \
