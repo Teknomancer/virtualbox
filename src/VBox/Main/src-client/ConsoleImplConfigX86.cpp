@@ -1,4 +1,4 @@
-/* $Id: ConsoleImplConfigX86.cpp 113542 2026-03-24 15:42:24Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleImplConfigX86.cpp 114577 2026-07-01 08:25:16Z alexander.eichner@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation - VM Configuration Bits.
  *
@@ -296,18 +296,24 @@ HRESULT Console::i_attachRawPCIDevices(PUVM pUVM, PCVMMR3VTABLE pVMM, BusAssignm
     }
 
     uint32_t iDev = 0;
+    PCIBusAddress hostPciAddrCur(UINT32_MAX);
+    uint8_t  idxFn = 0;
     for (std::map<PCIBusAddress,PCIBusAddress>::iterator it = PCIMap.begin(); it != PCIMap.end(); it++)
     {
         PCIBusAddress hostAddress = it->first;
         PCIBusAddress guestAddress = it->second;
 
         /*
-         * Do some sanity checks here:
+         * Enforce some sanity here:
          *    1. Individual functions belonging to the same host device must also belong to the same guest device.
-         *    2. There always must be a device with function 0.
-         *    3. Can't mash different host devices into the same guest device.
+         *    2. Can't mash different host devices into the same guest device.
+         *    3. Functions need to be ascending starting with 0.
          */
-        if (hostAddress.miFn == 0)
+
+        /* New device (ignores function)? */
+        if (   hostAddress.mu16Domain != hostPciAddrCur.mu16Domain
+            || hostAddress.miBus      != hostPciAddrCur.miBus
+            || hostAddress.miDevice   != hostPciAddrCur.miDevice)
         {
             /* New device. */
             InsertConfigNodeF(pPCIDevs, &pInst, "%d", iDev++);
@@ -317,6 +323,9 @@ HRESULT Console::i_attachRawPCIDevices(PUVM pUVM, PCVMMR3VTABLE pVMM, BusAssignm
             hrc = pBusMgr->assignHostPCIDevice("pci-vfio", pInst, hostAddress, guestAddress, true);
             if (hrc != S_OK)
                 return hrc;
+
+            hostPciAddrCur = hostAddress;
+            idxFn = 0; /* Start the function from the beginning again. */
         }
 
         char szHostAddr[32]; /* Format is xxxx:xx:xx.x */
@@ -324,8 +333,9 @@ HRESULT Console::i_attachRawPCIDevices(PUVM pUVM, PCVMMR3VTABLE pVMM, BusAssignm
                     hostAddress.mu16Domain, hostAddress.miBus, hostAddress.miDevice, hostAddress.miFn);
 
         PCFGMNODE pCfgFun = NULL;
-        InsertConfigNodeF(pCfg, &pCfgFun, "Fun%u", hostAddress.miFn);
+        InsertConfigNodeF(pCfg, &pCfgFun, "Fun%u", idxFn);
         InsertConfigString(pCfgFun, "HostAddress", szHostAddr);
+        idxFn++;
     }
 
     return hrc;
