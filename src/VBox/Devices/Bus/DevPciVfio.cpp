@@ -1,4 +1,4 @@
-/* $Id: DevPciVfio.cpp 114513 2026-06-24 18:04:38Z alexander.eichner@oracle.com $ */
+/* $Id: DevPciVfio.cpp 114588 2026-07-01 17:38:49Z alexander.eichner@oracle.com $ */
 /** @file
  * PCI passthrough device emulation using VFIO/IOMMUFD.
  */
@@ -2581,7 +2581,7 @@ static int pciVfioConfigureAccess(PPDMDEVINS pDevIns, PVFIOPCI pThis, PCPDMDEVHL
                                            N_("Configuration error: The device configuration misses function 0"));
 
             char szHostAddress[32]; /* Format is xxxx:xx:xx.x */
-            rc = pHlp->pfnCFGMQueryString(pCfg, "HostAddress", &szHostAddress[0], sizeof(szHostAddress));
+            rc = pHlp->pfnCFGMQueryString(pCfgFun, "HostAddress", &szHostAddress[0], sizeof(szHostAddress));
             if (RT_FAILURE(rc))
                 return PDMDevHlpVMSetError(pDevIns, rc, RT_SRC_POS,
                                            N_("Configuration error: Querying \"HostAddress\" failed, no access method configured"));
