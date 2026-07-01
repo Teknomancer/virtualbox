@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114570 2026-06-30 12:16:39Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114581 2026-07-01 11:49:57Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -223,7 +223,9 @@ int VBClExplicitLoadClientLibrariesForDisplayServer(VBGHDISPLAYSERVERTYPE enmTyp
     /*
      * Do the loading.
      */
+#ifdef VBOX_WITH_WAYLAND_ADDITIONS
     RTERRINFOSTATIC ErrInfo;
+#endif
     int             rc = VINF_SUCCESS;
     switch (enmType)
     {
