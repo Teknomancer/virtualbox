@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114561 2026-06-29 08:52:21Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114584 2026-07-01 13:24:25Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -1918,7 +1918,13 @@ HRESULT Clipboard::i_readDataForFormat(ClipboardAction_T aAction,
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::GetInst();
+    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    if (!pShCl)
+    {
+        LogFunc(("Cannot read guest clipboard data without Shared Clipboard service\n"));
+        return mData->mParent->setError(VBOX_E_SHCL_NO_DATA,
+                                        Console::tr("The Shared Clipboard service is not available"));
+    }
 
     void *pvData = NULL;
     uint32_t cbData = 0;
@@ -2399,7 +2405,15 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
     i_storeData(aAction, aSource, aMimeType, aBuffer);
     i_reportFormats(aClientId, uFormat, aSource);
 
-    GuestShCl *pShCl = GuestShCl::GetInst();
+    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    if (!pShCl)
+    {
+        LogFunc(("Cannot report write format to guest without Shared Clipboard service: format=%#x\n", uFormat));
+        return mData->mParent->setErrorBoth(VBOX_E_SHCL_GUEST_ERROR, VERR_INVALID_STATE,
+                                            Console::tr("Writing shared clipboard data failed because the "
+                                                        "Shared Clipboard service is not available"));
+    }
+
     vrc = pShCl->ReportFormatsToGuest(uFormat);
     if (RT_FAILURE(vrc))
     {
@@ -2447,7 +2461,15 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
 
     i_reportFormats(aClientId, fFormats, ClipboardSource_Host, true /* fForceNotify */);
 
-    GuestShCl *pShCl = GuestShCl::GetInst();
+    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    if (!pShCl)
+    {
+        LogFunc(("Cannot report formats to guest without Shared Clipboard service: fFormats=%#x\n", fFormats));
+        return mData->mParent->setErrorBoth(VBOX_E_SHCL_GUEST_ERROR, VERR_INVALID_STATE,
+                                            Console::tr("Writing shared clipboard formats failed because the "
+                                                        "Shared Clipboard service is not available"));
+    }
+
     int vrc = pShCl->ReportFormatsToGuest(fFormats);
     if (RT_FAILURE(vrc))
     {
@@ -2559,7 +2581,16 @@ HRESULT Clipboard::i_hostClipboardReportFormats(VBOXSHCLMAINCLIENTID aClientId,
     /* Native backends may request lazily rendered data immediately after taking ownership. */
     i_reportFormats(aClientId, fFormats, aSource, true /* fForceNotify */);
 
-    GuestShCl *pShCl = GuestShCl::GetInst();
+    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    if (!pShCl)
+    {
+        LogFunc(("Cannot report formats to native host clipboard without Shared Clipboard service: fFormats=%#x\n",
+                 fFormats));
+        return setErrorBoth(VBOX_E_SHCL_ERROR, VERR_INVALID_STATE,
+                            tr("Reporting shared clipboard formats to the host failed because the "
+                               "Shared Clipboard service is not available"));
+    }
+
     int vrc = pShCl->ReportFormatsToHost(fFormats);
     if (RT_FAILURE(vrc))
     {
@@ -2856,7 +2887,15 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
     AutoCaller autoCaller(pParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
-    GuestShCl *pShCl = GuestShCl::GetInst();
+    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    if (!pShCl)
+    {
+        LogFunc(("Cannot set native host clipboard data without Shared Clipboard service: format=%#x\n", uFormat));
+        return setErrorBoth(VBOX_E_SHCL_ERROR, VERR_INVALID_STATE,
+                            tr("Writing shared clipboard data to the host failed because the "
+                               "Shared Clipboard service is not available"));
+    }
+
     vrc = pShCl->ReportFormatsToHost(uFormat);
     if (RT_FAILURE(vrc))
     {
@@ -2905,7 +2944,13 @@ HRESULT Clipboard::i_hostClipboardClear()
     AutoCaller autoCaller(pParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
-    GuestShCl *pShCl = GuestShCl::GetInst();
+    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    if (!pShCl)
+    {
+        Log2Func(("Skipping native host clipboard clear because Shared Clipboard service is no longer available\n"));
+        return S_OK;
+    }
+
     int vrc = pShCl->ReportFormatsToHost(VBOX_SHCL_FMT_NONE);
     if (RT_FAILURE(vrc))
     {
@@ -3094,7 +3139,15 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
             return E_FAIL;
         }
 
-        GuestShCl *pShCl = GuestShCl::GetInst();
+        GuestShCl *pShCl = GuestShCl::TryGetInst();
+        if (!pShCl)
+        {
+            LogFunc(("Cannot read native host data for guest request without Shared Clipboard service: format=%#x\n",
+                     uFormat));
+            i_removePendingDataRequest(idRequest);
+            return E_FAIL;
+        }
+
         int vrc = pShCl->ReadDataFromHost((SHCLFORMAT)uFormat, pvData, cbData, pcbActual);
         if (RT_FAILURE(vrc))
         {

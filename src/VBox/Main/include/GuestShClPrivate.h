@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.h 114557 2026-06-26 13:42:09Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.h 114584 2026-07-01 13:24:25Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code for the Main API.
  */
@@ -101,6 +101,17 @@ public:
     static inline GuestShCl *GetInst(void)
     {
         AssertPtr(GuestShCl::s_pInstance);
+        return GuestShCl::s_pInstance;
+    }
+
+    /**
+     * Returns the Singleton GuestShCl object if it exists.
+     *
+     * @returns Pointer to Singleton GuestShCl object, or NULL if not created or
+     *          already destroyed.
+     */
+    static inline GuestShCl *TryGetInst(void)
+    {
         return GuestShCl::s_pInstance;
     }
 
