@@ -398,7 +398,7 @@ enum xdg_wm_base_error {
 	/**
 	 * the client didn’t respond to a ping event in time
 	 */
-	XDG_WM_BASE_ERROR_UNRESPONSIVE = 6,
+	XDG_WM_BASE_ERROR_UNRESPONSIVE = 6
 };
 #endif /* XDG_WM_BASE_ERROR_ENUM */
 
@@ -570,7 +570,7 @@ enum xdg_positioner_error {
 	/**
 	 * invalid input provided
 	 */
-	XDG_POSITIONER_ERROR_INVALID_INPUT = 0,
+	XDG_POSITIONER_ERROR_INVALID_INPUT = 0
 };
 #endif /* XDG_POSITIONER_ERROR_ENUM */
 
@@ -585,7 +585,7 @@ enum xdg_positioner_anchor {
 	XDG_POSITIONER_ANCHOR_TOP_LEFT = 5,
 	XDG_POSITIONER_ANCHOR_BOTTOM_LEFT = 6,
 	XDG_POSITIONER_ANCHOR_TOP_RIGHT = 7,
-	XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT = 8,
+	XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT = 8
 };
 #endif /* XDG_POSITIONER_ANCHOR_ENUM */
 
@@ -600,7 +600,7 @@ enum xdg_positioner_gravity {
 	XDG_POSITIONER_GRAVITY_TOP_LEFT = 5,
 	XDG_POSITIONER_GRAVITY_BOTTOM_LEFT = 6,
 	XDG_POSITIONER_GRAVITY_TOP_RIGHT = 7,
-	XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT = 8,
+	XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT = 8
 };
 #endif /* XDG_POSITIONER_GRAVITY_ENUM */
 
@@ -708,7 +708,7 @@ enum xdg_positioner_constraint_adjustment {
 	 * Resize the surface vertically so that it is completely
 	 * unconstrained.
 	 */
-	XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y = 32,
+	XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y = 32
 };
 #endif /* XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_ENUM */
 
@@ -991,7 +991,7 @@ enum xdg_surface_error {
 	/**
 	 * Surface was destroyed before its role object
 	 */
-	XDG_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT = 6,
+	XDG_SURFACE_ERROR_DEFUNCT_ROLE_OBJECT = 6
 };
 #endif /* XDG_SURFACE_ERROR_ENUM */
 
@@ -1257,7 +1257,7 @@ enum xdg_toplevel_error {
 	/**
 	 * client provided an invalid min or max size
 	 */
-	XDG_TOPLEVEL_ERROR_INVALID_SIZE = 2,
+	XDG_TOPLEVEL_ERROR_INVALID_SIZE = 2
 };
 #endif /* XDG_TOPLEVEL_ERROR_ENUM */
 
@@ -1279,7 +1279,7 @@ enum xdg_toplevel_resize_edge {
 	XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT = 6,
 	XDG_TOPLEVEL_RESIZE_EDGE_RIGHT = 8,
 	XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT = 9,
-	XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT = 10,
+	XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT = 10
 };
 #endif /* XDG_TOPLEVEL_RESIZE_EDGE_ENUM */
 
@@ -1431,7 +1431,7 @@ enum xdg_toplevel_state {
 	 * constrained side of the window.
 	 * @since 7
 	 */
-	XDG_TOPLEVEL_STATE_CONSTRAINED_BOTTOM = 13,
+	XDG_TOPLEVEL_STATE_CONSTRAINED_BOTTOM = 13
 };
 /**
  * @ingroup iface_xdg_toplevel
@@ -2153,7 +2153,7 @@ enum xdg_popup_error {
 	/**
 	 * tried to grab after being mapped
 	 */
-	XDG_POPUP_ERROR_INVALID_GRAB = 0,
+	XDG_POPUP_ERROR_INVALID_GRAB = 0
 };
 #endif /* XDG_POPUP_ERROR_ENUM */
 

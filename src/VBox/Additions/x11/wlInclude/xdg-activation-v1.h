@@ -242,7 +242,7 @@ enum xdg_activation_token_v1_error {
 	/**
 	 * The token has already been used previously
 	 */
-	XDG_ACTIVATION_TOKEN_V1_ERROR_ALREADY_USED = 0,
+	XDG_ACTIVATION_TOKEN_V1_ERROR_ALREADY_USED = 0
 };
 #endif /* XDG_ACTIVATION_TOKEN_V1_ERROR_ENUM */
 
