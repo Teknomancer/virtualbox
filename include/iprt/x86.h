@@ -2403,6 +2403,219 @@ typedef const X86MTRRVAR *PCX86MTRRVAR;
 /** Speculative Store Bypass Disable. */
 # define MSR_AMD_VIRT_SPEC_CTL_F_SSBD       RT_BIT(2)
 
+
+/** @name Hyper-V MSRs.
+ * @{
+ */
+/** Start of range 0. */
+#define MSR_HV_RANGE0_FIRST                 UINT32_C(0x40000000)
+/** Guest OS identification (R/W) */
+#define MSR_HV_GUEST_OS_ID                  UINT32_C(0x40000000)
+/** Enable hypercall interface (R/W) */
+#define MSR_HV_HYPERCALL                    UINT32_C(0x40000001)
+/** Virtual processor's (VCPU) index (R) */
+#define MSR_HV_VP_INDEX                     UINT32_C(0x40000002)
+/** Reset operation (R/W) */
+#define MSR_HV_RESET                        UINT32_C(0x40000003)
+/** End of range 0. */
+#define MSR_HV_RANGE0_LAST                  MSR_HV_RESET
+
+/** Start of range 1. */
+#define MSR_HV_RANGE1_FIRST                 UINT32_C(0x40000010)
+/** Virtual processor's (VCPU) runtime (R) */
+#define MSR_HV_VP_RUNTIME                   UINT32_C(0x40000010)
+/** End of range 1. */
+#define MSR_HV_RANGE1_LAST                  MSR_HV_VP_RUNTIME
+
+/** Start of range 2. */
+#define MSR_HV_RANGE2_FIRST                 UINT32_C(0x40000020)
+/** Per-VM reference counter (R) */
+#define MSR_HV_TIME_REF_COUNT               UINT32_C(0x40000020)
+/** Per-VM TSC page (R/W) */
+#define MSR_HV_REF_TSC                      UINT32_C(0x40000021)
+/** Frequency of TSC in Hz as reported by the hypervisor (R) */
+#define MSR_HV_TSC_FREQ                     UINT32_C(0x40000022)
+/** Frequency of LAPIC in Hz as reported by the hypervisor (R) */
+#define MSR_HV_APIC_FREQ                    UINT32_C(0x40000023)
+/** End of range 2. */
+#define MSR_HV_RANGE2_LAST                  MSR_HV_APIC_FREQ
+
+/** Start of range 3. */
+#define MSR_HV_RANGE3_FIRST                 UINT32_C(0x40000070)
+/** Access to APIC EOI (End-Of-Interrupt) register (W) */
+#define MSR_HV_EOI                          UINT32_C(0x40000070)
+/** Access to APIC ICR (Interrupt Command) register (R/W) */
+#define MSR_HV_ICR                          UINT32_C(0x40000071)
+/** Access to APIC TPR (Task Priority) register (R/W) */
+#define MSR_HV_TPR                          UINT32_C(0x40000072)
+/** Enables lazy EOI processing (R/W) */
+#define MSR_HV_APIC_ASSIST_PAGE             UINT32_C(0x40000073)
+/** End of range 3. */
+#define MSR_HV_RANGE3_LAST                  MSR_HV_APIC_ASSIST_PAGE
+
+/** Start of range 4. */
+#define MSR_HV_RANGE4_FIRST                 UINT32_C(0x40000080)
+/** Control behaviour of synthetic interrupt controller (R/W) */
+#define MSR_HV_SCONTROL                     UINT32_C(0x40000080)
+/** Syntheti interrupt controller version (R) */
+#define MSR_HV_SVERSION                     UINT32_C(0x40000081)
+/** Base address of synthetic interrupt event flag (R/W) */
+#define MSR_HV_SIEFP                        UINT32_C(0x40000082)
+/** Base address of synthetic interrupt message page (R/W) */
+#define MSR_HV_SIMP                         UINT32_C(0x40000083)
+/** End-Of-Message in synthetic interrupt parameter page (W) */
+#define MSR_HV_EOM                          UINT32_C(0x40000084)
+/** End of range 4. */
+#define MSR_HV_RANGE4_LAST                  MSR_HV_EOM
+
+/** Start of range 5. */
+#define MSR_HV_RANGE5_FIRST                 UINT32_C(0x40000090)
+/** Configures synthetic interrupt source 0 (R/W) */
+#define MSR_HV_SINT0                        UINT32_C(0x40000090)
+/** Configures synthetic interrupt source 1 (R/W) */
+#define MSR_HV_SINT1                        UINT32_C(0x40000091)
+/** Configures synthetic interrupt source 2 (R/W) */
+#define MSR_HV_SINT2                        UINT32_C(0x40000092)
+/** Configures synthetic interrupt source 3 (R/W) */
+#define MSR_HV_SINT3                        UINT32_C(0x40000093)
+/** Configures synthetic interrupt source 4 (R/W) */
+#define MSR_HV_SINT4                        UINT32_C(0x40000094)
+/** Configures synthetic interrupt source 5 (R/W) */
+#define MSR_HV_SINT5                        UINT32_C(0x40000095)
+/** Configures synthetic interrupt source 6 (R/W) */
+#define MSR_HV_SINT6                        UINT32_C(0x40000096)
+/** Configures synthetic interrupt source 7 (R/W) */
+#define MSR_HV_SINT7                        UINT32_C(0x40000097)
+/** Configures synthetic interrupt source 8 (R/W) */
+#define MSR_HV_SINT8                        UINT32_C(0x40000098)
+/** Configures synthetic interrupt source 9 (R/W) */
+#define MSR_HV_SINT9                        UINT32_C(0x40000099)
+/** Configures synthetic interrupt source 10 (R/W) */
+#define MSR_HV_SINT10                       UINT32_C(0x4000009A)
+/** Configures synthetic interrupt source 11 (R/W) */
+#define MSR_HV_SINT11                       UINT32_C(0x4000009B)
+/** Configures synthetic interrupt source 12 (R/W) */
+#define MSR_HV_SINT12                       UINT32_C(0x4000009C)
+/** Configures synthetic interrupt source 13 (R/W) */
+#define MSR_HV_SINT13                       UINT32_C(0x4000009D)
+/** Configures synthetic interrupt source 14 (R/W) */
+#define MSR_HV_SINT14                       UINT32_C(0x4000009E)
+/** Configures synthetic interrupt source 15 (R/W) */
+#define MSR_HV_SINT15                       UINT32_C(0x4000009F)
+/** End of range 5. */
+#define MSR_HV_RANGE5_LAST                  MSR_HV_SINT15
+
+/** Start of range 6. */
+#define MSR_HV_RANGE6_FIRST                 UINT32_C(0x400000B0)
+/** Configures register for synthetic timer 0 (R/W) */
+#define MSR_HV_STIMER0_CONFIG               UINT32_C(0x400000B0)
+/** Expiration time or period for synthetic timer 0 (R/W) */
+#define MSR_HV_STIMER0_COUNT                UINT32_C(0x400000B1)
+/** Configures register for synthetic timer 1 (R/W) */
+#define MSR_HV_STIMER1_CONFIG               UINT32_C(0x400000B2)
+/** Expiration time or period for synthetic timer 1 (R/W) */
+#define MSR_HV_STIMER1_COUNT                UINT32_C(0x400000B3)
+/** Configures register for synthetic timer 2 (R/W) */
+#define MSR_HV_STIMER2_CONFIG               UINT32_C(0x400000B4)
+/** Expiration time or period for synthetic timer 2 (R/W) */
+#define MSR_HV_STIMER2_COUNT                UINT32_C(0x400000B5)
+/** Configures register for synthetic timer 3 (R/W) */
+#define MSR_HV_STIMER3_CONFIG               UINT32_C(0x400000B6)
+/** Expiration time or period for synthetic timer 3 (R/W) */
+#define MSR_HV_STIMER3_COUNT                UINT32_C(0x400000B7)
+/** End of range 6. */
+#define MSR_HV_RANGE6_LAST                  MSR_HV_STIMER3_COUNT
+
+/** Start of range 7. */
+#define MSR_HV_RANGE7_FIRST                 UINT32_C(0x400000C1)
+/** Trigger to transition to power state C1 (R) */
+#define MSR_HV_POWER_STATE_TRIGGER_C1       UINT32_C(0x400000C1)
+/** Trigger to transition to power state C2 (R) */
+#define MSR_HV_POWER_STATE_TRIGGER_C2       UINT32_C(0x400000C2)
+/** Trigger to transition to power state C3 (R) */
+#define MSR_HV_POWER_STATE_TRIGGER_C3       UINT32_C(0x400000C3)
+/** End of range 7. */
+#define MSR_HV_RANGE7_LAST                  MSR_HV_POWER_STATE_TRIGGER_C3
+
+/** Start of range 8. */
+#define MSR_HV_RANGE8_FIRST                 UINT32_C(0x400000D1)
+/** Configure the recipe for power state transitions to C1 (R/W) */
+#define MSR_HV_POWER_STATE_CONFIG_C1        UINT32_C(0x400000D1)
+/** Configure the recipe for power state transitions to C2 (R/W) */
+#define MSR_HV_POWER_STATE_CONFIG_C2        UINT32_C(0x400000D2)
+/** Configure the recipe for power state transitions to C3 (R/W) */
+#define MSR_HV_POWER_STATE_CONFIG_C3        UINT32_C(0x400000D3)
+/** End of range 8. */
+#define MSR_HV_RANGE8_LAST                  MSR_HV_POWER_STATE_CONFIG_C3
+
+/** Start of range 9. */
+#define MSR_HV_RANGE9_FIRST                 UINT32_C(0x400000E0)
+/** Map the guest's retail partition stats page (R/W) */
+#define MSR_HV_STATS_PART_RETAIL_PAGE       UINT32_C(0x400000E0)
+/** Map the guest's internal partition stats page (R/W) */
+#define MSR_HV_STATS_PART_INTERNAL_PAGE     UINT32_C(0x400000E1)
+/** Map the guest's retail VP stats page (R/W) */
+#define MSR_HV_STATS_VP_RETAIL_PAGE         UINT32_C(0x400000E2)
+/** Map the guest's internal VP stats page (R/W) */
+#define MSR_HV_STATS_VP_INTERNAL_PAGE       UINT32_C(0x400000E3)
+/** End of range 9. */
+#define MSR_HV_RANGE9_LAST                  MSR_HV_STATS_VP_INTERNAL_PAGE
+
+/** Start of range 10. */
+#define MSR_HV_RANGE10_FIRST                UINT32_C(0x400000F0)
+/** Trigger the guest's transition to idle power state (R) */
+#define MSR_HV_GUEST_IDLE                   UINT32_C(0x400000F0)
+/** Synthetic debug control. */
+#define MSR_HV_SYNTH_DEBUG_CONTROL          UINT32_C(0x400000F1)
+/** Synthetic debug status. */
+#define MSR_HV_SYNTH_DEBUG_STATUS           UINT32_C(0x400000F2)
+/** Synthetic debug send buffer. */
+#define MSR_HV_SYNTH_DEBUG_SEND_BUFFER      UINT32_C(0x400000F3)
+/** Synthetic debug receive buffer. */
+#define MSR_HV_SYNTH_DEBUG_RECEIVE_BUFFER   UINT32_C(0x400000F4)
+/** Synthetic debug pending buffer. */
+#define MSR_HV_SYNTH_DEBUG_PENDING_BUFFER   UINT32_C(0x400000F5)
+/** End of range 10. */
+#define MSR_HV_RANGE10_LAST                 MSR_HV_SYNTH_DEBUG_PENDING_BUFFER
+
+/** Start of range 11. */
+#define MSR_HV_RANGE11_FIRST                UINT32_C(0x400000FF)
+/** Undocumented debug options MSR. */
+#define MSR_HV_DEBUG_OPTIONS_MSR            UINT32_C(0x400000FF)
+/** End of range 11. */
+#define MSR_HV_RANGE11_LAST                 MSR_HV_DEBUG_OPTIONS_MSR
+
+/** Start of range 12. */
+#define MSR_HV_RANGE12_FIRST                UINT32_C(0x40000100)
+/** Guest crash MSR 0. */
+#define MSR_HV_CRASH_P0                     UINT32_C(0x40000100)
+/** Guest crash MSR 1. */
+#define MSR_HV_CRASH_P1                     UINT32_C(0x40000101)
+/** Guest crash MSR 2. */
+#define MSR_HV_CRASH_P2                     UINT32_C(0x40000102)
+/** Guest crash MSR 3. */
+#define MSR_HV_CRASH_P3                     UINT32_C(0x40000103)
+/** Guest crash MSR 4. */
+#define MSR_HV_CRASH_P4                     UINT32_C(0x40000104)
+/** Guest crash control. */
+#define MSR_HV_CRASH_CTL                    UINT32_C(0x40000105)
+/** End of range 12. */
+#define MSR_HV_RANGE12_LAST                 MSR_HV_CRASH_CTL
+/** @} */
+
+AssertCompile(MSR_HV_RANGE0_FIRST  <= MSR_HV_RANGE0_LAST);
+AssertCompile(MSR_HV_RANGE1_FIRST  <= MSR_HV_RANGE1_LAST);
+AssertCompile(MSR_HV_RANGE2_FIRST  <= MSR_HV_RANGE2_LAST);
+AssertCompile(MSR_HV_RANGE3_FIRST  <= MSR_HV_RANGE3_LAST);
+AssertCompile(MSR_HV_RANGE4_FIRST  <= MSR_HV_RANGE4_LAST);
+AssertCompile(MSR_HV_RANGE5_FIRST  <= MSR_HV_RANGE5_LAST);
+AssertCompile(MSR_HV_RANGE6_FIRST  <= MSR_HV_RANGE6_LAST);
+AssertCompile(MSR_HV_RANGE7_FIRST  <= MSR_HV_RANGE7_LAST);
+AssertCompile(MSR_HV_RANGE8_FIRST  <= MSR_HV_RANGE8_LAST);
+AssertCompile(MSR_HV_RANGE9_FIRST  <= MSR_HV_RANGE9_LAST);
+AssertCompile(MSR_HV_RANGE10_FIRST <= MSR_HV_RANGE10_LAST);
+AssertCompile(MSR_HV_RANGE11_FIRST <= MSR_HV_RANGE11_LAST);
+
 /** @} */
 
 
