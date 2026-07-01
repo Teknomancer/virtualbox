@@ -1,4 +1,4 @@
-/* $Id: DrvNAT.cpp 114267 2026-06-08 17:26:00Z andreas.loeffler@oracle.com $ */
+/* $Id: DrvNAT.cpp 114578 2026-07-01 08:34:03Z alexander.eichner@oracle.com $ */
 /** @file
  * DrvNATlibslirp - NATlibslirp network transport driver.
  */
@@ -2585,6 +2585,7 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
                                   "|HostResolverMappings"
                                   "|ForwardBroadcast"
                                   "|EnableTFTP"
+                                  "|RestrictInternet"
                                   , "PortForwarding");
 
     /*
@@ -2594,7 +2595,6 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
     SlirpConfig slirpCfg = { 0 };
 
     slirpCfg.version = 6;
-    slirpCfg.restricted = false;
     slirpCfg.in_enabled = true;
     slirpCfg.in6_enabled = true;
     slirpCfg.vhostname = NULL;
@@ -2605,6 +2605,12 @@ static DECLCALLBACK(int) drvNATConstruct(PPDMDRVINS pDrvIns, PCFGMNODE pCfg, uin
     rc = pDrvIns->pHlpR3->pfnCFGMQueryBoolDef(pCfg, "ForwardBroadcast", &slirpCfg.fForwardBroadcast, false);
     AssertLogRelRCReturn(rc, rc);
     pThis->Diag.fForwardBroadcast = slirpCfg.fForwardBroadcast;
+
+    bool fRestricted = false;
+    rc = pDrvIns->pHlpR3->pfnCFGMQueryBoolDef(pCfg, "RestrictInternet", &fRestricted, false);
+    AssertLogRelRCReturn(rc, rc);
+
+    slirpCfg.restricted = fRestricted ? 1 : 0;
 
     /*
      * Keep default as true to preserve functionality for old VMs.
