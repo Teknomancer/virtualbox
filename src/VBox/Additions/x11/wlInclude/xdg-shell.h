@@ -1489,7 +1489,7 @@ enum xdg_toplevel_wm_capabilities {
 	/**
 	 * set_minimized is available
 	 */
-	XDG_TOPLEVEL_WM_CAPABILITIES_MINIMIZE = 4,
+	XDG_TOPLEVEL_WM_CAPABILITIES_MINIMIZE = 4
 };
 #endif /* XDG_TOPLEVEL_WM_CAPABILITIES_ENUM */
 
