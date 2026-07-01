@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-# $Id: tdSerial1.py 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $
+# $Id: tdSerial1.py 114580 2026-07-01 08:39:21Z alexander.eichner@oracle.com $
 
 """
 VirtualBox Validation Kit - Serial port testing #1.
@@ -37,7 +37,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 112403 $"
+__version__ = "$Revision: 114580 $"
 
 
 # Standard Python imports.
@@ -54,6 +54,7 @@ g_ksValidationKitDir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.a
 sys.path.append(g_ksValidationKitDir);
 
 # Validation Kit imports.
+from common     import utils;
 from testdriver import base;
 from testdriver import reporter;
 from testdriver import vbox;
@@ -77,7 +78,9 @@ class tdSerial1(vbox.TestDriver):
         vbox.TestDriver.__init__(self);
         self.asRsrcs          = None;
         self.oTestVmSet       = self.oTestVmManager.selectSet(self.oTestVmManager.kfGrpStdSmoke);
-        self.asSerialModesDef = ['RawFile', 'Tcp', 'TcpServ', 'NamedPipe', 'NamedPipeServ', 'HostDev'];
+        self.asSerialModesDef = ['RawFile', 'Tcp', 'TcpServ', 'HostDev'];
+        if utils.getHostOs() != 'win':
+            self.asSerialModesDef += ['NamedPipe', 'NamedPipeServ'];
         self.asSerialModes    = self.asSerialModesDef;
         self.asSerialTestsDef = ['Write', 'ReadWrite'];
         self.asSerialTests    = self.asSerialTestsDef;
