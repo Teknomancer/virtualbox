@@ -94,6 +94,11 @@ Rules for adding a changelog entry to make them look more uniform:
     <itemizedlist>
 
       <listitem>
+        <para>NAT: Fixed ICMP traceroute missing intermediate hops when using
+          NAT networking</para>
+      </listitem>
+
+      <listitem>
         <para>VBoxManage: Added natnetwork log and dhcpserver log commands
           to display NAT network and DHCP server log files</para>
       </listitem>
