@@ -314,7 +314,7 @@ static int icmp_send(struct socket *so, struct mbuf *m, int hlen)
         }
     }
 # ifdef _WIN32
-    if (ttl < IPDEFTTL && so->so_type == IPPROTO_ICMP && icmp_win_send(so, m, hlen))
+    if (ttl < IPDEFTTL && so->so_type == IPPROTO_ICMP && icmp_win_send(so, m, hlen, ttl))
         return 0;
 # endif /* _WIN32 */
 # ifdef __linux__
