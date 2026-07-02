@@ -1,4 +1,4 @@
-/* $Id: VBoxInstallHelper.cpp 114585 2026-07-01 13:41:38Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxInstallHelper.cpp 114593 2026-07-02 06:59:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxInstallHelper - Various helper routines for Windows host installer.
  */
@@ -1045,38 +1045,42 @@ UINT __stdcall ArePythonAPIDepsInstalled(MSIHANDLE hModule)
  *
  * @returns @c true if the key exists and indicates an installed runtime component, @c false otherwise.
  * @param   hModule             Windows installer module handle.
- * @param   pwszRuntimeKey      Registry key to check under HKLM.
- * @param   pszInstallValue     DWORD value name indicating installation state.
+ * @param   pwszRuntimeVersion  MS CRT runtime version key, e.g. "14.0".
+ * @param   pwszRuntimeArch     Runtime architecture key, e.g. "X64".
  * @param   plrc                Where to return the registry status. Optional.
  * @param   pdwMaj              Where to return the major version.
  * @param   pdwMin              Where to return the minor version.
  */
-static bool isMSCRTRegistryKeyInstalled(MSIHANDLE hModule, PCRTUTF16 pwszRuntimeKey, const char *pszInstallValue,
+static bool isMSCRTRegistryKeyInstalled(MSIHANDLE hModule, PCRTUTF16 pwszRuntimeVersion, PCRTUTF16 pwszRuntimeArch,
                                         LSTATUS *plrc, DWORD *pdwMaj, DWORD *pdwMin)
 {
+    RTUTF16 wszRuntimeKey[128];
+    RTUtf16Printf(wszRuntimeKey, RT_ELEMENTS(wszRuntimeKey),
+                  "SOFTWARE\\Microsoft\\VisualStudio\\%ls\\VC\\Runtimes\\%ls", pwszRuntimeVersion, pwszRuntimeArch);
+
     HKEY hKey;
-    LSTATUS lrc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, pwszRuntimeKey, 0, KEY_READ, &hKey);
+    LSTATUS lrc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, wszRuntimeKey, 0, KEY_READ, &hKey);
     if (plrc)
         *plrc = lrc;
     if (lrc != ERROR_SUCCESS)
     {
-        logStringF(hModule, "IsMSCRTInstalled: Failed opening '%ls' (lrc=%ld)", pwszRuntimeKey, lrc);
+        logStringF(hModule, "IsMSCRTInstalled: Failed opening '%ls' (lrc=%ld)", wszRuntimeKey, lrc);
         return false;
     }
 
     DWORD dwVal;
-    int rc = VBoxMsiRegQueryDWORD(hModule, hKey, pszInstallValue, &dwVal);
+    int rc = VBoxMsiRegQueryDWORD(hModule, hKey, "Installed", &dwVal);
     if (RT_FAILURE(rc))
     {
         RegCloseKey(hKey);
-        logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but '%s' key not present (rc=%Rrc)",
-                   pwszRuntimeKey, pszInstallValue, rc);
+        logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but 'Installed' key not present (rc=%Rrc)",
+                   wszRuntimeKey, rc);
         return false;
     }
     if (dwVal < 1)
     {
         RegCloseKey(hKey);
-        logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but not marked as installed", pwszRuntimeKey);
+        logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but not marked as installed", wszRuntimeKey);
         return false;
     }
 
@@ -1088,7 +1092,7 @@ static bool isMSCRTRegistryKeyInstalled(MSIHANDLE hModule, PCRTUTF16 pwszRuntime
     if (RT_SUCCESS(rc))
         return true;
 
-    logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but version keys not present (rc=%Rrc)", pwszRuntimeKey, rc);
+    logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but version keys not present (rc=%Rrc)", wszRuntimeKey, rc);
     return false;
 }
 
@@ -1117,18 +1121,73 @@ static bool isMSCRTDevDivRuntimeInstalled(MSIHANDLE hModule, PCRTUTF16 pwszRunti
                       "SOFTWARE\\Microsoft\\DevDiv\\vc\\Servicing\\%ls\\%ls",
                       pwszRuntimeVersion, s_apwszRuntimeSubKeys[i]);
 
-        DWORD dwMaj;
-        DWORD dwMin;
-        if (!isMSCRTRegistryKeyInstalled(hModule, wszRuntimeKey, "Install", NULL, &dwMaj, &dwMin))
-            return false;
-
-        if (   i == 0
-            || dwMaj < *pdwMaj
-            || (dwMaj == *pdwMaj && dwMin < *pdwMin))
+        HKEY hKey;
+        LSTATUS lrc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, wszRuntimeKey, 0, KEY_READ, &hKey);
+        if (lrc != ERROR_SUCCESS)
         {
-            *pdwMaj = dwMaj;
-            *pdwMin = dwMin;
+            logStringF(hModule, "IsMSCRTInstalled: Failed opening '%ls' (lrc=%ld)", wszRuntimeKey, lrc);
+            return false;
         }
+
+        DWORD dwInstall;
+        int rc = VBoxMsiRegQueryDWORD(hModule, hKey, "Install", &dwInstall);
+        if (RT_FAILURE(rc) || dwInstall < 1)
+        {
+            RegCloseKey(hKey);
+            logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but not marked as installed (rc=%Rrc)", wszRuntimeKey, rc);
+            return false;
+        }
+
+        RTUTF16 wszVersion[64];
+        DWORD cbVersion = sizeof(wszVersion) - sizeof(wszVersion[0]);
+        DWORD dwType = REG_SZ;
+        lrc = RegQueryValueExW(hKey, L"Version", NULL, &dwType, (LPBYTE)wszVersion, &cbVersion);
+        RegCloseKey(hKey);
+        if (   lrc != ERROR_SUCCESS
+            || (dwType != REG_SZ && dwType != REG_EXPAND_SZ))
+        {
+            logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but 'Version' key not present (lrc=%ld)", wszRuntimeKey, lrc);
+            return false;
+        }
+        wszVersion[RT_ELEMENTS(wszVersion) - 1] = '\0';
+
+        char *pszVersion;
+        rc = RTUtf16ToUtf8(wszVersion, &pszVersion);
+        if (RT_FAILURE(rc))
+        {
+            logStringF(hModule, "IsMSCRTInstalled: Failed converting Version for '%ls' (rc=%Rrc)", wszRuntimeKey, rc);
+            return false;
+        }
+
+        const char *pszCur = pszVersion;
+        if (*pszCur == 'v' || *pszCur == 'V')
+            pszCur++;
+
+        char *pszNext = NULL;
+        uint32_t uMaj;
+        rc = RTStrToUInt32Ex(pszCur, &pszNext, 10, &uMaj);
+        if (RT_SUCCESS(rc) && pszNext && *pszNext == '.')
+        {
+            uint32_t uMin;
+            rc = RTStrToUInt32Ex(pszNext + 1, &pszNext, 10, &uMin);
+            if (RT_SUCCESS(rc))
+            {
+                if (   i == 0
+                    || uMaj < *pdwMaj
+                    || (uMaj == *pdwMaj && uMin < *pdwMin))
+                {
+                    *pdwMaj = uMaj;
+                    *pdwMin = uMin;
+                }
+                RTStrFree(pszVersion);
+                continue;
+            }
+        }
+
+        logStringF(hModule, "IsMSCRTInstalled: Found '%ls', but Version '%s' could not be parsed (rc=%Rrc)",
+                   wszRuntimeKey, pszVersion, rc);
+        RTStrFree(pszVersion);
+        return false;
     }
 
     logStringF(hModule, "IsMSCRTInstalled: Found installed v%u.%u runtime servicing keys", *pdwMaj, *pdwMin);
@@ -1174,12 +1233,8 @@ UINT __stdcall IsMSCRTInstalled(MSIHANDLE hModule)
     DWORD dwMin = 0;
     bool fFoundRuntime = false;
 
-    RTUTF16 wszRuntimeKey[128];
-    RTUtf16Printf(wszRuntimeKey, RT_ELEMENTS(wszRuntimeKey),
-                  "SOFTWARE\\Microsoft\\VisualStudio\\%ls\\VC\\Runtimes\\%ls", s_pwszRuntimeVersion, pwszRuntimeArch);
-
     LSTATUS lrc;
-    fFoundRuntime = isMSCRTRegistryKeyInstalled(hModule, wszRuntimeKey, "Installed", &lrc, &dwMaj, &dwMin);
+    fFoundRuntime = isMSCRTRegistryKeyInstalled(hModule, s_pwszRuntimeVersion, pwszRuntimeArch, &lrc, &dwMaj, &dwMin);
 
     bool const fMissingVisualStudioRuntimeKey = lrc != ERROR_SUCCESS;
     if (fFoundRuntime)
