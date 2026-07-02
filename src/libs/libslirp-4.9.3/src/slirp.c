@@ -846,13 +846,7 @@ void slirp_cleanup(Slirp *slirp)
     (((so)->so_state & (SS_FCANTRCVMORE | SS_ISFCONNECTED)) == SS_ISFCONNECTED)
 
 #ifdef VBOX
-/**
- * Updates the poll timeout according to pending slirp timers.
- *
- * @param   slirp               The slirp instance.
- * @param   timeout             Pointer to timeout in milliseconds. Input value is capped
- *                              and may be reduced based on fast/slow timer state.
- */
+/* Update the poll timeout according to pending slirp timers. */
 static void slirp_update_timeout(Slirp *slirp, int *timeout)
 {
     int t;
@@ -1850,97 +1844,50 @@ void slirp_send_packet_all(Slirp *slirp, const void *buf, size_t len)
 }
 
 #ifdef VBOX
-/**
- * Gets the configured virtual IPv4 network address.
- *
- * @returns The virtual network IPv4 address.
- * @param   pSlirp              The slirp instance.
- */
+/* Get the configured virtual IPv4 network address. */
 struct in_addr slirp_get_vnetwork_addr(Slirp *pSlirp)
 {
     return pSlirp->vnetwork_addr;
 }
 
-/**
- * Sets the virtual domain name used by libslirp.
- *
- * @returns Pointer to the duplicated domain name stored in the slirp instance,
- *          or NULL on allocation failure.
- * @param   pSlirp              The slirp instance.
- * @param   vdomainname         Domain name string to store.
- */
+/* Set the virtual domain name used by libslirp. */
 char *slirp_set_vdomainname(Slirp *pSlirp, const char *vdomainname)
 {
     pSlirp->vdomainname = g_strdup(vdomainname);
     return pSlirp->vdomainname;
 }
 
-/**
- * Gets the configured virtual domain name.
- *
- * @returns Pointer to the current virtual domain name, or NULL if none is set.
- * @param   pSlirp               The slirp instance.
- */
+/* Get the configured virtual domain name. */
 char *slirp_get_vdomainname(Slirp *pSlirp)
 {
     return pSlirp->vdomainname;
 }
 
-/**
- * Sets the DNS search domain list.
- *
- * @param   pSlirp              The slirp instance.
- * @param   ppszSearchDomains   Pointer to a NULL-terminated list of UTF-8
- *                              domain name strings.
- *
- * @returns 0 on success, -1 on failure.
- */
+/* Set the DNS search domain list. */
 int slirp_set_vdnssearch(Slirp *pSlirp, const char * const *ppszSearchDomains)
 {
     return translate_dnssearch(pSlirp, (const char **)ppszSearchDomains);
 }
 
-/**
- * Sets the default IPv4 DNS server used by the built-in libslirp DNS proxy.
- *
- * @param   pSlirp              The slirp instance.
- * @param   uAddr               IPv4 address to use as default name server.
- */
+/* Set the default IPv4 DNS server used by the built-in libslirp DNS proxy. */
 void slirp_set_vnameserver(Slirp *pSlirp, struct in_addr uAddr)
 {
     pSlirp->vnameserver_addr = uAddr;
 }
 
-/**
- * Sets the default IPv6 DNS server used by the built-in libslirp DNS proxy.
- *
- * @param   pSlirp              The slirp instance.
- * @param   mAddr               IPv6 address to use as default name server.
- */
+/* Set the default IPv6 DNS server used by the built-in libslirp DNS proxy. */
 void slirp_set_vnameserver6(Slirp *pSlirp, struct in6_addr mAddr)
 {
     pSlirp->vnameserver_addr6 = mAddr;
 }
 
-/**
- * Enables or disables built-in DNS proxy support.
- *
- * @param   pSlirp              The slirp instance.
- * @param   fDisableDNS         Whether DNS proxying should be disabled.
- */
+/* Enable or disable built-in DNS proxy support. */
 void slirp_set_disable_dns(Slirp *pSlirp, bool fDisableDNS)
 {
     pSlirp->disable_dns = !!fDisableDNS;
 }
 
-/**
- * Sets the IPv4 nameserver list used for DHCP advertisement.
- *
- * @param   pSlirp              The slirp instance.
- * @param   cRealNameservers    Number of entries in @a paRealNameservers.
- * @param   paRealNameservers   Pointer to IPv4 nameserver array. Ownership is
- *                              transferred to the slirp instance.
- */
+/* Set the IPv4 nameserver list used for DHCP advertisement. */
 void slirp_set_RealNameservers(Slirp *pSlirp, size_t cRealNameservers, struct in_addr *paRealNameservers)
 {
     if (pSlirp->cRealNameservers)
@@ -1953,14 +1900,7 @@ void slirp_set_RealNameservers(Slirp *pSlirp, size_t cRealNameservers, struct in
     pSlirp->cRealNameservers = cRealNameservers;
 }
 
-/**
- * Sets the IPv6 nameserver list used for DHCPv6 advertisement.
- *
- * @param   pSlirp              The slirp instance.
- * @param   cRealNameservers    Number of entries in @a paRealNameservers.
- * @param   paRealNameservers   Pointer to IPv6 nameserver array. Ownership is
- *                              transferred to the slirp instance.
- */
+/* Set the IPv6 nameserver list used for DHCPv6 advertisement. */
 void slirp_set_IPv6RealNameservers(Slirp *pSlirp, size_t cRealNameservers, struct in6_addr *paRealNameservers)
 {
     if (pSlirp->cIPv6RealNameservers)
