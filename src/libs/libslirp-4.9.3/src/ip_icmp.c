@@ -37,6 +37,14 @@
 #ifndef _WIN32
 #include <sys/param.h>
 #endif
+#if defined(VBOX) && defined(__linux__)
+/* github:gh-479: Needed to read Linux ping-socket ICMP router errors. */
+#include <linux/errqueue.h>
+#endif
+#if defined(VBOX) && defined(_WIN32)
+/* github:gh-479: Needed for the Windows non-raw ICMP traceroute fallback. */
+#include <icmpapi.h>
+#endif
 
 #ifndef WITH_ICMP_ERROR_MSG
 #define WITH_ICMP_ERROR_MSG 0
@@ -87,6 +95,129 @@ void icmp_cleanup(Slirp *slirp)
     }
 }
 
+#if defined(VBOX) && defined(_WIN32)
+# define ICMP_WIN_TIMEOUT_MS 1000
+
+/* github:gh-479: Map Windows IP Helper Echo statuses to guest-visible ICMP errors. */
+static bool icmp_win_status_to_icmp(DWORD status, uint8_t *ptype, uint8_t *pcode)
+{
+    if (status == IP_REQ_TIMED_OUT)
+        return false;
+    switch (status) {
+    case IP_TTL_EXPIRED_TRANSIT:
+        *ptype = ICMP_TIMXCEED;
+        *pcode = ICMP_TIMXCEED_INTRANS;
+        return true;
+    case IP_TTL_EXPIRED_REASSEM:
+        *ptype = ICMP_TIMXCEED;
+        *pcode = ICMP_TIMXCEED_REASS;
+        return true;
+    case IP_DEST_NET_UNREACHABLE:
+        *ptype = ICMP_UNREACH;
+        *pcode = ICMP_UNREACH_NET;
+        return true;
+    case IP_DEST_PROT_UNREACHABLE:
+        *ptype = ICMP_UNREACH;
+        *pcode = ICMP_UNREACH_PROTOCOL;
+        return true;
+    case IP_DEST_PORT_UNREACHABLE:
+        *ptype = ICMP_UNREACH;
+        *pcode = ICMP_UNREACH_PORT;
+        return true;
+    case IP_PACKET_TOO_BIG:
+        *ptype = ICMP_UNREACH;
+        *pcode = ICMP_UNREACH_NEEDFRAG;
+        return true;
+    case IP_DEST_HOST_UNREACHABLE:
+    default:
+        *ptype = ICMP_UNREACH;
+        *pcode = ICMP_UNREACH_HOST;
+        return true;
+    }
+}
+
+/*
+ * github:gh-479: Use Windows IP Helper when low-TTL ping sockets cannot expose intermediate hops.
+ * This fallback is synchronous and may block the NAT thread up to ICMP_WIN_TIMEOUT_MS.
+ *
+ ** @todo Make IcmpSendEcho2Ex() run asynchronously and signal completion
+ *        through a pollable loopback socket, so icmp_receive() can forward the result without blocking.
+ */
+static bool icmp_win_send(struct socket *so, struct mbuf *m, int hlen, int ttl)
+{
+    uint8_t *pbIcmp = (uint8_t *)m->m_data + hlen;
+    int cbIcmp = m->m_len - hlen;
+    if (cbIcmp < ICMP_MINLEN)
+        return false;
+
+    int cbPayload = cbIcmp - ICMP_MINLEN;
+    if (cbPayload > UINT16_MAX)
+        return false;
+
+    HANDLE hIcmp = IcmpCreateFile();
+    if (hIcmp == INVALID_HANDLE_VALUE)
+        return false;
+
+    IP_OPTION_INFORMATION OptInfo;
+    memset(&OptInfo, 0, sizeof(OptInfo));
+    OptInfo.Ttl = (UCHAR)ttl;
+    OptInfo.Tos = so->so_iptos;
+
+    IPAddr src_ip = 0;
+    if (so->slirp->outbound_addr)
+        src_ip = so->slirp->outbound_addr->sin_addr.s_addr;
+
+    DWORD cbReply = sizeof(ICMP_ECHO_REPLY) + cbPayload + 8;
+    ICMP_ECHO_REPLY *pReply = g_malloc0(cbReply);
+
+    /** @todo This is a blocking call -- see above. */
+    DWORD cReplies = IcmpSendEcho2Ex(hIcmp, NULL, NULL, NULL, src_ip,
+                                     so->so_faddr.s_addr, pbIcmp + ICMP_MINLEN,
+                                     (WORD)cbPayload, &OptInfo, pReply, cbReply,
+                                     ICMP_WIN_TIMEOUT_MS);
+    DWORD dwError = cReplies ? ERROR_SUCCESS : GetLastError();
+    IcmpCloseHandle(hIcmp);
+
+    if (!cReplies) {
+        g_free(pReply);
+        if (dwError == IP_REQ_TIMED_OUT) {
+            icmp_detach(so);
+            return true;
+        }
+        return false;
+    }
+
+    if (pReply->Status == IP_REQ_TIMED_OUT) {
+        g_free(pReply);
+        icmp_detach(so);
+        return true;
+    }
+
+    bool fHandled = true;
+    if (pReply->Status == IP_SUCCESS) {
+        struct ip *ip = mtod(so->so_m, struct ip *);
+        ip->ip_ttl = pReply->Options.Ttl ? pReply->Options.Ttl : MAXTTL;
+        icmp_reflect(so->so_m);
+        so->so_m = NULL;
+    } else {
+        uint8_t type;
+        uint8_t code;
+        if (icmp_win_status_to_icmp(pReply->Status, &type, &code)) {
+            struct in_addr src_addr;
+            src_addr.s_addr = pReply->Address ? pReply->Address : so->so_faddr.s_addr;
+            icmp_forward_error(so->so_m, type, code, 0, NULL, &src_addr);
+        } else
+            fHandled = false;
+    }
+
+    g_free(pReply);
+    if (fHandled)
+        icmp_detach(so);
+    return fHandled;
+}
+# undef ICMP_WIN_TIMEOUT_MS
+#endif /* defined(VBOX) && defined(_WIN32) */
+
 /* Send ICMP packet to the Internet, and save it to so_m */
 static int icmp_send(struct socket *so, struct mbuf *m, int hlen)
 {
@@ -103,7 +234,7 @@ static int icmp_send(struct socket *so, struct mbuf *m, int hlen)
      * isn't possible to detect this difference at runtime, so we must use an
      * #ifdef to determine if we need to remove the IP header.
      */
-#if defined(BSD) && !defined(__GNU__)
+#if (defined(BSD) && !defined(__GNU__)) || defined(__APPLE__)
     so->so_type = IPPROTO_IP;
 #else
     so->so_type = IPPROTO_ICMP;
@@ -122,6 +253,13 @@ static int icmp_send(struct socket *so, struct mbuf *m, int hlen)
     if (not_valid_socket(so->s)) {
         return -1;
     }
+#if defined(VBOX) && defined(__APPLE__) && defined(IP_STRIPHDR)
+    if (so->so_type == IPPROTO_IP) {
+        /* github:gh-479: Darwin ICMP dgram replies must keep the IP header for router-error parsing. */
+        int fStripHdr = 0;
+        setsockopt(so->s, IPPROTO_IP, IP_STRIPHDR, &fStripHdr, sizeof(fStripHdr));
+    }
+#endif
     slirp_register_poll_socket(so);
 
     if (slirp_bind_outbound(so, AF_INET) != 0) {
@@ -144,18 +282,50 @@ static int icmp_send(struct socket *so, struct mbuf *m, int hlen)
     addr.sin_family = AF_INET;
     addr.sin_addr = so->so_faddr;
 
-#ifdef VBOX /* github:gh-479 */
-    /* Forward ICMP with the guest supplied TTL. */
+#ifdef VBOX
+    /* github:gh-479: Use guest-supplied TTL for forwarded ICMP so traceroute expires at the right hop. */
     int ttl = ip->ip_ttl - IPTTLDEC;
     if (ttl <= 0) {
-        /* Let traceroute see the hop limit expire. */
+        /* github:gh-479: TTL expired inside NAT; return Time Exceeded to the guest. */
         DEBUG_MISC("icmp ttl exceeded");
         icmp_send_error(m, ICMP_TIMXCEED, ICMP_TIMXCEED_INTRANS, 0, NULL);
         icmp_detach(so);
         return 0;
     }
+
+    if (ttl < IPDEFTTL && so->so_type == IPPROTO_ICMP) {
+        /* github:gh-479: Low-TTL ICMP is traceroute-like; use raw sockets so router errors are visible. */
+        slirp_os_socket s_raw = slirp_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+        if (have_valid_socket(s_raw)) {
+            slirp_os_socket s_dgram = so->s;
+            so->s = s_raw;
+            so->so_type = IPPROTO_IP;
+            if (slirp_bind_outbound(so, AF_INET) == 0) {
+                so->s = s_dgram;
+                slirp_unregister_poll_socket(so);
+                so->s = s_raw;
+                closesocket(s_dgram);
+                slirp_register_poll_socket(so);
+            } else {
+                closesocket(s_raw);
+                so->s = s_dgram;
+                so->so_type = IPPROTO_ICMP;
+            }
+        }
+    }
+# ifdef _WIN32
+    if (ttl < IPDEFTTL && so->so_type == IPPROTO_ICMP && icmp_win_send(so, m, hlen))
+        return 0;
+# endif /* _WIN32 */
+# ifdef __linux__
+    if (so->so_type == IPPROTO_ICMP) {
+        /* github:gh-479: Ping sockets report router errors via MSG_ERRQUEUE. */
+        int fRecvErr = 1;
+        setsockopt(so->s, IPPROTO_IP, IP_RECVERR, &fRecvErr, sizeof(fRecvErr));
+    }
+# endif /* __linux__ */
     setsockopt(so->s, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
-#endif
+#endif /* VBOX */
 
     slirp_insque(so, &so->slirp->icmp);
 
@@ -499,8 +669,8 @@ void icmp_reflect(struct mbuf *m)
         m->m_len -= optlen;
     }
 
-#ifdef VBOX /* github:gh-479 */
-    /* Keep the TTL from the real reply. */
+#ifdef VBOX
+    /* github:gh-479: Keep real Echo Reply TTL instead of resetting it to MAXTTL. */
 #else
     ip->ip_ttl = MAXTTL;
 #endif
@@ -514,16 +684,165 @@ void icmp_reflect(struct mbuf *m)
     ip_output((struct socket *)NULL, m);
 }
 
+#ifdef VBOX
+# ifdef __linux__
+/* github:gh-479: Return true after draining a Linux ping-socket error queue entry, forwarding any ICMP router error. */
+static bool icmp_receive_error_queue(struct socket *so)
+{
+    char buf[256];
+    char control[1024];
+    struct sockaddr_storage saddr;
+    struct msghdr msg;
+    struct iovec iov;
+    ssize_t len;
+
+    /* Prepare recvmsg() buffers for the queued ICMP error and its ancillary data. */
+    memset(&msg, 0, sizeof(msg));
+    msg.msg_name = &saddr;
+    msg.msg_namelen = sizeof(saddr);
+    msg.msg_control = control;
+    msg.msg_controllen = sizeof(control);
+    iov.iov_base = buf;
+    iov.iov_len = sizeof(buf);
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+
+    /* Drain at most one queued router error without blocking normal Echo Reply receive. */
+    len = recvmsg(so->s, &msg, MSG_ERRQUEUE | MSG_DONTWAIT);
+    if (len < 0)
+        return false;
+
+    /* Linux reports ping-socket ICMP errors as IP_RECVERR control messages. */
+    struct cmsghdr *cmsg;
+    for (cmsg = CMSG_FIRSTHDR(&msg); cmsg; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+        if (cmsg->cmsg_level == IPPROTO_IP && cmsg->cmsg_type == IP_RECVERR) {
+            struct sock_extended_err *ee = (struct sock_extended_err *)CMSG_DATA(cmsg);
+            if (cmsg->cmsg_len >= CMSG_LEN(sizeof(*ee) + sizeof(struct sockaddr_in))
+                && ee->ee_origin == SO_EE_ORIGIN_ICMP) {
+                /* The offender address is the intermediate router traceroute must show. */
+                struct sockaddr *sa = SO_EE_OFFENDER(ee);
+                if (sa->sa_family == AF_INET) {
+                    struct sockaddr_in *sin;
+
+                    /* github:gh-479: Forward Linux ping-socket router errors to the guest. */
+                    sin = (struct sockaddr_in *)sa;
+                    icmp_forward_error(so->so_m, ee->ee_type, ee->ee_code,
+                                       0, NULL, &sin->sin_addr);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+# endif /* __linux__ */
+
+/* github:gh-479: Receive into a temporary buffer so router errors do not overwrite the quoted Echo Request.
+                  Note! To avoid further #ifdef hells this replaces the original icmp_receive() as a whole. */
 void icmp_receive(struct socket *so)
 {
     struct mbuf *m = so->so_m;
     struct ip *ip = mtod(m, struct ip *);
     int hlen = ip->ip_hl << 2;
     uint8_t error_code;
-#ifdef VBOX /* github:gh-479 */
-    /* Remember the host-side ICMP source. */
     struct in_addr icmp_src = ip->ip_dst;
-#endif
+    uint8_t icmp_ttl = MAXTTL;
+    bool f_have_icmp_ttl = false;
+    struct icmp *icp;
+    struct icmp *icp_rx;
+    unsigned char *buf;
+    struct sockaddr_storage srcaddr;
+    socklen_t srcaddrlen;
+    int id, len, room;
+
+# ifdef __linux__
+    if (so->so_type == IPPROTO_ICMP && icmp_receive_error_queue(so)) {
+        icmp_detach(so);
+        return;
+    }
+# endif
+
+    m->m_data += hlen;
+    m->m_len -= hlen;
+    icp = mtod(m, struct icmp *);
+
+    id = icp->icmp_id;
+    room = M_ROOM(m);
+    buf = g_malloc(room);
+    memset(&srcaddr, 0, sizeof(srcaddr));
+    srcaddrlen = sizeof(srcaddr);
+    /* github:gh-479: recvfrom keeps the hop source on hosts delivering in-band ICMP errors without IP headers. */
+    len = recvfrom(so->s, (char *)buf, room, 0, (struct sockaddr *)&srcaddr, &srcaddrlen);
+    if (len > 0 && srcaddr.ss_family == AF_INET)
+        icmp_src = ((struct sockaddr_in *)&srcaddr)->sin_addr;
+    icp_rx = (struct icmp *)buf;
+
+    if (so->so_type == IPPROTO_IP) {
+        if (len >= sizeof(struct ip)) {
+            struct ip *inner_ip = (struct ip *)buf;
+            int inner_hlen = inner_ip->ip_hl << 2;
+            if (inner_hlen < (int)sizeof(struct ip) || inner_hlen > len) {
+                len = -1;
+                errno = EINVAL;
+            } else {
+                /* github:gh-479: Raw ICMP sockets include an IP header; keep its source and Echo Reply TTL. */
+                icmp_ttl = inner_ip->ip_ttl;
+                f_have_icmp_ttl = true;
+                icmp_src = inner_ip->ip_src;
+                len -= inner_hlen;
+                icp_rx = (struct icmp *)(buf + inner_hlen);
+            }
+        } else {
+            len = -1;
+            errno = EINVAL;
+        }
+    }
+
+    m->m_data -= hlen;
+    m->m_len += hlen;
+
+    if (len == -1 || len == 0) {
+        if (errno == ENETUNREACH) {
+            error_code = ICMP_UNREACH_NET;
+        } else {
+            error_code = ICMP_UNREACH_HOST;
+        }
+        DEBUG_MISC(" udp icmp rx errno = %d-%s", errno, g_strerror(errno));
+        icmp_send_error(so->so_m, ICMP_UNREACH, error_code, 0, g_strerror(errno));
+    } else {
+        /* Do not reflect ICMP errors as echo replies. */
+        if (len < ICMP_MINLEN) {
+            icmp_send_error(so->so_m, ICMP_UNREACH, ICMP_UNREACH_HOST, 0, "short icmp");
+        } else if (icp_rx->icmp_type == ICMP_TIMXCEED || icp_rx->icmp_type == ICMP_UNREACH) {
+            /* github:gh-479: Forward router errors using the untouched Echo Request as the quote. */
+            icmp_forward_error(so->so_m, icp_rx->icmp_type, icp_rx->icmp_code,
+                               0, NULL, &icmp_src);
+        } else {
+            /* github:gh-479: Copy real Echo Replies into so_m and preserve their received TTL. */
+            m->m_data += hlen;
+            m->m_len -= hlen;
+            icp = mtod(m, struct icmp *);
+            memcpy(icp, icp_rx, len);
+            icp->icmp_id = id;
+            m->m_data -= hlen;
+            m->m_len += hlen;
+            if (f_have_icmp_ttl)
+                ip->ip_ttl = icmp_ttl;
+
+            icmp_reflect(so->so_m);
+            so->so_m = NULL; /* Don't m_free() it again! */
+        }
+    }
+    g_free(buf);
+    icmp_detach(so);
+}
+#else /* !VBOX */
+void icmp_receive(struct socket *so)
+{
+    struct mbuf *m = so->so_m;
+    struct ip *ip = mtod(m, struct ip *);
+    int hlen = ip->ip_hl << 2;
+    uint8_t error_code;
     struct icmp *icp;
     int id, len;
 
@@ -542,11 +861,6 @@ void icmp_receive(struct socket *so)
                 len = -1;
                 errno = -EINVAL;
             } else {
-#ifdef VBOX /* github:gh-479 */
-                /* Preserve TTL and source from replies with IP headers. */
-                ip->ip_ttl = inner_ip->ip_ttl;
-                icmp_src = inner_ip->ip_src;
-#endif
                 len -= inner_hlen;
                 memmove(icp, (unsigned char *)icp + inner_hlen, len);
             }
@@ -570,19 +884,9 @@ void icmp_receive(struct socket *so)
         DEBUG_MISC(" udp icmp rx errno = %d-%s", errno, g_strerror(errno));
         icmp_send_error(so->so_m, ICMP_UNREACH, error_code, 0, g_strerror(errno));
     } else {
-#ifdef VBOX /* github:gh-479 */
-        /* Do not reflect ICMP errors as echo replies. */
-        if (len < ICMP_MINLEN) {
-            icmp_send_error(so->so_m, ICMP_UNREACH, ICMP_UNREACH_HOST, 0, "short icmp");
-        } else if (icp->icmp_type == ICMP_TIMXCEED || icp->icmp_type == ICMP_UNREACH) {
-            /* Pass traceroute errors back to the guest. */
-            icmp_forward_error(so->so_m, icp->icmp_type, icp->icmp_code, 0, NULL, &icmp_src);
-        } else
-#endif
-        {
-            icmp_reflect(so->so_m);
-            so->so_m = NULL; /* Don't m_free() it again! */
-        }
+        icmp_reflect(so->so_m);
+        so->so_m = NULL; /* Don't m_free() it again! */
     }
     icmp_detach(so);
 }
+#endif /* !VBOX */
