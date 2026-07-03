@@ -1,4 +1,4 @@
-' $Id: clipboard_api.iuml 114549 2026-06-26 09:31:36Z andreas.loeffler@oracle.com $
+' $Id: clipboard_api.iuml 114611 2026-07-03 15:34:02Z andreas.loeffler@oracle.com $
 '' @file
 ' UML definition for PlantUML - VirtualBox Clipboard API - Draft
 '
@@ -28,125 +28,353 @@
 @startuml
 title VirtualBox Clipboard API - 7.x Draft
 hide empty description
+skinparam shadowing false
+skinparam dpi 96
 
-enum ClipboardAction
-{
-    Invalid
-    Copy
-    Cut
-    Paste
-    Custom
+package "Clipboard data" {
+  enum ClipboardAction
+  {
+      Invalid
+      Copy
+      Cut
+      Paste
+      Custom
+  }
+
+  enum ClipboardSource
+  {
+      Host
+      Guest
+      Remote
+      Custom
+  }
+
+  enum ClipboardMode
+  {
+      Disabled
+      HostToGuest
+      GuestToHost
+      Bidirectional
+  }
+
+  enum ClipboardError
+  {
+      None
+      NotSupported
+      AccessDenied
+      FormatNotSupported
+      OperationFailed
+  }
+
+  abstract class IClipboardFormat
+  {
+      +mimeType : wstring
+  }
+
+  abstract class IClipboardItem
+  {
+      +id : ULONG
+      +source : ClipboardSource
+      +format : IClipboardFormat
+      +buffer : Array
+      +size : ULONG
+  }
 }
 
-abstract class IClipboardFormat
-{
-    +mimeType : wstring
+package "Abstract transfer tree" {
+  enum ClipboardTransferDirection
+  {
+      Any
+      ToGuest
+      ToHost
+  }
+
+  enum ClipboardTransferState
+  {
+      Added
+      Removed
+      InProgress
+      Interaction
+      Completed
+      Canceled
+      Failed
+  }
+
+
+
+  enum ClipboardTransferListFlag
+  {
+      None
+      NoRecursion
+      IncludeRoot
+      NoFollowSymlinks
+  }
+
+  enum ClipboardTransferDataType
+  {
+      RootList
+      List
+      Object
+  }
+
+  enum ClipboardTransferInteraction
+  {
+      None
+      Approval
+      Destination
+      Overwrite
+      Rename
+      ErrorRecovery
+  }
+
+  enum ClipboardTransferResponse
+  {
+      None
+      Accept
+      Reject
+      Overwrite
+      Skip
+      Rename
+      Cancel
+      Retry
+  }
+
+  abstract class IFsObjInfo
+  {
+      +name : wstring
+      +type : FsObjType
+      +size : LONG64
+      +mode : ULONG
+  }
+
+  abstract class IFile
+  {
+      +read(size, timeoutMS) : Array
+      +readAt(offset, size, timeoutMS) : Array
+      +write(data, timeoutMS) : ULONG
+      +seek(offset, whence) : LONG64
+      +close() : HRESULT
+  }
+
+  abstract class IDirectory
+  {
+      +list(maxEntries) : SafeArray<IFsObjInfo>
+      +read() : IFsObjInfo
+      +rewind() : HRESULT
+      +close() : HRESULT
+  }
+
+  abstract class IClipboardTransferFsObjInfo
+  {
+      +path : wstring
+      +flags : ULONG
+  }
+
+  abstract class IClipboardTransferFile
+  {
+      +path : wstring
+      +flags : ULONG
+  }
+
+  abstract class IClipboardTransferDirectory
+  {
+      +path : wstring
+      +flags : ULONG
+      +listEx(maxEntries, flags) : SafeArray<IClipboardTransferFsObjInfo>
+  }
+
+  abstract class IClipboardTransferData
+  {
+      +open(type, path, filter, flags) : LONG64
+      +close(type, handle) : HRESULT
+      +read(type, handle, size, flags) : name/infoFlags/info/data
+      +write(type, handle, name, infoFlags, info, data, flags) : ULONG
+  }
+
+  abstract class IClipboardTransfer
+  {
+      +id : ULONG
+      +direction : ClipboardTransferDirection
+      +source : ClipboardSource
+      +action : ClipboardAction
+      +state : ClipboardTransferState
+      +item : IClipboardItem
+      +progress : IProgress
+      +message : wstring
+      +error : ClipboardError
+      +data : IClipboardTransferData
+      +getSourcePaths() : SafeArray<wstring>
+      +setSourcePaths(SafeArray<wstring>) : HRESULT
+      +roots() : SafeArray<IClipboardTransferFsObjInfo>
+      +query(path) : IClipboardTransferFsObjInfo
+      +list(path, flags) : SafeArray<IClipboardTransferFsObjInfo>
+      +openDirectory(path, flags) : IClipboardTransferDirectory
+      +openFile(path, access, openAction, sharing, mode, flags) : IClipboardTransferFile
+      +createDirectory(path, flags) : HRESULT
+  }
+
+  IClipboardTransferFsObjInfo --|> IFsObjInfo
+  IClipboardTransferFile --|> IFile
+  IClipboardTransferDirectory --|> IDirectory
+  IClipboardTransfer *-- IClipboardTransferFsObjInfo : roots/list/query
+  IClipboardTransfer *-- IClipboardTransferFile : openFile
+  IClipboardTransfer *-- IClipboardTransferDirectory : openDirectory
+  IClipboardTransfer *-- IClipboardTransferData : data
 }
 
-enum ClipboardSource
-{
-    Host
-    Guest
-    Remote
-    Custom
+package "Events" {
+  abstract class IClipboardEvent
+  {
+      +id : wstring
+      +item : IClipboardItem
+      +veto : BOOL
+  }
+
+  abstract class IClipboardModeChangedEvent
+  {
+      +mode : ClipboardMode
+  }
+
+  abstract class IClipboardSourceChangedEvent
+  {
+      +source : ClipboardSource
+  }
+
+  abstract class IClipboardFormatChangedEvent
+  {
+      +source : ClipboardSource
+      +formats : SafeArray<IClipboardFormat>
+  }
+
+  abstract class IClipboardDataRequestedEvent
+  {
+      +requestId : ULONG
+      +action : ClipboardAction
+      +source : ClipboardSource
+      +format : IClipboardFormat
+  }
+
+  abstract class IClipboardDataChangedEvent
+  {
+      +action : ClipboardAction
+  }
+
+  abstract class IClipboardErrorEvent
+  {
+      +msg : wstring
+      +rcError : LONG
+  }
+
+  abstract class IClipboardTransferEvent
+  {
+      +transfer : IClipboardTransfer
+      +state : ClipboardTransferState
+      +interaction : ClipboardTransferInteraction
+      +path : wstring
+      +message : wstring
+      +error : ClipboardError
+  }
+
+  IEvent <|-- IClipboardEvent
+  IEvent <|-- IClipboardModeChangedEvent
+  IEvent <|-- IClipboardSourceChangedEvent
+  IClipboardEvent <|-- IClipboardFormatChangedEvent
+  IClipboardEvent <|-- IClipboardDataRequestedEvent
+  IClipboardEvent <|-- IClipboardDataChangedEvent
+  IClipboardEvent <|-- IClipboardErrorEvent
+  IEvent <|-- IClipboardTransferEvent
 }
+
+package "Clipboard control" {
+  abstract class IClipboardTransferManager
+  {
+      +getTransfers(direction, flags) : SafeArray<IClipboardTransfer>
+      +createTransfer(direction, source, action) : IClipboardTransfer
+      +add(transfer) : HRESULT
+      +remove(transfer) : HRESULT
+      +cancel(transfer) : HRESULT
+      +approve(transfer, flags) : HRESULT
+      +deny(transfer, reason) : HRESULT
+      +respond(transfer, interaction, path, response, responsePath, flags) : HRESULT
+      +pause(transfer) : HRESULT
+      +resume(transfer) : HRESULT
+      +reset() : HRESULT
+  }
+
+  abstract class IClipboardSettings
+  {
+      +setMode(mode) : HRESULT
+      +getMode : ClipboardMode
+      +setFileTransfersEnabled(enabled) : HRESULT
+      +getFileTransfersEnabled : BOOL
+  }
+
+  abstract class IClipboard
+  {
+      +createFormat(wstring) : IClipboardFormat
+      +createItem(source, format, buffer) : IClipboardItem
+      +readData(action) : IClipboardItem
+      +readFormats() : SafeArray<IClipboardFormat>
+      +writeData(action, item) : IClipboardItem
+      +readDataRaw(action, requestedMimeType) : SafeArray<octet>
+      +writeDataRaw(action, source, mime, bytes) : SafeArray<octet>
+      +writeFormats(formats) : HRESULT
+      +reset() : HRESULT
+      +isFormatAvailable(source, format) : BOOL
+      +getSupportedFormats(source) : SafeArray<IClipboardFormat>
+      +transfers : IClipboardTransferManager
+      +eventSource : IEventSource
+  }
+
+  class IMachine
+  {
+      clipboard : IClipboardSettings
+  }
+
+  class IConsole
+  {
+      clipboard : IClipboard
+  }
+
+  IClipboard *-- IClipboardTransferManager
+  IClipboardTransferManager o-- IClipboardTransfer
+  IClipboardTransferManager ..> IClipboardTransfer : creates
+  IClipboard ..> IClipboardFormat : creates
+  IClipboard ..> IClipboardItem : creates
+  IMachine *-- IClipboardSettings
+  IConsole *-- IClipboard
+}
+
+note right of IClipboardTransfer
+  sourcePaths are producer-side local filesystem
+  paths used to configure a local transfer.
+  Example: /home/user/report.txt
+
+  roots() returns receiver-visible transfer-relative
+  nodes, not local paths.
+  Example root: report.txt
+
+  A transfer may have roots even when getSourcePaths()
+  is empty, such as guest, remote or virtual offers.
+  Directory listing is recursive by default;
+  NoRecursion opts out.
+end note
+
+note right of IClipboardTransferManager::getTransfers
+  Replaces the old transfers attribute getter on
+  the manager. Returns all matching transfer objects.
+end note
+
+note right of IClipboardTransferEvent
+  Implicit transfer automation uses events for
+  approval, destination, overwrite, rename and
+  recovery decisions. There is intentionally no
+  IClipboardTransferOperation interface.
+end note
 
 note left of ClipboardSource::Remote
-  For VRDE extensions
+  For VRDE extensions.
 end note
-
-abstract class IClipboardItem
-{
-    +id : ULONG
-    +source : ClipboardSource
-    +format : IClipboardFormat
-    +buffer : Array
-    +size : ULONG
-}
-
-abstract class IClipboardTransfer
-{
-    +getId : ULONG
-    +progress : IProgress
-}
-
-' Note: Interaction state for (later) supporting 'overwrite?' actions and such.
-abstract class ClipboardTransferState
-{
-    Added
-    Removed
-    InProgress
-    Interaction
-    Completed
-    Canceled
-    Failed
-}
-
-note left of IClipboardItem::source
-  Optional source ID of the clipboard. Defaults to 0.
-  For X11 this means PRIMARY (0), SECONDARY(1) and CLIPBOARD(2).
-end note
-
-note left of IClipboardItem::id
-  Unique ID to distinguish clipboard transfers.
-end note
-
-note left of IClipboardItem::format
-  MIME Format of the clipboard  (i.e. "text/plain", "image/bmp").
-end note
-
-enum ClipboardError
-{
-    None
-    NotSupported
-    AccessDenied
-    FormatNotSupported
-    OperationFailed
-}
-
-enum ClipboardMode
-{
-    Disabled
-    HostToGuest
-    GuestToHost
-    Bidirectional
-}
-
-' Events derived from IClipboardEvent can veto the announced operation.
-abstract class IClipboardEvent
-{
-    +id : wstring
-    +item : IClipboardItem
-    +veto : BOOL
-}
-
-' Already implemented < 7.2.
-abstract class IClipboardModeChangedEvent
-{
-    +mode : ClipboardMode
-}
-
-abstract class IClipboardSourceChangedEvent
-{
-    +source : ClipboardSource
-}
-note left of IClipboardSourceChangedEvent
-  When enabling / disabling VRDE extension
-end note
-
-abstract class IClipboardFormatChangedEvent
-{
-    +source : ClipboardSource
-    +formats : SafeArray<IClipboardFormat>
-}
-
-abstract class IClipboardDataRequestedEvent
-{
-    +requestId : ULONG
-    +action : ClipboardAction
-    +source : ClipboardSource
-    +format : IClipboardFormat
-}
 
 note left of IClipboardDataRequestedEvent
   Waitable event emitted when clipboard data
@@ -154,126 +382,6 @@ note left of IClipboardDataRequestedEvent
   Providers supply data and mark the event
   processed before the request completes.
 end note
-
-abstract class IClipboardDataChangedEvent
-{
-    +action : ClipboardAction
-}
-
-abstract class IClipboardErrorEvent
-{
-    +msg : wstring
-    +rcError : LONG
-}
-
-abstract class IClipboardTransferEvent
-{
-    +transfer : IClipboardTransfer
-    +state : ClipboardTransferState
-    +message : wstring
-    +error : ClipboardError
-}
-
-note left of IClipboardTransferEvent::message
-  For user interaction messages.
-  For example, "Do you want to overwrite existing file?".
-end note
-
-' Clipboard events
-IEvent <|-- IClipboardEvent
-IEvent <|-- IClipboardModeChangedEvent
-IEvent <|-- IClipboardSourceChangedEvent
-IClipboardEvent <|-- IClipboardFormatChangedEvent
-IClipboardEvent <|-- IClipboardDataRequestedEvent
-IClipboardEvent <|-- IClipboardDataChangedEvent
-IClipboardEvent <|-- IClipboardErrorEvent
-IEvent <|-- IClipboardTransferEvent
-
-' A single clipboard transfer
-abstract class IClipboardTransfer
-{
-    +id : ULONG
-    +action : ClipboardAction
-    +item : IClipboardItem
-}
-IClipboardTransfer <|-- IProgress
-
-' Clipboard (file) transfer manager
-abstract class IClipboardTransferManager
-{
-    +add(IClipboardTransfer) : HRESULT
-    +remove(IClipboardTransfer) : HRESULT
-    +cancel(IClipboardTransfer) : HRESULT
-    +getTranfers : SafeArray<IClipboardTransfer>
-    +reset : HRESULT
-}
-
-' Lives as part of IMachine.
-abstract class IClipboardSettings
-{
-    +setMode(ClipboardMode) : HRESULT
-    +getMode : ClipboardMode
-    +setFileTransfersEnabled(BOOL) : HRESULT
-    +getFileTransfersEnabled : BOOL
-}
-
-' Lives as part of IConsole.
-' All commands operate on the console clipboard.
-abstract class IClipboard
-{
-    +getFileList : SafeArray<wstring>
-    +setFileList(SafeArray<wstring>) : HRESULT
-    +createFormat(wstring) : IClipboardFormat
-    +createItem(ClipboardSource, IClipboardFormat, SafeArray<octet>) : IClipboardItem
-    +readData(ClipboardAction) : IClipboardItem
-    +readFormats : SafeArray<IClipboardFormat>
-    +writeData(ClipboardAction, IClipboardItem) : IClipboardItem
-    +readDataRaw(ClipboardAction, wstring requestedMimeType) : SafeArray<octet>
-    +writeDataRaw(ClipboardAction, ClipboardSource, wstring, SafeArray<octet>) : SafeArray<octet>
-    +writeFormats(SafeArray<IClipboardFormat>) : HRESULT
-    +reset : HRESULT
-    +isFormatAvailable(ClipboardSource, IClipboardFormat) : BOOL
-    +getSupportedFormats(ClipboardSource) : SafeArray<IClipboardFormat>
-
-    __ Data / file transfers
-
-    +transfers : IClipboardTransferManager
-
-    __ Events __
-
-    +EventSource : IEventSource
-}
-
-IClipboard *-- IClipboardTransferManager
-IClipboard ..> IClipboardFormat : creates
-IClipboard ..> IClipboardItem : creates
-
-note left of IClipboard::createFormat
-  Factory needed by public API clients before using methods
-  accepting IClipboardFormat values.
-end note
-note left of IClipboard::createItem
-  Factory needed by public API clients before using writeData().
-end note
-note left of IClipboard::readData
-  Reads current clipboard item from the active clipboard source.
-end note
-note left of IClipboard::writeData
-  Writes a clipboard item and announces it to the opposite side.
-end note
-note left of IClipboard::reset
-  Resets all clipboard data.
-end note
-
-class IMachine
-{
-    clipboard : IClipboardSettings
-}
-
-class IConsole
-{
-    clipboard : IClipboard
-}
 
 @enduml
 ' EOF
