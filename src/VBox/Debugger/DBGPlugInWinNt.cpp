@@ -1,4 +1,4 @@
-/* $Id: DBGPlugInWinNt.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: DBGPlugInWinNt.cpp 114607 2026-07-03 12:55:24Z alexander.eichner@oracle.com $ */
 /** @file
  * DBGPlugInWindows - Debugger and Guest OS Digger Plugin For Windows NT.
  */
@@ -289,6 +289,8 @@ typedef struct DBGDIGGERWINNT
     DBGFOSIWINNT        IWinNt;
 
 #ifdef VBOX_DEBUGGER_WITH_WIN_DBG_PRINT_HOOKING
+    /** Pointer to the VMM callback table. */
+    PCVMMR3VTABLE       pVMM;
     /** Breakpoint owner handle for the DbgPrint/vDbgPrint{,Ex}... interception. */
     DBGFBPOWNER         hBpOwnerDbgPrint;
     /** Breakpoint handle for the DbgPrint/vDbgPrint{,Ex}... interception. */
@@ -382,17 +384,18 @@ static const RTUTF16 g_wszKernelNames[][WINNT_KERNEL_BASE_NAME_LEN + 1] =
  * @param   enmReg          The register to query the string pointer from.
  * @param   pszBuf          Where to store the sanitized string.
  * @param   cbBuf           Size of the buffer in number of bytes.
+ * @param   pVMM            The VMM function table.
  */
-static int dbgDiggerWinNtDbgPrintQueryStringFromReg(PUVM pUVM, VMCPUID idCpu, DBGFREG enmReg, char *pszBuf, size_t cbBuf)
+static int dbgDiggerWinNtDbgPrintQueryStringFromReg(PUVM pUVM, VMCPUID idCpu, DBGFREG enmReg, char *pszBuf, size_t cbBuf, PCVMMR3VTABLE pVMM)
 {
     uint64_t u64RegPtr = 0;
-    int rc = DBGFR3RegCpuQueryU64(pUVM, idCpu, enmReg, &u64RegPtr);
+    int rc = pVMM->pfnDBGFR3RegCpuQueryU64(pUVM, idCpu, enmReg, &u64RegPtr);
     if (   rc == VINF_SUCCESS
         || rc == VINF_DBGF_ZERO_EXTENDED_REGISTER) /* Being strict about what we expect here. */
     {
         DBGFADDRESS AddrStr;
-        DBGFR3AddrFromFlat(pUVM, &AddrStr, u64RegPtr);
-        rc = DBGFR3MemRead(pUVM, idCpu, &AddrStr, pszBuf, cbBuf);
+        pVMM->pfnDBGFR3AddrFromFlat(pUVM, &AddrStr, u64RegPtr);
+        rc = pVMM->pfnDBGFR3MemRead(pUVM, idCpu, &AddrStr, pszBuf, cbBuf);
         if (RT_SUCCESS(rc))
         {
             /* Check that there is a zero terminator and purge invalid encoding (expecting UTF-8 here). */
@@ -424,7 +427,8 @@ static DECLCALLBACK(VBOXSTRICTRC) dbgDiggerWinNtDbgPrintHit(PVM pVM, VMCPUID idC
 {
     RT_NOREF(hBp, pBpPub, fFlags);
     PDBGDIGGERWINNT pThis = (PDBGDIGGERWINNT)pvUserBp;
-    PUVM pUVM = VMR3GetUVM(pVM);
+    PCVMMR3VTABLE pVMM = pThis->pVMM;
+    PUVM pUVM = pVMM->pfnVMR3GetUVM(pVM);
 
     /*
      * The worker prototype looks like the following:
@@ -450,13 +454,13 @@ static DECLCALLBACK(VBOXSTRICTRC) dbgDiggerWinNtDbgPrintHit(PVM pVM, VMCPUID idC
          * Grab the prefix, component, level, format string pointer from the registers and the argument list from the
          * stack (mind the home area for the register arguments).
          */
-        rc = dbgDiggerWinNtDbgPrintQueryStringFromReg(pUVM, idCpu, DBGFREG_RCX, &aszPrefixStr[0], sizeof(aszPrefixStr));
+        rc = dbgDiggerWinNtDbgPrintQueryStringFromReg(pUVM, idCpu, DBGFREG_RCX, &aszPrefixStr[0], sizeof(aszPrefixStr), pVMM);
         if (RT_SUCCESS(rc))
-            rc = DBGFR3RegCpuQueryU32(pUVM, idCpu, DBGFREG_RDX, &idComponent);
+            rc = pVMM->pfnDBGFR3RegCpuQueryU32(pUVM, idCpu, DBGFREG_RDX, &idComponent);
         if (RT_SUCCESS(rc))
-            rc = DBGFR3RegCpuQueryU32(pUVM, idCpu, DBGFREG_R8, &iLevel);
+            rc = pVMM->pfnDBGFR3RegCpuQueryU32(pUVM, idCpu, DBGFREG_R8, &iLevel);
         if (RT_SUCCESS(rc))
-            rc = dbgDiggerWinNtDbgPrintQueryStringFromReg(pUVM, idCpu, DBGFREG_R9, &aszFmtStr[0], sizeof(aszFmtStr));
+            rc = dbgDiggerWinNtDbgPrintQueryStringFromReg(pUVM, idCpu, DBGFREG_R9, &aszFmtStr[0], sizeof(aszFmtStr), pVMM);
         if (RT_SUCCESS(rc))
         {
             /* Grabbing the pointer to the va list. The stack layout when we are here looks like (each entry is 64bit):
@@ -471,16 +475,16 @@ static DECLCALLBACK(VBOXSTRICTRC) dbgDiggerWinNtDbgPrintHit(PVM pVM, VMCPUID idC
              *     +-------------+ <- RSP
              */
             uint64_t uRegRsp = 0;
-            rc = DBGFR3RegCpuQueryU64(pUVM, idCpu, DBGFREG_RSP, &uRegRsp);
+            rc = pVMM->pfnDBGFR3RegCpuQueryU64(pUVM, idCpu, DBGFREG_RSP, &uRegRsp);
             if (rc == VINF_SUCCESS)
             {
                 DBGFADDRESS AddrVaListPtr;
                 RTGCUINTPTR GCPtrVaList = 0;
 
-                DBGFR3AddrFromFlat(pUVM, &AddrVaListPtr, uRegRsp + 5 * sizeof(RTGCUINTPTR));
-                rc = DBGFR3MemRead(pUVM, idCpu, &AddrVaListPtr, &GCPtrVaList, sizeof(GCPtrVaList));
+                pVMM->pfnDBGFR3AddrFromFlat(pUVM, &AddrVaListPtr, uRegRsp + 5 * sizeof(RTGCUINTPTR));
+                rc = pVMM->pfnDBGFR3MemRead(pUVM, idCpu, &AddrVaListPtr, &GCPtrVaList, sizeof(GCPtrVaList));
                 if (RT_SUCCESS(rc))
-                    DBGFR3AddrFromFlat(pUVM, &AddrVaList, GCPtrVaList);
+                    pVMM->pfnDBGFR3AddrFromFlat(pUVM, &AddrVaList, GCPtrVaList);
             }
             else
                 rc = VERR_INVALID_STATE;
@@ -509,29 +513,31 @@ static DECLCALLBACK(VBOXSTRICTRC) dbgDiggerWinNtDbgPrintHit(PVM pVM, VMCPUID idC
  * @param   pUVM            The user mode VM handle.
  * @param   pAddrInsn       Guest address of the instruction.
  * @param   pAddrCall       Where to store the destination if the instruction is a call.
+ * @param   pVMM            The VMM function table.
  */
-static bool dbgDiggerWinNtDbgPrintWrapperInsnIsCall(PDBGDIGGERWINNT pThis, PUVM pUVM, PCDBGFADDRESS pAddrInsn, PDBGFADDRESS pAddrCall)
+static bool dbgDiggerWinNtDbgPrintWrapperInsnIsCall(PDBGDIGGERWINNT pThis, PUVM pUVM, PCDBGFADDRESS pAddrInsn, PDBGFADDRESS pAddrCall,
+                                                    PCVMMR3VTABLE pVMM)
 {
     DISSTATE DisState;
     RT_ZERO(DisState);
 
     /* Prefetch the instruction. */
     uint8_t abInstr[32];
-    int rc = DBGFR3MemRead(pUVM, 0 /*idCpu*/, pAddrInsn, &abInstr[0], sizeof(abInstr));
+    int rc = pVMM->pfnDBGFR3MemRead(pUVM, 0 /*idCpu*/, pAddrInsn, &abInstr[0], sizeof(abInstr));
     if (RT_SUCCESS(rc))
     {
         uint32_t cbInsn = 0;
         rc = DISInstr(&abInstr[0], pThis->enmArch == RTLDRARCH_X86_32 ? DISCPUMODE_32BIT : DISCPUMODE_64BIT, &DisState, &cbInsn);
         if (   RT_SUCCESS(rc)
             && DisState.pCurInstr->uOpcode == OP_CALL
-            && DisState.Param1.fUse & DISUSE_IMMEDIATE)
+            && DisState.aParams[0].fUse & DISUSE_IMMEDIATE)
         {
-            if (DisState.Param1.fUse & (DISUSE_IMMEDIATE32 | DISUSE_IMMEDIATE64))
-                DBGFR3AddrFromFlat(pUVM, pAddrCall, DisState.Param1.uValue);
-            else if (DisState.Param1.fUse & (DISUSE_IMMEDIATE32_REL | DISUSE_IMMEDIATE64_REL))
+            if (DisState.aParams[0].fUse & (DISUSE_IMMEDIATE32 | DISUSE_IMMEDIATE64))
+                pVMM->pfnDBGFR3AddrFromFlat(pUVM, pAddrCall, DisState.aParams[0].uValue);
+            else if (DisState.aParams[0].fUse & (DISUSE_IMMEDIATE32_REL | DISUSE_IMMEDIATE64_REL))
             {
                 *pAddrCall = *pAddrInsn;
-                DBGFR3AddrAdd(pAddrCall, DisState.Param1.uValue + cbInsn);
+                pVMM->pfnDBGFR3AddrAdd(pAddrCall, DisState.aParams[0].uValue + cbInsn);
             }
 
             return true;
@@ -551,40 +557,48 @@ static bool dbgDiggerWinNtDbgPrintWrapperInsnIsCall(PDBGDIGGERWINNT pThis, PUVM 
  * @param   pUVM            The user mode VM handle.
  * @param   hFlow           The control flow graph handle.
  * @param   pAddr           Where to store the worker address on success.
+ * @param   pVMM            The VMM function table.
  */
-static int dbgDiggerWinNtDbgPrintResolveWorker(PDBGDIGGERWINNT pThis, PUVM pUVM, DBGFFLOW hFlow, PDBGFADDRESS pAddr)
+static int dbgDiggerWinNtDbgPrintResolveWorker(PDBGDIGGERWINNT pThis, PUVM pUVM, DBGFFLOW hFlow, PDBGFADDRESS pAddr, PCVMMR3VTABLE pVMM)
 {
     DBGFFLOWBB hBb;
-    int rc = DBGFR3FlowQueryStartBb(hFlow, &hBb);
+    int rc = pVMM->pfnDBGFR3FlowQueryStartBb(hFlow, &hBb);
     if (RT_SUCCESS(rc))
     {
-        bool fCallFound = false;
-
-        for (uint32_t i = 0; i < DBGFR3FlowBbGetInstrCount(hBb) && RT_SUCCESS(rc); i++)
+        DBGFFLOWBB hBb2;
+        rc = pVMM->pfnDBGFR3FlowBbQuerySuccessors(hBb, &hBb2, NULL);
+        pVMM->pfnDBGFR3FlowBbRelease(hBb);
+        hBb = hBb2;
+        if (RT_SUCCESS(rc))
         {
-            DBGFADDRESS AddrInsn;
-            uint32_t cbInsn;
-            rc = DBGFR3FlowBbQueryInstr(hBb, i, &AddrInsn, &cbInsn, NULL);
-            if (RT_SUCCESS(rc))
+            bool fCallFound = false;
+
+            for (uint32_t i = 0; i < pVMM->pfnDBGFR3FlowBbGetInstrCount(hBb) && RT_SUCCESS(rc); i++)
             {
-                DBGFADDRESS AddrCall;
-                if (dbgDiggerWinNtDbgPrintWrapperInsnIsCall(pThis, pUVM, &AddrInsn, &AddrCall))
+                DBGFADDRESS AddrInsn;
+                uint32_t cbInsn;
+                rc = pVMM->pfnDBGFR3FlowBbQueryInstr(hBb, i, &AddrInsn, &cbInsn, NULL);
+                if (RT_SUCCESS(rc))
                 {
-                    if (!fCallFound)
+                    DBGFADDRESS AddrCall;
+                    if (dbgDiggerWinNtDbgPrintWrapperInsnIsCall(pThis, pUVM, &AddrInsn, &AddrCall, pVMM))
                     {
-                        *pAddr = AddrCall;
-                        fCallFound = true;
-                    }
-                    else
-                    {
-                        LogRel(("DigWinNt/DbgPrint: nt!vDbgPrintEx contains multiple call instructions!\n"));
-                        rc = VERR_ALREADY_EXISTS;
+                        if (!fCallFound)
+                        {
+                            *pAddr = AddrCall;
+                            fCallFound = true;
+                        }
+                        else
+                        {
+                            LogRel(("DigWinNt/DbgPrint: nt!vDbgPrintEx contains multiple call instructions!\n"));
+                            rc = VERR_ALREADY_EXISTS;
+                        }
                     }
                 }
             }
         }
 
-        DBGFR3FlowBbRelease(hBb);
+        pVMM->pfnDBGFR3FlowBbRelease(hBb);
     }
 
     return rc;
@@ -597,8 +611,9 @@ static int dbgDiggerWinNtDbgPrintResolveWorker(PDBGDIGGERWINNT pThis, PUVM pUVM,
  *
  * @param   pThis           The instance data.
  * @param   pUVM            The user mode VM handle.
+ * @param   pVMM            The VMM function table.
  */
-static void dbgDiggerWinNtDbgPrintHook(PDBGDIGGERWINNT pThis, PUVM pUVM)
+static void dbgDiggerWinNtDbgPrintHook(PDBGDIGGERWINNT pThis, PUVM pUVM, PCVMMR3VTABLE pVMM)
 {
     /*
      * This is a multi step process:
@@ -610,7 +625,7 @@ static void dbgDiggerWinNtDbgPrintHook(PDBGDIGGERWINNT pThis, PUVM pUVM)
      *     3. Get the address from the called worker
      *     4. Set a hardware breakpoint with our callback.
      */
-    RTDBGAS hAs = DBGFR3AsResolveAndRetain(pUVM, DBGF_AS_KERNEL);
+    RTDBGAS hAs = pVMM->pfnDBGFR3AsResolveAndRetain(pUVM, DBGF_AS_KERNEL);
     if (hAs != NIL_RTDBGAS)
     {
         RTDBGSYMBOL SymInfo;
@@ -618,35 +633,35 @@ static void dbgDiggerWinNtDbgPrintHook(PDBGDIGGERWINNT pThis, PUVM pUVM)
         if (RT_SUCCESS(rc))
         {
             DBGFADDRESS Addr;
-            DBGFR3AddrFromFlat(pUVM, &Addr, (RTGCPTR)SymInfo.Value);
+            pVMM->pfnDBGFR3AddrFromFlat(pUVM, &Addr, (RTGCPTR)SymInfo.Value);
 
             LogRel(("DigWinNt/DbgPrint: nt!vDbgPrintEx resolved to %RGv\n", SymInfo.Value));
 
             DBGFFLOW hCfg;
-            rc = DBGFR3FlowCreate(pUVM, 0 /*idCpu*/, &Addr, 512 /*cbDisasmMax*/,
-                                  0 /*fFlagsFlow*/, DBGF_DISAS_FLAGS_UNPATCHED_BYTES | DBGF_DISAS_FLAGS_ANNOTATE_PATCHED | DBGF_DISAS_FLAGS_DEFAULT_MODE,
-                                  &hCfg);
+            rc = pVMM->pfnDBGFR3FlowCreate(pUVM, 0 /*idCpu*/, &Addr, 512 /*cbDisasmMax*/,
+                                           0 /*fFlagsFlow*/, DBGF_DISAS_FLAGS_UNPATCHED_BYTES | DBGF_DISAS_FLAGS_ANNOTATE_PATCHED | DBGF_DISAS_FLAGS_DEFAULT_MODE,
+                                           &hCfg);
             if (RT_SUCCESS(rc))
             {
                 /* Verify assumptions. */
-                if (DBGFR3FlowGetBbCount(hCfg) == 1)
+                if (pVMM->pfnDBGFR3FlowGetBbCount(hCfg) == 6)
                 {
-                    rc = dbgDiggerWinNtDbgPrintResolveWorker(pThis, pUVM, hCfg, &Addr);
+                    rc = dbgDiggerWinNtDbgPrintResolveWorker(pThis, pUVM, hCfg, &Addr, pVMM);
                     if (RT_SUCCESS(rc))
                     {
                         /* Try to hook the worker. */
                         LogRel(("DigWinNt/DbgPrint: Worker for nt!vDbgPrintEx resolved to %RGv\n", Addr.FlatPtr));
-                        rc = DBGFR3BpOwnerCreate(pUVM, dbgDiggerWinNtDbgPrintHit, NULL /*pfnBpIoHit*/, &pThis->hBpOwnerDbgPrint);
+                        rc = pVMM->pfnDBGFR3BpOwnerCreate(pUVM, dbgDiggerWinNtDbgPrintHit, NULL /*pfnBpIoHit*/, &pThis->hBpOwnerDbgPrint);
                         if (RT_SUCCESS(rc))
                         {
-                            rc = DBGFR3BpSetInt3Ex(pUVM, pThis->hBpOwnerDbgPrint, pThis, 0 /*idCpu*/, &Addr, DBGF_BP_F_DEFAULT,
-                                                   0 /*iHitTrigger*/, 0 /*iHitDisable*/, &pThis->hBpDbgPrint);
+                            rc = pVMM->pfnDBGFR3BpSetInt3Ex(pUVM, pThis->hBpOwnerDbgPrint, pThis, 0 /*idCpu*/, &Addr, DBGF_BP_F_DEFAULT,
+                                                            0 /*iHitTrigger*/, 0 /*iHitDisable*/, &pThis->hBpDbgPrint);
                             if (RT_SUCCESS(rc))
                                 LogRel(("DigWinNt/DbgPrint: Hooked nt!vDbgPrintEx worker hBp=%#x\n", pThis->hBpDbgPrint));
                             else
                             {
                                 LogRel(("DigWinNt/DbgPrint: Setting hardware breakpoint for nt!vDbgPrintEx worker failed with rc=%Rrc\n", rc));
-                                int rc2 = DBGFR3BpOwnerDestroy(pUVM, pThis->hBpOwnerDbgPrint);
+                                int rc2 = pVMM->pfnDBGFR3BpOwnerDestroy(pUVM, pThis->hBpOwnerDbgPrint);
                                 pThis->hBpOwnerDbgPrint = NIL_DBGFBPOWNER;
                                 AssertRC(rc2);
                             }
@@ -656,9 +671,9 @@ static void dbgDiggerWinNtDbgPrintHook(PDBGDIGGERWINNT pThis, PUVM pUVM)
                 }
                 else
                     LogRel(("DigWinNt/DbgPrint: Control flow graph for nt!vDbgPrintEx has more than one basic block (%u)\n",
-                            DBGFR3FlowGetBbCount(hCfg)));
+                            pVMM->pfnDBGFR3FlowGetBbCount(hCfg)));
 
-                DBGFR3FlowRelease(hCfg);
+                pVMM->pfnDBGFR3FlowRelease(hCfg);
             }
             else
                 LogRel(("DigWinNt/DbgPrint: Failed to create control flow graph from nt!vDbgPrintEx rc=%Rrc\n", rc));
@@ -1503,14 +1518,14 @@ static DECLCALLBACK(void)  dbgDiggerWinNtTerm(PUVM pUVM, PCVMMR3VTABLE pVMM, voi
 #ifdef VBOX_DEBUGGER_WITH_WIN_DBG_PRINT_HOOKING
     if (pThis->hBpDbgPrint != NIL_DBGFBP)
     {
-        int rc = DBGFR3BpClear(pUVM, pThis->hBpDbgPrint);
+        int rc = pVMM->pfnDBGFR3BpClear(pUVM, pThis->hBpDbgPrint);
         AssertRC(rc);
         pThis->hBpDbgPrint = NIL_DBGFBP;
     }
 
     if (pThis->hBpOwnerDbgPrint != NIL_DBGFBPOWNER)
     {
-        int rc = DBGFR3BpOwnerDestroy(pUVM, pThis->hBpOwnerDbgPrint);
+        int rc = pVMM->pfnDBGFR3BpOwnerDestroy(pUVM, pThis->hBpOwnerDbgPrint);
         AssertRC(rc);
         pThis->hBpOwnerDbgPrint = NIL_DBGFBPOWNER;
     }
@@ -1747,8 +1762,10 @@ static DECLCALLBACK(int)  dbgDiggerWinNtInit(PUVM pUVM, PCVMMR3VTABLE pVMM, void
     dbgDiggerWinNtResolveKpcr(pThis, pUVM, pVMM);
 
 #ifdef VBOX_DEBUGGER_WITH_WIN_DBG_PRINT_HOOKING
+    pThis->pVMM = pVMM;
+
     /* Try to hook into the DbgPrint/vDbgPrint... code so we can gather information from the drivers. */
-    dbgDiggerWinNtDbgPrintHook(pThis, pUVM);
+    dbgDiggerWinNtDbgPrintHook(pThis, pUVM, pVMM);
 #endif
 
     pThis->fValid = true;
