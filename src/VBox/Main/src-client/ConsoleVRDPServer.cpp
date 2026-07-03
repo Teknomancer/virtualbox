@@ -1,4 +1,4 @@
-/* $Id: ConsoleVRDPServer.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ConsoleVRDPServer.cpp 114604 2026-07-03 12:17:31Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console VRDP helper class.
  */
@@ -961,6 +961,8 @@ DECLCALLBACK(void) ConsoleVRDPServer::VRDPCallbackClientConnect(void *pvCallback
     if (pVRDE)
         pVRDE->onVRDEClientConnect(u32ClientId);
 #endif
+
+    pServer->mConsole->i_onVRDEServerInfoChange();
 }
 
 DECLCALLBACK(void) ConsoleVRDPServer::VRDPCallbackClientDisconnect(void *pvCallback, uint32_t u32ClientId,
@@ -992,6 +994,8 @@ DECLCALLBACK(void) ConsoleVRDPServer::VRDPCallbackClientDisconnect(void *pvCallb
         /* Features which should be enabled only if there is a client. */
         pServer->remote3DRedirect(false);
     }
+
+    pServer->mConsole->i_onVRDEServerInfoChange();
 }
 
 DECLCALLBACK(int) ConsoleVRDPServer::VRDPCallbackIntercept(void *pvCallback, uint32_t u32ClientId, uint32_t fu32Intercept,
