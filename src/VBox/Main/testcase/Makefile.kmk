@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114467 2026-06-22 08:18:18Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the VBox API testcases.
 #
@@ -330,7 +330,15 @@ tstSafeArray_SOURCES  = tstSafeArray.cpp
 # tstClipboard
 #
 tstClipboard_TEMPLATE = VBoxMainClientTstExe
-tstClipboard_SOURCES  = tstClipboard.cpp
+tstClipboard_INCS     = \
+	../include \
+	$(PATH_OUT)/obj/VBoxAPIWrap \
+	$(PATH_OUT)/obj/Main
+tstClipboard_SOURCES  = \
+	tstClipboard.cpp
+ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+ tstClipboard_DEFS    += VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+endif
 
 
 #

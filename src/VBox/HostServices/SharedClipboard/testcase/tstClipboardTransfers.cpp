@@ -1,4 +1,4 @@
-/* $Id: tstClipboardTransfers.cpp 114574 2026-06-30 15:41:02Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardTransfers.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard transfers test case.
  */
@@ -366,6 +366,9 @@ static void testTransferBasics(void)
     PSHCLTRANSFER pTransfer;
     int rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransfer);
     RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(ShClTransferGetID(pTransfer) == NIL_SHCLTRANSFERID);
+    RTTESTI_CHECK(ShClTransferGetSessionId(pTransfer) == NIL_SHCLSESSIONID);
+    RTTESTI_CHECK(ShClTransferGetGeneration(pTransfer) == NIL_SHCLTRANSFERGEN);
     rc = ShClTransferDestroy(pTransfer);
     RTTESTI_CHECK_RC_OK(rc);
     pTransfer = NULL; /* Was free'd above. */
@@ -387,6 +390,68 @@ static void testTransferBasics(void)
 
     rc = ShClTransferDestroy(pTransfer);
     RTTESTI_CHECK_RC_OK(rc);
+}
+
+static void testTransferContextIdentity(void)
+{
+    RTTestISub("Testing transfer context identity");
+
+    SHCLTRANSFERCTX Ctx;
+    int rc = ShClTransferCtxInit(&Ctx);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = ShClTransferCtxBeginSession(&Ctx, 7);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    PSHCLTRANSFER pTransfer;
+    rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    SHCLTRANSFERID idTransfer = NIL_SHCLTRANSFERID;
+    rc = ShClTransferCtxRegister(&Ctx, pTransfer, &idTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(idTransfer != NIL_SHCLTRANSFERID);
+    RTTESTI_CHECK(ShClTransferGetSessionId(pTransfer) == 7);
+    RTTESTI_CHECK(ShClTransferGetGeneration(pTransfer) != 0);
+    RTTESTI_CHECK(ShClTransferGetGeneration(pTransfer) != NIL_SHCLTRANSFERGEN);
+
+    SHCLTRANSFERGEN const uGeneration = ShClTransferGetGeneration(pTransfer);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 7, idTransfer, uGeneration) == pTransfer);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 8, idTransfer, uGeneration) == NULL);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 7, idTransfer, uGeneration + 1) == NULL);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 7, idTransfer + 1, uGeneration) == NULL);
+
+    rc = ShClTransferCtxUnregisterById(&Ctx, idTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    PSHCLTRANSFER pTransferReuse;
+    rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransferReuse);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+    rc = ShClTransferCtxRegisterById(&Ctx, pTransferReuse, idTransfer);
+    RTTESTI_CHECK_RC(rc, VERR_ALREADY_EXISTS);
+    rc = ShClTransferDestroy(pTransferReuse);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferCtxBeginSession(&Ctx, 8);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransferReuse);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+    rc = ShClTransferCtxRegisterById(&Ctx, pTransferReuse, idTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(ShClTransferGetSessionId(pTransferReuse) == 8);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 7, idTransfer, uGeneration) == NULL);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 8, idTransfer,
+                                                  ShClTransferGetGeneration(pTransferReuse)) == pTransferReuse);
+
+    rc = ShClTransferCtxUnregisterById(&Ctx, idTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = ShClTransferDestroy(pTransferReuse);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    ShClTransferCtxDestroy(&Ctx);
 }
 
 static void testTransferRootsSet(RTTEST hTest)
@@ -603,6 +668,100 @@ static void testTransferListOpenEmptyPath(RTTEST hTest)
     RTTESTI_CHECK_RC_OK(rc);
 }
 
+/**
+ * Tests local-provider list handling for a single file root.
+ *
+ * @param   hTest               Test handle.
+ */
+static void testTransferListSingleFileRoot(RTTEST hTest)
+{
+    RTTestISub("Testing single-file transfer list handling");
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    SHCLTXPROVIDER Provider;
+    ShClTransferProviderLocalQueryInterface(&Provider);
+
+    rc = ShClTransferSetProvider(pTransfer, &Provider);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char szTestTransferListDir[RTPATH_MAX];
+    rc = testCreateTempDir(hTest, "testTransferListSingleFileRoot", szTestTransferListDir, sizeof(szTestTransferListDir));
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char *pszRootFileAbs = NULL;
+    rc = testCreateFile(hTest, szTestTransferListDir, "my-transfer-1/file1.txt", 0, 0, &pszRootFileAbs);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char *pszRoots = RTStrDup(pszRootFileAbs);
+    RTTESTI_CHECK_RETV(pszRoots);
+    rc = RTStrAAppend(&pszRoots, "\r\n");
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    rc = ShClTransferRootsSetFromStringList(pTransfer, pszRoots, strlen(pszRoots) + 1);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferInit(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RTStrFree(pszRoots);
+
+    SHCLLISTOPENPARMS OpenParms;
+    rc = ShClTransferListOpenParmsInit(&OpenParms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = RTStrCopy(OpenParms.pszPath, OpenParms.cbPath, "file1.txt");
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = RTStrCopy(OpenParms.pszFilter, OpenParms.cbFilter, "");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    SHCLLISTHANDLE hList = NIL_SHCLLISTHANDLE;
+    rc = ShClTransferListOpen(pTransfer, &OpenParms, &hList);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    if (RT_SUCCESS(rc))
+    {
+        SHCLLISTHDR Hdr;
+        rc = ShClTransferListGetHeader(pTransfer, hList, &Hdr);
+        RTTESTI_CHECK_RC_OK(rc);
+        RTTESTI_CHECK(Hdr.cEntries == 1);
+
+        SHCLLISTENTRY Entry;
+        rc = ShClTransferListEntryInit(&Entry);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_SUCCESS(rc))
+        {
+            rc = ShClTransferListRead(pTransfer, hList, &Entry);
+            RTTESTI_CHECK_RC_OK(rc);
+            if (RT_SUCCESS(rc))
+                RTTESTI_CHECK(strcmp(Entry.pszName, "file1.txt") == 0);
+            ShClTransferListEntryDestroy(&Entry);
+        }
+
+        SHCLLISTENTRY WriteEntry;
+        rc = ShClTransferListEntryInit(&WriteEntry);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_SUCCESS(rc))
+        {
+            rc = ShClTransferListWrite(pTransfer, hList, &WriteEntry);
+            RTTESTI_CHECK_RC(rc, VERR_NOT_SUPPORTED);
+            ShClTransferListEntryDestroy(&WriteEntry);
+        }
+
+        rc = ShClTransferListClose(pTransfer, hList);
+        RTTESTI_CHECK_RC_OK(rc);
+    }
+
+    ShClTransferListOpenParmsDestroy(&OpenParms);
+    RTStrFree(pszRootFileAbs);
+
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+}
+
+
 static void testTransferSymlinkRejection(RTTEST hTest)
 {
     RTTestISub("Testing transfer symlink rejection");
@@ -758,10 +917,12 @@ int main(int argc, char *argv[])
     testPathSanitize();
     testEvents();
     testTransferBasics();
+    testTransferContextIdentity();
     testTransferRootsSet(hTest);
     testTransferObjOpenPrefixBoundary(hTest);
     testTransferObjReadWriteValidation();
     testTransferListOpenEmptyPath(hTest);
+    testTransferListSingleFileRoot(hTest);
     testTransferSymlinkRejection(hTest);
     testTransferObjOpen(hTest);
 

@@ -1,4 +1,4 @@
-/* $Id: SharedClipboard-transfers.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: SharedClipboard-transfers.h 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Shared transfer functions between host and guest.
  */
@@ -79,6 +79,8 @@ typedef struct SHCLTRANSFER *PSHCLTRANSFER;
 #define SHCL_TRANSFER_DEFAULT_MAX_LIST_HANDLES  _4K
 /** Defines the default maximum object handles a Shared Clipboard transfer can have. */
 #define SHCL_TRANSFER_DEFAULT_MAX_OBJ_HANDLES   _4K
+/** Number of 64-bit bitmap words needed for transfer ID allocation. */
+#define SHCL_TRANSFER_ID_BITMAP_QWORDS          (((VBOX_SHCL_MAX_TRANSFERS) + 63) / 64)
 /** Defines the separator for the entries of an URI list (as a string). */
 #define SHCL_TRANSFER_URI_LIST_SEP_STR          "\r\n"
 
@@ -114,6 +116,11 @@ typedef enum
 
 /** Defines a transfer status. */
 typedef uint32_t SHCLTRANSFERSTATUS;
+
+/** Host-private transfer generation counter. */
+typedef uint64_t SHCLTRANSFERGEN;
+/** NIL transfer generation. */
+#define NIL_SHCLTRANSFERGEN UINT64_MAX
 
 /** @} */
 
@@ -612,6 +619,10 @@ typedef struct _SHCLTRANSFERSTATE
 {
     /** The transfer's (local) ID. */
     SHCLTRANSFERID     uID;
+    /** Service session that owns this transfer. */
+    SHCLSESSIONID      idSession;
+    /** Host-private generation assigned when the transfer is registered. */
+    SHCLTRANSFERGEN    uGeneration;
     /** The transfer's current status. */
     SHCLTRANSFERSTATUS enmStatus;
     /** The transfer's direction, seen from the perspective who created the transfer. */
@@ -1081,7 +1092,15 @@ typedef struct _SHCLTRANSFERCTX
     /** List of transfers. */
     RTLISTANCHOR                List;
     /** Transfer ID allocation bitmap; clear bits are free, set bits are busy. */
-    uint64_t                    bmTransferIds[VBOX_SHCL_MAX_TRANSFERS / sizeof(uint64_t) / 8];
+    uint64_t                    bmTransferIds[SHCL_TRANSFER_ID_BITMAP_QWORDS];
+    /** Transfer IDs already consumed in the current service session. */
+    uint64_t                    bmTransferIdsUsed[SHCL_TRANSFER_ID_BITMAP_QWORDS];
+    /** Service session associated with this transfer context. */
+    SHCLSESSIONID               idSession;
+    /** Next host-private transfer generation. */
+    SHCLTRANSFERGEN             uNextGeneration;
+    /** Number of transfer IDs consumed in the current service session. */
+    uint16_t                    cTransferIdsUsed;
     /** Number of running (concurrent) transfers. */
     uint16_t                    cRunning;
     /** Maximum Number of running (concurrent) transfers. */
@@ -1149,6 +1168,8 @@ uint32_t ShClTransferAcquire(PSHCLTRANSFER pTransfer);
 uint32_t ShClTransferRelease(PSHCLTRANSFER pTransfer);
 
 SHCLTRANSFERID ShClTransferGetID(PSHCLTRANSFER pTransfer);
+SHCLSESSIONID ShClTransferGetSessionId(PSHCLTRANSFER pTransfer);
+SHCLTRANSFERGEN ShClTransferGetGeneration(PSHCLTRANSFER pTransfer);
 SHCLTRANSFERDIR ShClTransferGetDir(PSHCLTRANSFER pTransfer);
 int ShClTransferGetRootPathAbs(PSHCLTRANSFER pTransfer, char *pszPath, size_t cbPath);
 SHCLSOURCE ShClTransferGetSource(PSHCLTRANSFER pTransfer);
@@ -1213,7 +1234,10 @@ int ShClTransferRootListRead(PSHCLTRANSFER pTransfer);
 int ShClTransferCtxInit(PSHCLTRANSFERCTX pTransferCtx);
 void ShClTransferCtxDestroy(PSHCLTRANSFERCTX pTransferCtx);
 void ShClTransferCtxReset(PSHCLTRANSFERCTX pTransferCtx);
+int ShClTransferCtxBeginSession(PSHCLTRANSFERCTX pTransferCtx, SHCLSESSIONID idSession);
 PSHCLTRANSFER ShClTransferCtxGetTransferById(PSHCLTRANSFERCTX pTransferCtx, uint32_t uID);
+PSHCLTRANSFER ShClTransferCtxGetTransferByKey(PSHCLTRANSFERCTX pTransferCtx, SHCLSESSIONID idSession,
+                                              SHCLTRANSFERID idTransfer, SHCLTRANSFERGEN uGeneration);
 PSHCLTRANSFER ShClTransferCtxGetTransferByIndex(PSHCLTRANSFERCTX pTransferCtx, uint32_t uIdx);
 PSHCLTRANSFER ShClTransferCtxGetTransferLast(PSHCLTRANSFERCTX pTransferCtx);
 uint32_t ShClTransferCtxGetRunningTransfers(PSHCLTRANSFERCTX pTransferCtx);

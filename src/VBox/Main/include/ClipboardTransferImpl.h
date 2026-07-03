@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferImpl.h 114362 2026-06-15 18:31:38Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferImpl.h 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer object.
  */
@@ -33,6 +33,12 @@
 
 #include "ClipboardTransferWrap.h"
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include <VBox/GuestHost/SharedClipboard-transfers.h>
+#endif
+
+#include <vector>
+
 /**
  * Clipboard transfer object.
  */
@@ -47,31 +53,89 @@ public:
     void FinalRelease();
 
     HRESULT init(ULONG aId,
+                 ClipboardTransferDirection_T aDirection,
+                 ClipboardSource_T aSource,
                  ClipboardAction_T aAction,
                  const ComPtr<IClipboardItem> &aItem,
-                 const ComPtr<IProgress> &aProgress);
+                 const ComPtr<IProgress> &aProgress
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+                 , PSHCLTRANSFER aTransfer = NULL,
+                 bool fOwnTransfer = false
+#endif
+                 );
     void uninit();
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    /** Returns the backing Shared Clipboard transfer. */
+    PSHCLTRANSFER i_getTransfer() const;
+#endif
+    /** Updates the public transfer state. */
+    void i_setState(ClipboardTransferState_T aState,
+                    const com::Utf8Str &aMessage,
+                    ClipboardError_T aError);
 
 private:
 
     /** @name Wrapped IClipboardTransfer properties
      * @{ */
     HRESULT getId(ULONG *aId);
+    HRESULT getDirection(ClipboardTransferDirection_T *aDirection);
+    HRESULT getSource(ClipboardSource_T *aSource);
     HRESULT getAction(ClipboardAction_T *aAction);
+    HRESULT getState(ClipboardTransferState_T *aState);
     HRESULT getItem(ComPtr<IClipboardItem> &aItem);
     HRESULT getProgress(ComPtr<IProgress> &aProgress);
+    HRESULT getMessage(com::Utf8Str &aMessage);
+    HRESULT getError(ClipboardError_T *aError);
+    HRESULT getData(ComPtr<IClipboardTransferData> &aData);
+    HRESULT getSourcePaths(std::vector<com::Utf8Str> &aSourcePaths);
+    HRESULT setSourcePaths(const std::vector<com::Utf8Str> &aSourcePaths);
+    HRESULT roots(std::vector<ComPtr<IClipboardTransferFsObjInfo> > &aNodes);
+    HRESULT query(const com::Utf8Str &aPath,
+                  ComPtr<IClipboardTransferFsObjInfo> &aNode);
+    HRESULT list(const com::Utf8Str &aPath,
+                 ULONG aFlags,
+                 std::vector<ComPtr<IClipboardTransferFsObjInfo> > &aNodes);
+    HRESULT openDirectory(const com::Utf8Str &aPath,
+                          ULONG aFlags,
+                          ComPtr<IClipboardTransferDirectory> &aDirectory);
+    HRESULT openFile(const com::Utf8Str &aPath,
+                     FileAccessMode_T aAccessMode,
+                     FileOpenAction_T aOpenAction,
+                     FileSharingMode_T aSharingMode,
+                     ULONG aCreationMode,
+                     ComPtr<IClipboardTransferFile> &aFile);
+    HRESULT createDirectory(const com::Utf8Str &aPath);
     /** @} */
 
     struct Data
     {
         /** Unique transfer identifier. */
         ULONG mId;
+        /** Clipboard transfer direction. */
+        ClipboardTransferDirection_T mDirection;
+        /** Clipboard source owning or advertising the transfer. */
+        ClipboardSource_T mSource;
         /** Clipboard transfer action. */
         ClipboardAction_T mAction;
+        /** Current public transfer state. */
+        ClipboardTransferState_T mState;
         /** Clipboard item being transferred. */
         ComPtr<IClipboardItem> mItem;
         /** Progress object for the transfer. */
         ComPtr<IProgress> mProgress;
+        /** Optional transfer status or interaction message. */
+        com::Utf8Str mMessage;
+        /** Last transfer error. */
+        ClipboardError_T mError;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        /** Source-side local paths explicitly configured for this transfer. */
+        std::vector<com::Utf8Str> mSourcePaths;
+        /** Shared Clipboard transfer backing data-plane operations. Optional. */
+        PSHCLTRANSFER mTransfer;
+        /** Whether this object owns and destroys mTransfer. */
+        bool mfOwnTransfer;
+#endif
     } mData;
 };
 

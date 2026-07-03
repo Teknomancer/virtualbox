@@ -418,32 +418,8 @@ typedef enum VBOXLOGGROUP
     LOG_GROUP_MAIN_CERTIFICATE,
     /** Main group, IChoiceFormValue. */
     LOG_GROUP_MAIN_CHOICEFORMVALUE,
-    /** Main group, IClipboard. */
+    /** Main group, clipboard Main API and events. */
     LOG_GROUP_MAIN_CLIPBOARD,
-    /** Main group, IClipboardDataChangedEvent. */
-    LOG_GROUP_MAIN_CLIPBOARDDATACHANGEDEVENT,
-    /** Main group, IClipboardErrorEvent. */
-    LOG_GROUP_MAIN_CLIPBOARDERROREVENT,
-    /** Main group, IClipboardEvent. */
-    LOG_GROUP_MAIN_CLIPBOARDEVENT,
-    /** Main group, IClipboardFormat. */
-    LOG_GROUP_MAIN_CLIPBOARDFORMAT,
-    /** Main group, IClipboardFormatChangedEvent. */
-    LOG_GROUP_MAIN_CLIPBOARDFORMATCHANGEDEVENT,
-    /** Main group, IClipboardItem. */
-    LOG_GROUP_MAIN_CLIPBOARDITEM,
-    /** Main group, IClipboardSession. */
-    LOG_GROUP_MAIN_CLIPBOARDSESSION,
-    /** Main group, IClipboardSettings. */
-    LOG_GROUP_MAIN_CLIPBOARDSETTINGS,
-    /** Main group, IClipboardSourceChangedEvent. */
-    LOG_GROUP_MAIN_CLIPBOARDSOURCECHANGEDEVENT,
-    /** Main group, IClipboardTransfer. */
-    LOG_GROUP_MAIN_CLIPBOARDTRANSFER,
-    /** Main group, IClipboardTransferEvent. */
-    LOG_GROUP_MAIN_CLIPBOARDTRANSFEREVENT,
-    /** Main group, IClipboardTransferManager. */
-    LOG_GROUP_MAIN_CLIPBOARDTRANSFERMANAGER,
     /** Main group, ICloudClient. */
     LOG_GROUP_MAIN_CLOUDCLIENT,
     /** Main group, ICloudMachine. */
@@ -1091,18 +1067,6 @@ typedef enum VBOXLOGGROUP
     "MAIN_CERTIFICATE", \
     "MAIN_CHOICEFORMVALUE", \
     "MAIN_CLIPBOARD", \
-    "MAIN_CLIPBOARDDATACHANGEDEVENT", \
-    "MAIN_CLIPBOARDERROREVENT", \
-    "MAIN_CLIPBOARDEVENT", \
-    "MAIN_CLIPBOARDFORMAT", \
-    "MAIN_CLIPBOARDFORMATCHANGEDEVENT", \
-    "MAIN_CLIPBOARDITEM", \
-    "MAIN_CLIPBOARDSESSION", \
-    "MAIN_CLIPBOARDSETTINGS", \
-    "MAIN_CLIPBOARDSOURCECHANGEDEVENT", \
-    "MAIN_CLIPBOARDTRANSFER", \
-    "MAIN_CLIPBOARDTRANSFEREVENT", \
-    "MAIN_CLIPBOARDTRANSFERMANAGER", \
     "MAIN_CLOUDCLIENT", \
     "MAIN_CLOUDMACHINE", \
     "MAIN_CLOUDNETWORK", \

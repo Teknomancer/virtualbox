@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 114584 2026-07-01 13:24:25Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -37,6 +37,7 @@
 # include "ClipboardFormatImpl.h"
 # include "ClipboardItemImpl.h"
 # include "ClipboardSessionImpl.h"
+# include "ClipboardTransferImpl.h"
 # include "ClipboardTransferManagerImpl.h"
 # include "ConsoleClipboardFormats.h"
 # include "ConsoleImpl.h"
@@ -49,6 +50,8 @@
 
 # include <iprt/mem.h>
 # include <iprt/string.h>
+
+# include <new>
 # include <iprt/utf16.h>
 # include <VBox/HostServices/VBoxClipboardSvc.h>
 # include <VBox/param.h>
@@ -319,8 +322,6 @@ struct Clipboard::Data
     /** Parent console. */
     Console *mParent;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-    /** Clipboard file list represented as host paths. */
-    std::vector<com::Utf8Str> mFileList;
     /** Transfer manager object. */
     ComObjPtr<ClipboardTransferManager> mTransfers;
     /** Clipboard event source. */
@@ -509,7 +510,6 @@ void Clipboard::uninit()
             mData = NULL;
             pData->mParent = NULL;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD
-            pData->mFileList.clear();
             pData->mLastItemBuffer.clear();
             pData->mPendingDataRequests.clear();
             vecSessions.swap(pData->mSessions);
@@ -619,6 +619,39 @@ void Clipboard::i_storeData(ClipboardAction_T aAction,
     AssertPtrReturnVoid(mData);
 
     i_storeDataLocked(aAction, aSource, aMimeType, aBuffer);
+}
+
+
+/**
+ * Stores the most recent clipboard item payload if the expected client still owns it.
+ *
+ * @returns true if the data was stored, false if the client is stale.
+ * @param   aClientId       Expected owning client identifier.
+ * @param   aAction         Clipboard action associated with the data.
+ * @param   aSource         Clipboard data source.
+ * @param   aMimeType       MIME type of the payload.
+ * @param   aBuffer         Payload bytes.
+ * @param   fFormats        Shared Clipboard format mask expected to be owned.
+ */
+bool Clipboard::i_storeDataIfCurrentClient(VBOXSHCLMAINCLIENTID aClientId,
+                                           ClipboardAction_T aAction,
+                                           ClipboardSource_T aSource,
+                                           const com::Utf8Str &aMimeType,
+                                           const std::vector<BYTE> &aBuffer,
+                                           uint32_t fFormats)
+{
+    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
+    AssertPtrReturn(mData, false);
+
+    if (!i_isClientFormatOwnerLocked(aClientId, fFormats, aSource))
+    {
+        LogFunc(("Rejecting stale clipboard data store: clientId=%RU32, currentClientId=%RU32, source=%s, formats=%#x\n",
+                 aClientId, mData->mCurrentClientId, clipboardSourceToLogString(aSource), fFormats));
+        return false;
+    }
+
+    i_storeDataLocked(aAction, aSource, aMimeType, aBuffer);
+    return true;
 }
 
 
@@ -840,52 +873,6 @@ HRESULT Clipboard::createItem(ClipboardSource_T aSource,
 
 
 /**
- * Returns the clipboard file list.
- *
- * @returns COM status code.
- * @param   aFileList       Where to return the file list.
- */
-HRESULT Clipboard::getFileList(std::vector<com::Utf8Str> &aFileList)
-{
-#ifndef VBOX_WITH_SHARED_CLIPBOARD
-    RT_NOREF(aFileList);
-    ReturnComNotImplemented();
-#else /* VBOX_WITH_SHARED_CLIPBOARD */
-
-    AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
-    if (!mData)
-        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-    aFileList = mData->mFileList;
-    Log3Func(("cFiles=%zu\n", aFileList.size()));
-    return S_OK;
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
-}
-
-
-/**
- * Sets the clipboard file list.
- *
- * @returns COM status code.
- * @param   aFileList       New file list.
- */
-HRESULT Clipboard::setFileList(const std::vector<com::Utf8Str> &aFileList)
-{
-#ifndef VBOX_WITH_SHARED_CLIPBOARD
-    RT_NOREF(aFileList);
-    ReturnComNotImplemented();
-#else /* VBOX_WITH_SHARED_CLIPBOARD */
-
-    Log2Func(("cFiles=%zu\n", aFileList.size()));
-    AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-    if (!mData)
-        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-    mData->mFileList = aFileList;
-    return S_OK;
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
-}
-
-
-/**
  * Returns the clipboard transfer manager.
  *
  * @returns COM status code.
@@ -893,10 +880,10 @@ HRESULT Clipboard::setFileList(const std::vector<com::Utf8Str> &aFileList)
  */
 HRESULT Clipboard::getTransfers(ComPtr<IClipboardTransferManager> &aTransfers)
 {
-#ifndef VBOX_WITH_SHARED_CLIPBOARD
+#if !defined(VBOX_WITH_SHARED_CLIPBOARD) || !defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS)
     RT_NOREF(aTransfers);
     ReturnComNotImplemented();
-#else /* VBOX_WITH_SHARED_CLIPBOARD */
+#else /* VBOX_WITH_SHARED_CLIPBOARD && VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     if (!mData)
@@ -905,7 +892,7 @@ HRESULT Clipboard::getTransfers(ComPtr<IClipboardTransferManager> &aTransfers)
     if (FAILED(hrc))
         return setError(VBOX_E_SHCL_ERROR, tr("Getting the clipboard transfer manager failed (%Rhrc)"), hrc);
     return hrc;
-#endif /* VBOX_WITH_SHARED_CLIPBOARD */
+#endif /* VBOX_WITH_SHARED_CLIPBOARD && VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 }
 
 
@@ -1692,9 +1679,8 @@ HRESULT Clipboard::reset()
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
         if (!mData)
             return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
-        Log2Func(("Clearing cached clipboard state: cFiles=%zu, fHaveLastItem=%RTbool, cbLast=%zu\n",
-                  mData->mFileList.size(), mData->mfHaveLastItem, mData->mLastItemBuffer.size()));
-        mData->mFileList.clear();
+        Log2Func(("Clearing cached clipboard state: fHaveLastItem=%RTbool, cbLast=%zu\n",
+                  mData->mfHaveLastItem, mData->mLastItemBuffer.size()));
         mData->mLastItemBuffer.clear();
         mData->mfHaveLastItem = false;
         mData->mLastItemSerial++;
@@ -2045,6 +2031,48 @@ LONG64 Clipboard::i_nextEventRevision()
 
 
 /**
+ * Checks whether a Main clipboard client ID still names a live session.
+ *
+ * The anonymous client ID is the console-global endpoint and is always accepted.
+ * The caller must hold the clipboard lock.
+ *
+ * @returns true if the client ID may still publish through this clipboard object.
+ * @param   aClientId      Main clipboard client ID to validate.
+ */
+bool Clipboard::i_isClientIdRegisteredLocked(VBOXSHCLMAINCLIENTID aClientId) const
+{
+    AssertPtrReturn(mData, false);
+    if (aClientId == VBOX_SHCL_MAIN_CLIENT_NONE)
+        return true;
+
+    for (std::vector<Data::SessionRecord>::const_iterator it = mData->mSessions.begin(); it != mData->mSessions.end(); ++it)
+        if (it->mClientId == aClientId)
+            return true;
+    return false;
+}
+
+
+/**
+ * Checks whether a live client currently owns the advertised clipboard formats.
+ *
+ * The caller must hold the clipboard lock.
+ *
+ * @returns true if the client is live and still owns the requested source/formats.
+ * @param   aClientId      Main clipboard client ID to validate.
+ * @param   fFormats       Format mask that must still be advertised.
+ * @param   aSource        Clipboard source that must still be current.
+ */
+bool Clipboard::i_isClientFormatOwnerLocked(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormats, ClipboardSource_T aSource) const
+{
+    AssertPtrReturn(mData, false);
+    return    i_isClientIdRegisteredLocked(aClientId)
+           && mData->mCurrentClientId == aClientId
+           && mData->mSource == aSource
+           && (m_fFormats & fFormats) == fFormats;
+}
+
+
+/**
  * Allocates the next Main clipboard client ID.
  *
  * @returns Main clipboard client ID, never VBOX_SHCL_MAIN_CLIENT_NONE.
@@ -2130,6 +2158,7 @@ void Clipboard::i_unregisterSession(VBOXSHCLMAINCLIENTID aClientId)
     if (aClientId == VBOX_SHCL_MAIN_CLIENT_NONE)
         return;
 
+    bool fClearCurrentOwner = false;
     ComObjPtr<ClipboardSession> ptrKeepAlive;
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
@@ -2141,12 +2170,22 @@ void Clipboard::i_unregisterSession(VBOXSHCLMAINCLIENTID aClientId)
             {
                 ptrKeepAlive = it->mSession;
                 mData->mSessions.erase(it);
-                Log2Func(("Unregistered clipboard session: clientId=%RU32, cSessions=%zu\n",
-                          aClientId, mData->mSessions.size()));
-                return;
+                fClearCurrentOwner = mData->mCurrentClientId == aClientId;
+                Log2Func(("Unregistered clipboard session: clientId=%RU32, cSessions=%zu, fClearCurrentOwner=%RTbool\n",
+                          aClientId, mData->mSessions.size(), fClearCurrentOwner));
+                break;
             }
     }
-    Log3Func(("Clipboard session clientId=%RU32 was not registered\n", aClientId));
+
+    if (ptrKeepAlive.isNull())
+    {
+        Log3Func(("Clipboard session clientId=%RU32 was not registered\n", aClientId));
+        return;
+    }
+
+    if (fClearCurrentOwner)
+        i_reportFormats(VBOX_SHCL_MAIN_CLIENT_NONE, VBOX_SHCL_FMT_NONE, ClipboardSource_Custom,
+                        true /* fForceNotify */, true /* fRequireCurrentClientId */, aClientId);
 }
 
 
@@ -2348,6 +2387,18 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
     AssertPtrReturn(aWrittenSource, E_POINTER);
     AssertPtrReturn(mData, E_FAIL);
 
+    bool fClientActive = false;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        fClientActive = i_isClientIdRegisteredLocked(aClientId);
+    }
+    if (!fClientActive)
+    {
+        LogFunc(("Rejecting clipboard write from inactive session clientId=%RU32\n", aClientId));
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is not active"), aClientId);
+    }
+
     if (aBuffer.empty())
     {
         LogFunc(("Rejecting empty clipboard write: mime=%s\n", aMimeType.c_str()));
@@ -2399,11 +2450,24 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
+    if (!i_reportFormats(aClientId, uFormat, aSource))
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
+    if (!i_storeDataIfCurrentClient(aClientId, aAction, aSource, aMimeType, aBuffer, uFormat))
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer the clipboard owner"), aClientId);
+
     *aWrittenSource = aSource;
     aWrittenMimeType = aMimeType;
     aWrittenBuffer = aBuffer;
-    i_storeData(aAction, aSource, aMimeType, aBuffer);
-    i_reportFormats(aClientId, uFormat, aSource);
+
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        if (!i_isClientFormatOwnerLocked(aClientId, uFormat, aSource))
+        {
+            LogFunc(("Rejecting stale clipboard write backend publication: clientId=%RU32\n", aClientId));
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer the clipboard owner"), aClientId);
+        }
+    }
 
     GuestShCl *pShCl = GuestShCl::TryGetInst();
     if (!pShCl)
@@ -2413,7 +2477,6 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
                                             Console::tr("Writing shared clipboard data failed because the "
                                                         "Shared Clipboard service is not available"));
     }
-
     vrc = pShCl->ReportFormatsToGuest(uFormat);
     if (RT_FAILURE(vrc))
     {
@@ -2442,6 +2505,18 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
                                   const std::vector<com::Utf8Str> &aFormats)
 {
     Log2Func(("clientId=%RU32, cMimeTypes=%zu\n", aClientId, aFormats.size()));
+    bool fClientActive = false;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        fClientActive = i_isClientIdRegisteredLocked(aClientId);
+    }
+    if (!fClientActive)
+    {
+        LogFunc(("Rejecting clipboard format write from inactive session clientId=%RU32\n", aClientId));
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is not active"), aClientId);
+    }
+
     SHCLFORMATS fFormats;
     HRESULT hrc = consoleClipboardMimeTypesToFormats(aFormats, &fFormats);
     if (FAILED(hrc))
@@ -2459,7 +2534,18 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
-    i_reportFormats(aClientId, fFormats, ClipboardSource_Host, true /* fForceNotify */);
+    if (!i_reportFormats(aClientId, fFormats, ClipboardSource_Host, true /* fForceNotify */))
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
+
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        if (!i_isClientFormatOwnerLocked(aClientId, fFormats, ClipboardSource_Host))
+        {
+            LogFunc(("Rejecting stale clipboard format backend publication: clientId=%RU32\n", aClientId));
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer the clipboard owner"), aClientId);
+        }
+    }
 
     GuestShCl *pShCl = GuestShCl::TryGetInst();
     if (!pShCl)
@@ -2469,7 +2555,6 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
                                             Console::tr("Writing shared clipboard formats failed because the "
                                                         "Shared Clipboard service is not available"));
     }
-
     int vrc = pShCl->ReportFormatsToGuest(fFormats);
     if (RT_FAILURE(vrc))
     {
@@ -2557,11 +2642,18 @@ HRESULT Clipboard::i_hostClipboardReportFormats(VBOXSHCLMAINCLIENTID aClientId,
 
     ClipboardMode_T enmMode = ClipboardMode_Disabled;
     Console *pParent = NULL;
+    bool fClientActive = false;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
         if (!mData)
             return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
         pParent = mData->mParent;
+        fClientActive = i_isClientIdRegisteredLocked(aClientId);
+    }
+    if (!fClientActive)
+    {
+        LogFunc(("Rejecting host clipboard format publication from inactive session clientId=%RU32\n", aClientId));
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is not active"), aClientId);
     }
     hrc = ShClMainGetMode(pParent, &enmMode);
     if (FAILED(hrc))
@@ -2579,7 +2671,18 @@ HRESULT Clipboard::i_hostClipboardReportFormats(VBOXSHCLMAINCLIENTID aClientId,
     AssertComRCReturnRC(autoCaller.hrc());
 
     /* Native backends may request lazily rendered data immediately after taking ownership. */
-    i_reportFormats(aClientId, fFormats, aSource, true /* fForceNotify */);
+    if (!i_reportFormats(aClientId, fFormats, aSource, true /* fForceNotify */))
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
+
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        if (!i_isClientFormatOwnerLocked(aClientId, fFormats, aSource))
+        {
+            LogFunc(("Rejecting stale host clipboard format backend publication: clientId=%RU32\n", aClientId));
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer the clipboard owner"), aClientId);
+        }
+    }
 
     GuestShCl *pShCl = GuestShCl::TryGetInst();
     if (!pShCl)
@@ -2590,7 +2693,6 @@ HRESULT Clipboard::i_hostClipboardReportFormats(VBOXSHCLMAINCLIENTID aClientId,
                             tr("Reporting shared clipboard formats to the host failed because the "
                                "Shared Clipboard service is not available"));
     }
-
     int vrc = pShCl->ReportFormatsToHost(fFormats);
     if (RT_FAILURE(vrc))
     {
@@ -2696,6 +2798,7 @@ HRESULT Clipboard::i_hostClipboardProvideData(VBOXSHCLMAINCLIENTID aClientId,
     Console *pParent = NULL;
     uint32_t fCurrentFormats = VBOX_SHCL_FMT_NONE;
     ClipboardSource_T enmCurrentSource = ClipboardSource_Custom;
+    bool fClientActive = false;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
         if (!mData)
@@ -2703,6 +2806,12 @@ HRESULT Clipboard::i_hostClipboardProvideData(VBOXSHCLMAINCLIENTID aClientId,
         pParent = mData->mParent;
         fCurrentFormats = m_fFormats;
         enmCurrentSource = mData->mSource;
+        fClientActive = i_isClientIdRegisteredLocked(aClientId);
+    }
+    if (!fClientActive)
+    {
+        LogFunc(("Rejecting host clipboard data from inactive session clientId=%RU32\n", aClientId));
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is not active"), aClientId);
     }
     HRESULT hrc = ShClMainGetMode(pParent, &enmMode);
     if (FAILED(hrc))
@@ -2741,11 +2850,13 @@ HRESULT Clipboard::i_hostClipboardProvideData(VBOXSHCLMAINCLIENTID aClientId,
             if (it->mId == aRequestId)
             {
                 fFoundRequest = true;
+                bool const fClientStillActive = i_isClientIdRegisteredLocked(aClientId);
                 fMatchedRequest =    it->mClientId == aClientId
                                   && it->mAction == aAction
                                   && it->mSource == aSource
                                   && it->mFormat == uFormat;
                 fCurrentRequest =    fMatchedRequest
+                                  && fClientStillActive
                                   && mData->mCurrentClientId == aClientId
                                   && mData->mSource == aSource
                                   && (m_fFormats & uFormat);
@@ -2799,8 +2910,6 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
                                           const com::Utf8Str &aMimeType,
                                           const std::vector<BYTE> &aBuffer)
 {
-    RT_NOREF(aClientId);
-
     Log2Func(("clientId=%RU32, action=%s, source=%s, mime=%s, cb=%zu\n",
               aClientId, clipboardActionToLogString(aAction), clipboardSourceToLogString(aSource),
               aMimeType.c_str(), aBuffer.size()));
@@ -2866,11 +2975,18 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
 
     ClipboardMode_T enmMode = ClipboardMode_Disabled;
     Console *pParent = NULL;
+    bool fClientActive = false;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
         if (!mData)
             return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
         pParent = mData->mParent;
+        fClientActive = i_isClientIdRegisteredLocked(aClientId);
+    }
+    if (!fClientActive)
+    {
+        LogFunc(("Rejecting host clipboard setData from inactive session clientId=%RU32\n", aClientId));
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is not active"), aClientId);
     }
     HRESULT hrc = ShClMainGetMode(pParent, &enmMode);
     if (FAILED(hrc))
@@ -2887,6 +3003,16 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
     AutoCaller autoCaller(pParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        if (!i_isClientIdRegisteredLocked(aClientId))
+        {
+            LogFunc(("Rejecting stale host clipboard setData backend publication: clientId=%RU32\n", aClientId));
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
+        }
+    }
+
     GuestShCl *pShCl = GuestShCl::TryGetInst();
     if (!pShCl)
     {
@@ -2895,7 +3021,6 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
                             tr("Writing shared clipboard data to the host failed because the "
                                "Shared Clipboard service is not available"));
     }
-
     vrc = pShCl->ReportFormatsToHost(uFormat);
     if (RT_FAILURE(vrc))
     {
@@ -2928,21 +3053,39 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
  * Clears the native host clipboard endpoint.
  *
  * @returns COM status code.
+ * @param   aClientId       Main clipboard client ID associated with the endpoint.
  */
-HRESULT Clipboard::i_hostClipboardClear()
+HRESULT Clipboard::i_hostClipboardClear(VBOXSHCLMAINCLIENTID aClientId)
 {
-    Log2Func(("\n"));
+    Log2Func(("clientId=%RU32\n", aClientId));
 
     Console *pParent = NULL;
+    bool fClientActive = false;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
         if (!mData)
             return setError(VBOX_E_SHCL_ERROR, tr("Clipboard object is not initialized"));
         pParent = mData->mParent;
+        fClientActive = i_isClientIdRegisteredLocked(aClientId);
+    }
+    if (!fClientActive)
+    {
+        LogFunc(("Rejecting host clipboard clear from inactive session clientId=%RU32\n", aClientId));
+        return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is not active"), aClientId);
     }
 
     AutoCaller autoCaller(pParent);
     AssertComRCReturnRC(autoCaller.hrc());
+
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        AssertPtrReturn(mData, E_FAIL);
+        if (!i_isClientIdRegisteredLocked(aClientId))
+        {
+            LogFunc(("Rejecting stale host clipboard clear backend publication: clientId=%RU32\n", aClientId));
+            return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
+        }
+    }
 
     GuestShCl *pShCl = GuestShCl::TryGetInst();
     if (!pShCl)
@@ -2950,7 +3093,6 @@ HRESULT Clipboard::i_hostClipboardClear()
         Log2Func(("Skipping native host clipboard clear because Shared Clipboard service is no longer available\n"));
         return S_OK;
     }
-
     int vrc = pShCl->ReportFormatsToHost(VBOX_SHCL_FMT_NONE);
     if (RT_FAILURE(vrc))
     {
@@ -3005,7 +3147,7 @@ HRESULT Clipboard::i_reset()
 
 # ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 /**
- * Cancels a Shared Clipboard transfer.
+ * Cancels a Shared Clipboard transfer by public ID after resolving it to one live Main record.
  *
  * @returns COM status code.
  * @param   aTransferId     Transfer identifier to cancel.
@@ -3013,7 +3155,38 @@ HRESULT Clipboard::i_reset()
 HRESULT Clipboard::i_transferCancel(ULONG aTransferId)
 {
     LogFunc(("Canceling transfer id=%RU32\n", (uint32_t)aTransferId));
+
+    ComObjPtr<ClipboardTransferManager> ptrTransfers;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return E_FAIL;
+        ptrTransfers = mData->mTransfers;
+    }
+
+    if (ptrTransfers.isNull())
+        return E_FAIL;
+
+    return ptrTransfers->i_cancelTransferById(aTransferId);
+}
+
+
+/**
+ * Cancels a Shared Clipboard transfer using its private service key.
+ *
+ * @returns COM status code.
+ * @param   aServiceSessionId   Service session that owns the transfer.
+ * @param   aTransferId         Transfer ID to cancel.
+ * @param   aGeneration         Host-private transfer generation.
+ */
+HRESULT Clipboard::i_transferCancel(SHCLSESSIONID aServiceSessionId, SHCLTRANSFERID aTransferId, SHCLTRANSFERGEN aGeneration)
+{
+    LogFunc(("Canceling transfer session=%RU16 id=%RU16 generation=%RU64\n", aServiceSessionId, aTransferId, aGeneration));
     AssertPtrReturn(mData, E_FAIL);
+    AssertReturn(aServiceSessionId != 0 && aServiceSessionId != NIL_SHCLSESSIONID, E_INVALIDARG);
+    AssertReturn(aTransferId != NIL_SHCLTRANSFERID && aTransferId > 0 && aTransferId < VBOX_SHCL_MAX_TRANSFERS - 1, E_INVALIDARG);
+    AssertReturn(aGeneration != 0 && aGeneration != NIL_SHCLTRANSFERGEN, E_INVALIDARG);
+
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
@@ -3025,19 +3198,55 @@ HRESULT Clipboard::i_transferCancel(ULONG aTransferId)
     if (!pVMMDev)
         return S_OK;
 
-    VBOXHGCMSVCPARM parm;
-    HGCMSvcSetU32(&parm, aTransferId);
+    VBOXHGCMSVCPARM aParms[2];
+    HGCMSvcSetU64(&aParms[0], VBOX_SHCL_CONTEXTID_MAKE(aServiceSessionId, aTransferId, 0));
+    HGCMSvcSetU64(&aParms[1], aGeneration);
 
-    int vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_CANCEL, 1, &parm);
+    int vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_CANCEL, RT_ELEMENTS(aParms), aParms);
     if (RT_FAILURE(vrc))
     {
-        LogFunc(("Cancel transfer HGCM host call failed: id=%RU32, vrc=%Rrc\n", (uint32_t)aTransferId, vrc));
-        LogRelMax2(16, ("Shared Clipboard: Failed to cancel transfer %RU32, vrc=%Rrc\n", (uint32_t)aTransferId, vrc));
+        LogFunc(("Cancel transfer HGCM host call failed: session=%RU16, id=%RU16, generation=%RU64, vrc=%Rrc\n",
+                 aServiceSessionId, aTransferId, aGeneration, vrc));
+        LogRelMax2(16, ("Shared Clipboard: Failed to cancel transfer %RU16, vrc=%Rrc\n", aTransferId, vrc));
         return mData->mParent->setErrorBoth(VBOX_E_IPRT_ERROR, vrc,
                                             Console::tr("Canceling shared clipboard transfer failed with %Rrc"), vrc);
     }
-    Log2Func(("Canceled transfer id=%RU32\n", (uint32_t)aTransferId));
+    Log2Func(("Canceled transfer session=%RU16 id=%RU16 generation=%RU64\n", aServiceSessionId, aTransferId, aGeneration));
     return S_OK;
+}
+
+
+/**
+ * Handles a Shared Clipboard transfer lifecycle status delivered by the host service.
+ *
+ * @returns COM status code.
+ * @param   aServiceSessionId   Service session that owns the transfer.
+ * @param   aTransferId         Transfer ID that produced the status.
+ * @param   aGeneration         Host-private transfer generation.
+ * @param   enmShClSource       Shared Clipboard status source.
+ * @param   enmStatus           Transfer lifecycle status.
+ * @param   vrcTransfer         Transfer status result code.
+ */
+HRESULT Clipboard::i_handleTransferStatus(SHCLSESSIONID aServiceSessionId,
+                                          SHCLTRANSFERID aTransferId,
+                                          SHCLTRANSFERGEN aGeneration,
+                                          SHCLSOURCE enmShClSource,
+                                          SHCLTRANSFERSTATUS enmStatus,
+                                          int vrcTransfer)
+{
+    ComObjPtr<ClipboardTransferManager> ptrTransfers;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return E_FAIL;
+        ptrTransfers = mData->mTransfers;
+    }
+
+    if (ptrTransfers.isNull())
+        return E_FAIL;
+
+    return ptrTransfers->i_handleTransferStatus(aServiceSessionId, aTransferId, aGeneration,
+                                                enmShClSource, enmStatus, vrcTransfer);
 }
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
@@ -3147,7 +3356,6 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
             i_removePendingDataRequest(idRequest);
             return E_FAIL;
         }
-
         int vrc = pShCl->ReadDataFromHost((SHCLFORMAT)uFormat, pvData, cbData, pcbActual);
         if (RT_FAILURE(vrc))
         {
@@ -3351,10 +3559,13 @@ HRESULT Clipboard::i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSo
  * @param   fForceNotify    Whether to force notification regardless whether the formats or source
  *                          have been changed or not.
  */
-void Clipboard::i_reportFormats(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormats, ClipboardSource_T aSource, bool fForceNotify)
+bool Clipboard::i_reportFormats(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormats, ClipboardSource_T aSource,
+                                bool fForceNotify, bool fRequireCurrentClientId,
+                                VBOXSHCLMAINCLIENTID aRequiredCurrentClientId)
 {
-    Log2Func(("clientId=%RU32, fFormats=%#x, source=%s, fForceNotify=%RTbool\n",
-              aClientId, fFormats, clipboardSourceToLogString(aSource), fForceNotify));
+    Log2Func(("clientId=%RU32, fFormats=%#x, source=%s, fForceNotify=%RTbool, fRequireCurrentClientId=%RTbool, requiredClientId=%RU32\n",
+              aClientId, fFormats, clipboardSourceToLogString(aSource), fForceNotify,
+              fRequireCurrentClientId, aRequiredCurrentClientId));
     ComPtr<IEventSource> ptrEventSource;
     uint32_t fOldFormats = VBOX_SHCL_FMT_NONE;
     ClipboardSource_T enmOldSource = ClipboardSource_Custom;
@@ -3362,7 +3573,21 @@ void Clipboard::i_reportFormats(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormat
     bool fSourceChanged = false;
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
-        AssertPtrReturnVoid(mData);
+        AssertPtrReturn(mData, false);
+
+        if (   fRequireCurrentClientId
+            && mData->mCurrentClientId != aRequiredCurrentClientId)
+        {
+            LogFunc(("Ignoring conditional format report: requiredClientId=%RU32, currentClientId=%RU32\n",
+                     aRequiredCurrentClientId, mData->mCurrentClientId));
+            return false;
+        }
+        if (   aClientId != VBOX_SHCL_MAIN_CLIENT_NONE
+            && !i_isClientIdRegisteredLocked(aClientId))
+        {
+            LogFunc(("Ignoring format report from inactive session clientId=%RU32\n", aClientId));
+            return false;
+        }
 
         fOldFormats = m_fFormats;
         enmOldSource = mData->mSource;
@@ -3470,6 +3695,8 @@ void Clipboard::i_reportFormats(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormat
                                                   FALSE /* aVeto */, aSource, ComSafeArrayAsInParam(aEventFormats));
         }
     }
+
+    return true;
 }
 
 
@@ -3728,12 +3955,16 @@ void Clipboard::i_fireClipboardFileTransferModeChanged(bool fEnabled)
  * @param   aClientId       Originating client identifier.
  * @param   aTransfer       Transfer associated with the event.
  * @param   aState          Transfer state.
+ * @param   aInteraction    Requested transfer interaction.
+ * @param   aPath           Optional transfer-relative event path.
  * @param   aMessage        Optional event message.
  * @param   aError          Clipboard transfer error code.
  */
 void Clipboard::i_fireClipboardTransferEvent(VBOXSHCLMAINCLIENTID aClientId,
                                              IClipboardTransfer *aTransfer,
                                              ClipboardTransferState_T aState,
+                                             ClipboardTransferInteraction_T aInteraction,
+                                             const com::Utf8Str &aPath,
                                              const com::Utf8Str &aMessage,
                                              ClipboardError_T aError)
 {
@@ -3748,13 +3979,15 @@ void Clipboard::i_fireClipboardTransferEvent(VBOXSHCLMAINCLIENTID aClientId,
     LONG64 const i64Revision = i_nextEventRevision();
     Log2Func(("Firing transfer event: transfer=%p, state=%RU32, revision=%RI64, clientId=%RU32\n",
               (void *)aTransfer, (uint32_t)aState, i64Revision, aClientId));
-    ::FireClipboardTransferEvent(ptrEventSource, i64Revision, aClientId, aTransfer, aState, aMessage, aError);
+    ::FireClipboardTransferEvent(ptrEventSource, i64Revision, aClientId, aTransfer, aState, aInteraction,
+                                 Bstr(aPath).raw(), aMessage, aError);
 
     std::vector<SessionEventTarget> vecTargets;
     i_getSessionEventTargets(vecTargets, aClientId, true /* fPassive */, false /* fCheckReflection */,
                              VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
     for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
-        ::FireClipboardTransferEvent(it->mEventSource, i64Revision, aClientId, aTransfer, aState, aMessage, aError);
+        ::FireClipboardTransferEvent(it->mEventSource, i64Revision, aClientId, aTransfer, aState, aInteraction,
+                                     Bstr(aPath).raw(), aMessage, aError);
 }
 
 

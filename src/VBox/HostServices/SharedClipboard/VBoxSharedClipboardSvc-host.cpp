@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-host.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-host.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host-controlled service handling.
  */
@@ -161,11 +161,12 @@ DECLCALLBACK(int) shClSvcHostCall(void *, uint32_t u32Function, uint32_t cParms,
                 rc = VINF_SUCCESS;
             }
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-            else if (cParms == 1)
+            else
                 rc = ShClSvcTransferMsgHostHandler(u32Function, cParms, paParms);
-#endif
+#else
             else
                 rc = VERR_INVALID_PARAMETER;
+#endif
             break;
         }
 

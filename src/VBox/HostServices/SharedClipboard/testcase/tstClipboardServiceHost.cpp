@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -309,8 +309,9 @@ static void testSetTransferMode(void)
     RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
 }
 
-static void testGetTransferStatusMessage(VBOXHGCMSVCFNTABLE *pTable, SHCLTRANSFERID idTransferExpected,
-                                         SHCLTRANSFERSTATUS enmStatusExpected, int rcTransferExpected)
+static void testGetTransferStatusMessage(VBOXHGCMSVCFNTABLE *pTable, SHCLSESSIONID idSessionExpected,
+                                         SHCLTRANSFERID idTransferExpected, SHCLTRANSFERSTATUS enmStatusExpected,
+                                         int rcTransferExpected)
 {
     struct VBOXHGCMSVCPARM aStatusParms[VBOX_SHCL_CPARMS_TRANSFER_STATUS];
     VBOXHGCMCALLHANDLE_TYPEDEF call;
@@ -325,14 +326,25 @@ static void testGetTransferStatusMessage(VBOXHGCMSVCFNTABLE *pTable, SHCLTRANSFE
     pTable->pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
                     VBOX_SHCL_GUEST_FN_MSG_GET, RT_ELEMENTS(aStatusParms), aStatusParms, 0);
     RTTESTI_CHECK_RC_OK(call.rc);
-    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_TRANSFER(aStatusParms[0].u.uint64) == idTransferExpected);
+    uint64_t const uContext = aStatusParms[0].u.uint64;
+    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_SESSION(uContext) == idSessionExpected);
+    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_TRANSFER(uContext) == idTransferExpected);
+    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_EVENT(uContext) != 0);
+    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_EVENT(uContext) != NIL_SHCLEVENTID);
     RTTESTI_CHECK(aStatusParms[2].u.uint32 == enmStatusExpected);
     RTTESTI_CHECK((int32_t)aStatusParms[3].u.uint32 == rcTransferExpected);
 }
 
+static void testSetTransferKeyParms(VBOXHGCMSVCPARM aParms[], SHCLSESSIONID idSession,
+                                    SHCLTRANSFERID idTransfer, SHCLTRANSFERGEN uGeneration)
+{
+    HGCMSvcSetU64(&aParms[0], VBOX_SHCL_CONTEXTID_MAKE(idSession, idTransfer, 0));
+    HGCMSvcSetU64(&aParms[1], uGeneration);
+}
+
 static void testTransferHostCancelError(void)
 {
-    struct VBOXHGCMSVCPARM parms[2];
+    struct VBOXHGCMSVCPARM parms[3];
     struct VBOXHGCMSVCPARM aObjCloseParms[VBOX_SHCL_CPARMS_OBJ_CLOSE];
     VBOXHGCMSVCFNTABLE table;
     VBOXHGCMCALLHANDLE_TYPEDEF call;
@@ -352,65 +364,102 @@ static void testTransferHostCancelError(void)
     RT_ZERO(g_Client);
     rc = table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
     RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+    RTTESTI_CHECK(g_Client.State.uSessionID != 0);
+    RTTESTI_CHECK(g_Client.State.uSessionID != NIL_SHCLSESSIONID);
     g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
 
+    SHCLSESSIONID const idSessionBeforeReset = g_Client.State.uSessionID;
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 0, parms);
     RTTESTI_CHECK_RC_OK(rc);
+    RTTESTI_CHECK(g_Client.State.uSessionID != idSessionBeforeReset);
     g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
 
     HGCMSvcSetU32(&parms[0], 42);
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 1, parms);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+
+    testSetTransferKeyParms(parms, g_Client.State.uSessionID, 42, 1);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 2, parms);
     RTTESTI_CHECK_RC(rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
 
-    HGCMSvcSetU32(&parms[0], 0);
-    HGCMSvcSetU32(&parms[1], 0);
-    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 2, parms);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 3, parms);
     RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
 
     PSHCLTRANSFER pTransfer;
     rc = ShClSvcTransferCreate(&g_Client, SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL,
                                NIL_SHCLTRANSFERID, &pTransfer);
     RTTESTI_CHECK_RC_OK(rc);
+    SHCLSESSIONID const idSessionCancel = ShClTransferGetSessionId(pTransfer);
     SHCLTRANSFERID const idTransferCancel = ShClTransferGetID(pTransfer);
+    SHCLTRANSFERGEN const uGenerationCancel = ShClTransferGetGeneration(pTransfer);
+    RTTESTI_CHECK(idSessionCancel == g_Client.State.uSessionID);
+    RTTESTI_CHECK(uGenerationCancel != 0);
+    RTTESTI_CHECK(uGenerationCancel != NIL_SHCLTRANSFERGEN);
 
-    HGCMSvcSetU32(&parms[0], idTransferCancel);
-    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 1, parms);
+    testSetTransferKeyParms(parms, idSessionCancel + 1, idTransferCancel, uGenerationCancel);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 2, parms);
+    RTTESTI_CHECK_RC(rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferCancel) != NULL);
+
+    testSetTransferKeyParms(parms, idSessionCancel, idTransferCancel, uGenerationCancel + 1);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 2, parms);
+    RTTESTI_CHECK_RC(rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferCancel) != NULL);
+
+    HGCMSvcSetU64(&aObjCloseParms[0], VBOX_SHCL_CONTEXTID_MAKE(idSessionCancel + 1, idTransferCancel, 0));
+    HGCMSvcSetU64(&aObjCloseParms[1], 1);
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_OBJ_CLOSE, RT_ELEMENTS(aObjCloseParms), aObjCloseParms, 0);
+    RTTESTI_CHECK_RC(call.rc, VERR_INVALID_CONTEXT);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferCancel) != NULL);
+
+    testSetTransferKeyParms(parms, idSessionCancel, idTransferCancel, uGenerationCancel);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 2, parms);
     RTTESTI_CHECK_RC_OK(rc);
     RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferCancel) == NULL);
-    testGetTransferStatusMessage(&table, idTransferCancel, SHCLTRANSFERSTATUS_CANCELED, VERR_CANCELLED);
+    testGetTransferStatusMessage(&table, idSessionCancel, idTransferCancel, SHCLTRANSFERSTATUS_CANCELED, VERR_CANCELLED);
 
-    HGCMSvcSetU64(&aObjCloseParms[0], VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID, idTransferCancel, 0));
+    HGCMSvcSetU64(&aObjCloseParms[0], VBOX_SHCL_CONTEXTID_MAKE(idSessionCancel, idTransferCancel, 0));
     HGCMSvcSetU64(&aObjCloseParms[1], 1);
     call.rc = VERR_IPE_UNINITIALIZED_STATUS;
     table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
                   VBOX_SHCL_GUEST_FN_OBJ_CLOSE, RT_ELEMENTS(aObjCloseParms), aObjCloseParms, 0);
     RTTESTI_CHECK_RC(call.rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
 
-    HGCMSvcSetU32(&parms[0], 42);
-    HGCMSvcSetU32(&parms[1], (uint32_t)VERR_ACCESS_DENIED);
-    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 2, parms);
+    testSetTransferKeyParms(parms, g_Client.State.uSessionID, 42, 1);
+    HGCMSvcSetU32(&parms[2], (uint32_t)VERR_ACCESS_DENIED);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 3, parms);
     RTTESTI_CHECK_RC(rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
-
-    HGCMSvcSetU32(&parms[0], idTransferCancel);
-    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 1, parms);
-    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
-
-    HGCMSvcSetU32(&parms[0], idTransferCancel);
-    HGCMSvcSetU32(&parms[1], (uint32_t)VERR_CANCELLED);
-    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 2, parms);
-    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
 
     rc = ShClSvcTransferCreate(&g_Client, SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL,
                                NIL_SHCLTRANSFERID, &pTransfer);
     RTTESTI_CHECK_RC_OK(rc);
+    SHCLSESSIONID const idSessionError = ShClTransferGetSessionId(pTransfer);
     SHCLTRANSFERID const idTransferError = ShClTransferGetID(pTransfer);
+    SHCLTRANSFERGEN const uGenerationError = ShClTransferGetGeneration(pTransfer);
 
-    HGCMSvcSetU32(&parms[0], idTransferError);
-    HGCMSvcSetU32(&parms[1], (uint32_t)VERR_ACCESS_DENIED);
+    testSetTransferKeyParms(parms, idSessionError, idTransferError, uGenerationError);
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 2, parms);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+
+    HGCMSvcSetU32(&parms[2], (uint32_t)VERR_CANCELLED);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 3, parms);
+    RTTESTI_CHECK_RC(rc, VERR_INVALID_PARAMETER);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferError) != NULL);
+
+    testSetTransferKeyParms(parms, idSessionError, idTransferError, uGenerationError + 1);
+    HGCMSvcSetU32(&parms[2], (uint32_t)VERR_ACCESS_DENIED);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 3, parms);
+    RTTESTI_CHECK_RC(rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
+    RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferError) != NULL);
+
+    testSetTransferKeyParms(parms, idSessionError, idTransferError, uGenerationError);
+    HGCMSvcSetU32(&parms[2], (uint32_t)VERR_ACCESS_DENIED);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_ERROR, 3, parms);
     RTTESTI_CHECK_RC_OK(rc);
     RTTESTI_CHECK(ShClTransferCtxGetTransferById(&g_Client.Transfers.Ctx, idTransferError) == NULL);
-    testGetTransferStatusMessage(&table, idTransferError, SHCLTRANSFERSTATUS_ERROR, VERR_ACCESS_DENIED);
+    testGetTransferStatusMessage(&table, idSessionError, idTransferError, SHCLTRANSFERSTATUS_ERROR, VERR_ACCESS_DENIED);
 
     HGCMSvcSetU32(&parms[0], VBOX_SHCL_TRANSFER_MODE_F_NONE);
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE, 1, parms);

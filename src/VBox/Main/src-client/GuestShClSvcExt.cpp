@@ -1,4 +1,4 @@
-/* $Id: GuestShClSvcExt.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClSvcExt.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard service extension handling for Main.
  */
@@ -346,10 +346,17 @@ int GuestShCl::i_validateSvcExtParms(uint32_t u32Function, void *pvParms, uint32
         {
             AssertPtrReturn(pActiveClient, VERR_INVALID_POINTER);
             AssertReturn(pParms->u.FileTransferData.pClient == pActiveClient, VERR_INVALID_PARAMETER);
-            AssertPtrReturn(pParms->u.FileTransferData.pClient->pBackend, VERR_INVALID_POINTER);
-            AssertPtrReturn(pParms->u.FileTransferData.pTransfer, VERR_INVALID_POINTER);
+            PSHCLCLIENT const pClient = pParms->u.FileTransferData.pClient;
+            AssertPtrReturn(pClient->pBackend, VERR_INVALID_POINTER);
+            PSHCLTRANSFER const pTransfer = pParms->u.FileTransferData.pTransfer;
+            AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
             AssertPtrReturn(pParms->u.FileTransferData.pReply, VERR_INVALID_POINTER);
             AssertReturn(pParms->u.FileTransferData.enmShClSource == SHCLSOURCE_REMOTE, VERR_INVALID_PARAMETER);
+            AssertReturn(ShClTransferCtxGetTransferByKey(&pClient->Transfers.Ctx,
+                                                         ShClTransferGetSessionId(pTransfer),
+                                                         ShClTransferGetID(pTransfer),
+                                                         ShClTransferGetGeneration(pTransfer)) == pTransfer,
+                         VERR_INVALID_CONTEXT);
 
             PSHCLREPLY const pReply = pParms->u.FileTransferData.pReply;
             AssertReturn(pReply->uType == VBOX_SHCL_TX_REPLYMSGTYPE_TRANSFER_STATUS, VERR_INVALID_PARAMETER);
@@ -717,16 +724,30 @@ int GuestShCl::i_handleSvcExtError(PSHCLEXTPARMS pParms)
  */
 int GuestShCl::i_handleSvcExtFileTransfer(PSHCLEXTPARMS pParms, void *pvParms, uint32_t cbParms)
 {
+    PSHCLCLIENT pClient = pParms->u.FileTransferData.pClient;
+    PSHCLTRANSFER pTransfer = pParms->u.FileTransferData.pTransfer;
+    SHCLSOURCE const enmShClSource = pParms->u.FileTransferData.enmShClSource;
+    PSHCLREPLY pReply = pParms->u.FileTransferData.pReply;
+    SHCLSESSIONID const idSession = ShClTransferGetSessionId(pTransfer);
+    SHCLTRANSFERID const idTransfer = ShClTransferGetID(pTransfer);
+    SHCLTRANSFERGEN const uGeneration = ShClTransferGetGeneration(pTransfer);
+    SHCLTRANSFERSTATUS const enmStatus = pReply->u.TransferStatus.uStatus;
+    int const vrcTransfer = (int)pReply->rc;
+
     int vrc = i_forwardToSvcExt(VBOX_CLIPBOARD_EXT_FN_FILE_TRANSFER, pvParms, cbParms);
     if (vrc == VERR_NOT_SUPPORTED)
-    {
-        PSHCLCLIENT pClient = pParms->u.FileTransferData.pClient;
-        PSHCLTRANSFER pTransfer = pParms->u.FileTransferData.pTransfer;
-        SHCLSOURCE enmShClSource = pParms->u.FileTransferData.enmShClSource;
-        PSHCLREPLY pReply = pParms->u.FileTransferData.pReply;
         vrc = ShClBackendTransferHandleStatusReply(pClient->pBackend, pClient, pTransfer, enmShClSource,
-                                                   pReply->u.TransferStatus.uStatus, pReply->rc);
+                                                   pReply->u.TransferStatus.uStatus, (int)pReply->rc);
+
+    Clipboard *pClipboard = m_pConsole->i_getClipboard();
+    if (pClipboard)
+    {
+        HRESULT hrc = pClipboard->i_handleTransferStatus(idSession, idTransfer, uGeneration,
+                                                         enmShClSource, enmStatus, vrcTransfer);
+        if (FAILED(hrc))
+            LogFunc(("Main transfer status handling failed: hrc=%Rhrc\n", hrc));
     }
+
     return vrc;
 }
 #endif

@@ -30,7 +30,7 @@
 ]>
 <refentry id="vboxmanage-clipboard" lang="en">
   <refentryinfo>
-    <pubdate>$Date: 2026-06-29 10:32:23 +0200 (Mon, 29 Jun 2026) $</pubdate>
+    <pubdate>$Date: 2026-07-03 17:22:37 +0200 (Fri, 03 Jul 2026) $</pubdate>
     <title>VBoxManage clipboard</title>
   </refentryinfo>
 
@@ -99,6 +99,61 @@
       <arg>--timeout=<replaceable>ms</replaceable></arg>
       <arg>--wait=<replaceable>ms</replaceable></arg>
       <arg>-v|--verbose</arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-transfer-offer">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">transfer</arg>
+      <group choice="req">
+        <arg choice="plain">offer</arg>
+        <arg choice="plain">send</arg>
+      </group>
+      <arg>-R|--recursive</arg>
+      <arg>--timeout=<replaceable>ms</replaceable></arg>
+      <arg>-v|--verbose</arg>
+      <arg rep="repeat" choice="plain"><replaceable>source-on-host</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-transfer-receive">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">transfer</arg>
+      <group choice="req">
+        <arg choice="plain">receive</arg>
+        <arg choice="plain">recv</arg>
+      </group>
+      <arg>--timeout=<replaceable>ms</replaceable></arg>
+      <arg>-v|--verbose</arg>
+      <arg choice="plain"><replaceable>dest-on-host</replaceable></arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-transfer-list">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">transfer</arg>
+      <arg choice="plain">list</arg>
+      <arg>--direction=any|to-guest|to-host</arg>
+    </cmdsynopsis>
+
+    <cmdsynopsis id="synopsis-vboxmanage-clipboard-transfer-cancel">
+      <command>VBoxManage clipboard</command>
+      <group choice="req">
+        <arg choice="plain"><replaceable>uuid</replaceable></arg>
+        <arg choice="plain"><replaceable>vmname</replaceable></arg>
+      </group>
+      <arg choice="plain">transfer</arg>
+      <arg choice="plain">cancel</arg>
+      <arg choice="plain"><replaceable>transfer-id</replaceable></arg>
     </cmdsynopsis>
 
     <cmdsynopsis id="synopsis-vboxmanage-clipboard-formats">
@@ -201,19 +256,18 @@
       <title>Copy Host Data to the Virtual Machine Clipboard</title>
       <remark role="help-copy-synopsis"/>
       <para>
-        The <command>VBoxManage clipboard copy</command> command reads data
-        from host standard input, publishes it to the live virtual machine
-        clipboard, and notifies the guest about the selected format. Use shell
-        pipes or input redirection to copy data from a host file.
+        The <command>VBoxManage clipboard copy</command> command reads data from
+        host standard input, publishes it to the live virtual machine clipboard,
+        and notifies the guest about the selected format. Use shell pipes or input
+        redirection to copy data from a host file as ordinary clipboard data.
       </para>
       <para>
-        The command reads standard input once and writes the clipboard data. By
-        default, it waits indefinitely until a matching guest data request is
-        observed. Use <option>--timeout=0</option> to return immediately after
-        publishing the data. If <option>--timeout</option> is specified with a
-        finite non-zero value, the command waits up to that many milliseconds for
-        a matching guest data request. The shared clipboard mode must allow
-        host-to-guest transfers.
+        By default, the command waits indefinitely until a matching guest data
+        request is observed. Use <option>--timeout=0</option> to return
+        immediately after publishing the data. If <option>--timeout</option> is
+        specified with a finite non-zero value, the command waits up to that many
+        milliseconds. The shared clipboard mode must allow host-to-guest
+        transfers.
       </para>
       <variablelist>
         <varlistentry>
@@ -264,17 +318,17 @@ $ cat foo.txt | VBoxManage clipboard "Ubuntu VM" copy --format='text/plain;chars
       <title>Paste Virtual Machine Clipboard Data to the Host</title>
       <remark role="help-copy-synopsis"/>
       <para>
-        The <command>VBoxManage clipboard paste</command> command reads data
-        from the live clipboard of the virtual machine and writes guest-owned
-        clipboard data to host standard output. By default, it first tries
-        currently available guest data and then waits indefinitely until matching
-        guest clipboard data is available. Use <option>--timeout=0</option> or
+        The <command>VBoxManage clipboard paste</command> command reads data from
+        the live clipboard of the virtual machine and writes guest-owned clipboard
+        data to host standard output. By default, it first tries currently
+        available guest data and then waits indefinitely until matching guest
+        clipboard data is available. Use <option>--timeout=0</option> or
         <option>--wait=0</option> to read only currently available guest data.
         With a finite non-zero wait option, the command waits until matching
         guest clipboard data is available or the timeout is reached. It does not
         synthesize a paste keystroke in the guest. Use shell redirection to write
-        the clipboard payload to a host file, for example
-        <command>VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt</command>.
+        the clipboard payload to a host file, for example <command>VBoxManage
+        clipboard "Ubuntu VM" paste &gt; foo.txt</command>.
       </para>
       <para>
         If the command would print multiline text to an interactive terminal, it
@@ -316,6 +370,129 @@ $ cat foo.txt | VBoxManage clipboard "Ubuntu VM" copy --format='text/plain;chars
       </para>
 <screen>$ VBoxManage clipboard "Ubuntu VM" paste &gt; foo.txt
 $ VBoxManage clipboard "Ubuntu VM" paste --timeout=10000 &gt; foo.txt</screen>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-transfer-offer">
+      <title>Offer Host Files or Directories to the Virtual Machine Clipboard</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard transfer offer</command> command
+        publishes one or more host files or directories as a clipboard file
+        transfer using the live <command>set-filetransfers</command> setting and
+        the <literal>IClipboardTransfer</literal> API. Directory transfers are
+        recursive by default; use <option>-R</option> or
+        <option>--recursive</option> for explicit command-line intent.
+      </para>
+      <para>
+        The command publishes the transfer and waits for clipboard transfer events
+        such as progress, interaction, completion, cancellation, or failure. Use
+        <option>--timeout=0</option> to return immediately after publishing the
+        transfer. If <option>--timeout</option> is specified with a finite
+        non-zero value, the command waits up to that many milliseconds. The shared
+        clipboard mode must allow host-to-guest transfers.
+        <command>send</command> is an alias for <command>offer</command>.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>-R</option></term>
+          <term><option>--recursive</option></term>
+          <listitem><para>
+              Indicates that a directory path is intended to be transferred
+              recursively. Directory clipboard transfers are recursive by default.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>--timeout=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Sets the maximum wait time for clipboard transfer completion, in
+              milliseconds. The default is to wait indefinitely. Specify
+              <literal>0</literal> to return immediately after publishing the
+              transfer.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>-v</option></term>
+          <term><option>--verbose</option></term>
+          <listitem><para>
+              Prints diagnostic information to standard error, including transfer
+              publication and transfer events.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        For example:
+      </para>
+<screen>$ VBoxManage clipboard "Ubuntu VM" transfer offer --timeout=0 ./host-file.txt
+$ VBoxManage clipboard "Ubuntu VM" transfer offer -R ./host-directory
+$ VBoxManage clipboard "Ubuntu VM" transfer offer ./host-file.txt ./host-directory</screen>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-transfer-receive">
+      <title>Receive Virtual Machine Clipboard Files or Directories on the Host</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard transfer receive</command> command waits
+        for or uses a guest-to-host clipboard file transfer and materializes its
+        file tree below the specified host directory. The command uses
+        <literal>IClipboardTransferEvent</literal> notifications for transfer
+        state updates and responds to supported interaction requests, such as
+        approval, destination, and overwrite requests. The shared clipboard mode
+        must allow guest-to-host transfers.
+        <command>recv</command> is an alias for <command>receive</command>.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>--timeout=<replaceable>ms</replaceable></option></term>
+          <listitem><para>
+              Sets the maximum wait time for a guest-to-host clipboard file
+              transfer, in milliseconds. The default is to wait indefinitely.
+              Specify <literal>0</literal> to use only currently available
+              transfers.
+            </para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><option>-v</option></term>
+          <term><option>--verbose</option></term>
+          <listitem><para>
+              Prints diagnostic information to standard error.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+      <para>
+        For example:
+      </para>
+<screen>$ VBoxManage clipboard "Ubuntu VM" transfer receive ./from-guest
+$ VBoxManage clipboard "Ubuntu VM" transfer receive --timeout=10000 ./from-guest</screen>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-transfer-list">
+      <title>List Clipboard File Transfers</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard transfer list</command> command lists
+        clipboard file transfers currently known to the live virtual machine
+        clipboard.
+      </para>
+      <variablelist>
+        <varlistentry>
+          <term><option>--direction=any|to-guest|to-host</option></term>
+          <listitem><para>
+              Restricts the listed transfers by direction. The default is
+              <literal>any</literal>.
+            </para></listitem>
+        </varlistentry>
+      </variablelist>
+    </refsect2>
+
+    <refsect2 id="vboxmanage-clipboard-transfer-cancel">
+      <title>Cancel a Clipboard File Transfer</title>
+      <remark role="help-copy-synopsis"/>
+      <para>
+        The <command>VBoxManage clipboard transfer cancel</command> command
+        cancels the clipboard file transfer with the specified transfer ID.
+        Transfer IDs are shown by <command>VBoxManage clipboard transfer
+        list</command> and in verbose transfer event output.
+      </para>
     </refsect2>
 
     <refsect2 id="vboxmanage-clipboard-formats">

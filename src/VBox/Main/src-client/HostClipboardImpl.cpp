@@ -1,4 +1,4 @@
-/* $Id: HostClipboardImpl.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
+/* $Id: HostClipboardImpl.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Host clipboard API object.
  */
@@ -226,10 +226,12 @@ HRESULT HostClipboard::clear()
 
     Log2Func(("\n"));
 
+    VBOXSHCLMAINCLIENTID idClient = VBOX_SHCL_MAIN_CLIENT_NONE;
     Clipboard *pParent = NULL;
     AutoCaller autoCaller;
     {
         AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        idClient = mData.mClientId;
         pParent = mData.mParent;
         if (pParent)
             autoCaller.attach(pParent);
@@ -238,6 +240,6 @@ HRESULT HostClipboard::clear()
         return setError(VBOX_E_SHCL_ERROR, tr("Host clipboard object is not initialized"));
     AssertComRCReturnRC(autoCaller.hrc());
 
-    return pParent->i_hostClipboardClear();
+    return pParent->i_hostClipboardClear(idClient);
 #endif /* VBOX_WITH_SHARED_CLIPBOARD */
 }

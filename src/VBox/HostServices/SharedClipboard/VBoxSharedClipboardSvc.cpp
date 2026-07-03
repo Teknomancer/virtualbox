@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc.cpp 114428 2026-06-18 08:57:28Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Host service entry points.
  */
@@ -313,6 +313,9 @@ static int shClSvcInit(VBOXHGCMSVCFNTABLE *pTable)
     if (RT_SUCCESS(rc))
     {
         shClSvcHostModeSet(VBOX_SHCL_MODE_OFF);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        g_idNextSession = 1;
+#endif
 
         /* Normally we would call ShClBackendInit() here but the service extension
          * has not been loaded at this early stage of the Shared Clipboard service

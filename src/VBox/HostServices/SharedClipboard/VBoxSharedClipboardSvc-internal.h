@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-internal.h 114428 2026-06-18 08:57:28Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-internal.h 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal service instance state.
  */
@@ -54,6 +54,8 @@ typedef struct SHCLSERVICE
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     /** Current Shared Clipboard file transfer mode. */
     uint32_t                fTransferMode;
+    /** Next non-zero service session ID to assign to a client. */
+    SHCLSESSIONID           idNextSession;
 #endif
     /** Whether the service runs in headless mode. */
     bool                    fHeadless;
@@ -72,6 +74,7 @@ typedef struct SHCLSERVICE
         , uMode(VBOX_SHCL_MODE_OFF)
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
         , fTransferMode(VBOX_SHCL_TRANSFER_MODE_F_NONE)
+        , idNextSession(1)
 #endif
         , fHeadless(false)
         , fHostFeatures0(VBOX_SHCL_HF_0_CONTEXT_ID
@@ -100,6 +103,7 @@ extern SHCLSERVICE g_ShClSvc;
 #define g_uMode                (g_ShClSvc.uMode)
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
 # define g_fTransferMode       (g_ShClSvc.fTransferMode)
+# define g_idNextSession       (g_ShClSvc.idNextSession)
 #endif
 #define g_fHeadless            (g_ShClSvc.fHeadless)
 #define g_ExtState             (g_ShClSvc.ExtState)
@@ -136,7 +140,7 @@ int shClSvcClientMsgCancel(PSHCLCLIENT pClient, uint32_t cParms);
 int shClSvcClientMsgReportFormats(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
 int shClSvcClientMsgDataRead(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
 int shClSvcClientMsgDataWrite(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[]);
-int shClSvcClientMsgError(uint32_t cParms, VBOXHGCMSVCPARM paParms[], int *pRc);
+int shClSvcClientMsgError(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[], int *pRc);
 /** @} */
 
 /** @name Backend and extension bridge handling.

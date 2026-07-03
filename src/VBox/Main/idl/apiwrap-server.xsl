@@ -219,7 +219,16 @@ private:
 
 <xsl:template match="interface" mode="codeheader">
     <xsl:param name="addinterfaces"/>
-    <xsl:value-of select="concat('#define LOG_GROUP LOG_GROUP_MAIN_', translate(substring(@name, 2), $G_lowerCase, $G_upperCase), $G_sNewLine, $G_sNewLine)"/>
+    <xsl:choose>
+        <!-- Make all those IClipboardXXX interfaces use one logging group,
+             to make it easier to control logging for the complete feature set. -->
+        <xsl:when test="starts-with(@name, 'IClipboard')">
+            <xsl:value-of select="concat('#define LOG_GROUP LOG_GROUP_MAIN_CLIPBOARD', $G_sNewLine, $G_sNewLine)"/>
+        </xsl:when>
+        <xsl:otherwise>
+            <xsl:value-of select="concat('#define LOG_GROUP LOG_GROUP_MAIN_', translate(substring(@name, 2), $G_lowerCase, $G_upperCase), $G_sNewLine, $G_sNewLine)"/>
+        </xsl:otherwise>
+    </xsl:choose>
     <xsl:value-of select="concat('#include &quot;', substring(@name, 2), 'Wrap.h&quot;', $G_sNewLine)"/>
     <xsl:text>#include "LoggingNew.h"
 #ifdef VBOX_WITH_DTRACE_R3_MAIN

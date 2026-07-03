@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -538,10 +538,12 @@ int ShClTransferListOpenParmsCopy(PSHCLLISTOPENPARMS pDst, PSHCLLISTOPENPARMS pS
 
     if (RT_SUCCESS(rc))
     {
-        pDst->fList    = pDst->fList;
+        pDst->fList    = pSrc->fList;
         pDst->cbFilter = pSrc->cbFilter;
         pDst->cbPath   = pSrc->cbPath;
     }
+    else
+        ShClTransferListOpenParmsDestroy(pDst);
 
     return rc;
 }
@@ -590,8 +592,16 @@ int ShClTransferListOpenParmsInit(PSHCLLISTOPENPARMS pParms)
     pParms->cbPath    = SHCL_TRANSFER_PATH_MAX; /** @todo Make this dynamic. */
     pParms->pszPath   = RTStrAlloc(pParms->cbPath);
 
-    LogFlowFuncLeave();
-    return VINF_SUCCESS;
+    int rc = VINF_SUCCESS;
+    if (   !pParms->pszFilter
+        || !pParms->pszPath)
+    {
+        ShClTransferListOpenParmsDestroy(pParms);
+        rc = VERR_NO_MEMORY;
+    }
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
 }
 
 /**
@@ -1233,7 +1243,11 @@ PSHCLOBJDATACHUNK ShClTransferObjDataChunkDup(PSHCLOBJDATACHUNK pDataChunk)
 
         pDataChunkDup->uHandle = pDataChunk->uHandle;
         pDataChunkDup->pvData  = RTMemDup(pDataChunk->pvData, pDataChunk->cbData);
-        AssertPtrReturn(pDataChunkDup->pvData, NULL);
+        if (!pDataChunkDup->pvData)
+        {
+            RTMemFree(pDataChunkDup);
+            return NULL;
+        }
         pDataChunkDup->cbData  = pDataChunk->cbData;
     }
 
@@ -1317,10 +1331,12 @@ static int shClTransferCreateInternal(SHCLTRANSFERDIR enmDir, SHCLSOURCE enmSour
     PSHCLTRANSFER pTransfer = (PSHCLTRANSFER)RTMemAllocZ(sizeof(SHCLTRANSFER));
     AssertPtrReturn(pTransfer, VERR_NO_MEMORY);
 
-    pTransfer->State.uID       = NIL_SHCLTRANSFERID;
-    pTransfer->State.enmStatus = SHCLTRANSFERSTATUS_NONE;
-    pTransfer->State.enmDir    = enmDir;
-    pTransfer->State.enmSource = enmSource;
+    pTransfer->State.uID         = NIL_SHCLTRANSFERID;
+    pTransfer->State.idSession   = NIL_SHCLSESSIONID;
+    pTransfer->State.uGeneration = NIL_SHCLTRANSFERGEN;
+    pTransfer->State.enmStatus   = SHCLTRANSFERSTATUS_NONE;
+    pTransfer->State.enmDir      = enmDir;
+    pTransfer->State.enmSource   = enmSource;
 
     pTransfer->Thread.hThread    = NIL_RTTHREAD;
     pTransfer->Thread.fCancelled = false;
@@ -1752,14 +1768,15 @@ int ShClTransferListRead(PSHCLTRANSFER pTransfer, SHCLLISTHANDLE hList,
 int ShClTransferListWrite(PSHCLTRANSFER pTransfer, SHCLLISTHANDLE hList,
                           PSHCLLISTENTRY pEntry)
 {
-    RT_NOREF(pTransfer, hList, pEntry);
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    AssertPtrReturn(pEntry,    VERR_INVALID_POINTER);
+    AssertReturn   (hList != NIL_SHCLLISTHANDLE, VERR_INVALID_HANDLE);
 
-    int rc = VINF_SUCCESS;
-
-#if 0
+    int rc;
     if (pTransfer->ProviderIface.pfnListEntryWrite)
         rc = pTransfer->ProviderIface.pfnListEntryWrite(&pTransfer->ProviderCtx, hList, pEntry);
-#endif
+    else
+        rc = VERR_NOT_SUPPORTED;
 
     if (RT_FAILURE(rc))
         LogRel(("Shared Clipboard: Writing list entry to list 0x%x failed with %Rrc\n", hList, rc));
@@ -2341,6 +2358,44 @@ SHCLTRANSFERID ShClTransferGetID(PSHCLTRANSFER pTransfer)
 }
 
 /**
+ * Returns the clipboard transfer's owning service session ID.
+ *
+ * @returns The transfer's service session ID.
+ * @param   pTransfer           Clipboard transfer to return session ID for.
+ */
+SHCLSESSIONID ShClTransferGetSessionId(PSHCLTRANSFER pTransfer)
+{
+    AssertPtrReturn(pTransfer, NIL_SHCLSESSIONID);
+
+    shClTransferLock(pTransfer);
+
+    SHCLSESSIONID const idSession = pTransfer->State.idSession;
+
+    shClTransferUnlock(pTransfer);
+
+    return idSession;
+}
+
+/**
+ * Returns the clipboard transfer's host-private generation.
+ *
+ * @returns The transfer's host-private generation.
+ * @param   pTransfer           Clipboard transfer to return generation for.
+ */
+SHCLTRANSFERGEN ShClTransferGetGeneration(PSHCLTRANSFER pTransfer)
+{
+    AssertPtrReturn(pTransfer, NIL_SHCLTRANSFERGEN);
+
+    shClTransferLock(pTransfer);
+
+    SHCLTRANSFERGEN const uGeneration = pTransfer->State.uGeneration;
+
+    shClTransferUnlock(pTransfer);
+
+    return uGeneration;
+}
+
+/**
  * Returns the clipboard transfer's direction.
  *
  * @returns The transfer's direction.
@@ -2914,17 +2969,23 @@ int ShClTransferCtxInit(PSHCLTRANSFERCTX pTransferCtx)
 
             RTListInit(&pTransferCtx->List);
 
-            pTransferCtx->cTransfers  = 0;
-            pTransferCtx->cRunning    = 0;
-            pTransferCtx->cMaxRunning = 64; /** @todo Make this configurable? */
+            pTransferCtx->cTransfers       = 0;
+            pTransferCtx->cRunning         = 0;
+            pTransferCtx->cMaxRunning      = 64; /** @todo Make this configurable? */
+            pTransferCtx->cTransferIdsUsed = 0;
+            pTransferCtx->idSession        = NIL_SHCLSESSIONID;
+            pTransferCtx->uNextGeneration  = 1;
 
             RT_ZERO(pTransferCtx->bmTransferIds);
+            RT_ZERO(pTransferCtx->bmTransferIdsUsed);
 
             ShClTransferCtxReset(pTransferCtx);
         }
+        else
+            RTCritSectDelete(&pTransferCtx->CritSect);
     }
 
-    return VINF_SUCCESS;
+    return rc;
 }
 
 /**
@@ -2982,6 +3043,44 @@ void ShClTransferCtxReset(PSHCLTRANSFERCTX pTransferCtx)
 #endif
 
     shClTransferCtxUnlock(pTransferCtx);
+}
+
+/**
+ * Starts a new service session for a transfer context.
+ *
+ * @returns VBox status code.
+ * @param   pTransferCtx        Transfer context to bind to idSession.
+ * @param   idSession           Service session ID to bind.
+ */
+int ShClTransferCtxBeginSession(PSHCLTRANSFERCTX pTransferCtx, SHCLSESSIONID idSession)
+{
+    AssertPtrReturn(pTransferCtx, VERR_INVALID_POINTER);
+    AssertReturn(idSession != 0 && idSession != NIL_SHCLSESSIONID, VERR_INVALID_PARAMETER);
+
+    shClTransferCtxLock(pTransferCtx);
+
+    int rc;
+    if (pTransferCtx->cTransfers == 0)
+    {
+        RT_ZERO(pTransferCtx->ChangedEventData);
+        RT_ZERO(pTransferCtx->bmTransferIds);
+        RT_ZERO(pTransferCtx->bmTransferIdsUsed);
+        pTransferCtx->idSession        = idSession;
+        pTransferCtx->cTransferIdsUsed = 0;
+        pTransferCtx->cRunning         = 0;
+        pTransferCtx->cTransfers       = 0;
+        if (   pTransferCtx->uNextGeneration == 0
+            || pTransferCtx->uNextGeneration == NIL_SHCLTRANSFERGEN)
+            pTransferCtx->uNextGeneration = 1;
+        rc = VINF_SUCCESS;
+    }
+    else
+        rc = VERR_WRONG_ORDER;
+
+    shClTransferCtxUnlock(pTransferCtx);
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
 }
 
 /**
@@ -3072,6 +3171,46 @@ PSHCLTRANSFER ShClTransferCtxGetTransferById(PSHCLTRANSFERCTX pTransferCtx, uint
 }
 
 /**
+ * Returns a clipboard transfer for a specific service-session/transfer/generation key.
+ *
+ * @returns Clipboard transfer found, or NULL if not found or the key does not match.
+ * @param   pTransferCtx        Transfer context to return transfer for.
+ * @param   idSession           Service session ID to match.
+ * @param   idTransfer          Transfer ID to match.
+ * @param   uGeneration         Host-private transfer generation to match.
+ */
+PSHCLTRANSFER ShClTransferCtxGetTransferByKey(PSHCLTRANSFERCTX pTransferCtx, SHCLSESSIONID idSession,
+                                              SHCLTRANSFERID idTransfer, SHCLTRANSFERGEN uGeneration)
+{
+    AssertPtrReturn(pTransferCtx, NULL);
+    AssertReturn(idSession != 0 && idSession != NIL_SHCLSESSIONID, NULL);
+    AssertReturn(idTransfer != NIL_SHCLTRANSFERID && idTransfer > 0 && idTransfer < VBOX_SHCL_MAX_TRANSFERS - 1, NULL);
+    AssertReturn(uGeneration != 0 && uGeneration != NIL_SHCLTRANSFERGEN, NULL);
+
+    shClTransferCtxLock(pTransferCtx);
+
+    PSHCLTRANSFER pTransfer = NULL;
+    if (pTransferCtx->idSession == idSession)
+    {
+        pTransfer = shClTransferCtxGetTransferByIdInternal(pTransferCtx, idTransfer);
+        if (pTransfer)
+        {
+            PSHCLTRANSFER const pTransferToUnlock = pTransfer;
+            shClTransferLock(pTransferToUnlock);
+            if (   pTransferToUnlock->State.idSession != idSession
+                || pTransferToUnlock->State.uID != idTransfer
+                || pTransferToUnlock->State.uGeneration != uGeneration)
+                pTransfer = NULL;
+            shClTransferUnlock(pTransferToUnlock);
+        }
+    }
+
+    shClTransferCtxUnlock(pTransferCtx);
+
+    return pTransfer;
+}
+
+/**
  * Returns a clipboard transfer for a specific list index.
  *
  * @returns Clipboard transfer found, or NULL if not found.
@@ -3145,36 +3284,84 @@ uint32_t ShClTransferCtxGetTotalTransfers(PSHCLTRANSFERCTX pTransferCtx)
     return cTransfers;
 }
 
+/**
+ * Checks whether a transfer ID is in the assignable context-local range.
+ *
+ * @returns true if the ID can be used by a transfer context, false otherwise.
+ * @param   idTransfer          Transfer ID to check.
+ */
+static bool shClTransferCtxIsValidTransferId(SHCLTRANSFERID idTransfer)
+{
+    return    idTransfer != NIL_SHCLTRANSFERID
+           && idTransfer > 0
+           && idTransfer < VBOX_SHCL_MAX_TRANSFERS - 1;
+}
+
+
+/**
+ * Creates the next non-reserved transfer generation for a locked transfer context.
+ *
+ * @returns Transfer generation.
+ * @param   pTransferCtx        Transfer context to update.
+ */
+static SHCLTRANSFERGEN shClTransferCtxCreateGenerationInternal(PSHCLTRANSFERCTX pTransferCtx)
+{
+    Assert(RTCritSectIsOwner(&pTransferCtx->CritSect));
+
+    if (   pTransferCtx->uNextGeneration == 0
+        || pTransferCtx->uNextGeneration == NIL_SHCLTRANSFERGEN)
+        pTransferCtx->uNextGeneration = 1;
+
+    SHCLTRANSFERGEN const uGeneration = pTransferCtx->uNextGeneration++;
+    if (   pTransferCtx->uNextGeneration == 0
+        || pTransferCtx->uNextGeneration == NIL_SHCLTRANSFERGEN)
+        pTransferCtx->uNextGeneration = 1;
+
+    return uGeneration;
+}
+
+
+/**
+ * Allocates a context-local transfer ID for a locked transfer context.
+ *
+ * @returns VBox status code.
+ * @param   pTransferCtx        Transfer context to allocate from.
+ * @param   pidTransfer         Where to return the allocated transfer ID.
+ */
 static int shClTransferCreateIDInternal(PSHCLTRANSFERCTX pTransferCtx, SHCLTRANSFERID *pidTransfer)
 {
-    /*
-     * Pick a random bit as starting point.  If it's in use, search forward
-     * for a free one, wrapping around.  We've reserved both the zero'th and
-     * max-1 IDs.
-     */
-    SHCLTRANSFERID idTransfer = RTRandU32Ex(1, VBOX_SHCL_MAX_TRANSFERS - 2);
+    Assert(RTCritSectIsOwner(&pTransferCtx->CritSect));
 
-    if (!ASMBitTestAndSet(&pTransferCtx->bmTransferIds[0], idTransfer))
-    { /* likely */ }
-    else if (pTransferCtx->cTransfers < VBOX_SHCL_MAX_TRANSFERS - 2 /* First and last are not used */)
+    if (pTransferCtx->cTransferIdsUsed >= VBOX_SHCL_MAX_TRANSFERS - 2 /* First and last are not used */)
     {
-        /* Forward search. */
-        int iHit = ASMBitNextClear(&pTransferCtx->bmTransferIds[0], VBOX_SHCL_MAX_TRANSFERS, idTransfer);
-        if (iHit < 0)
-            iHit = ASMBitFirstClear(&pTransferCtx->bmTransferIds[0], VBOX_SHCL_MAX_TRANSFERS);
-        AssertLogRelMsgReturn(iHit >= 0, ("Transfer count: %RU16\n", pTransferCtx->cTransfers), VERR_SHCLPB_MAX_TRANSFERS_REACHED);
-        idTransfer = iHit;
-        AssertLogRelMsgReturn(!ASMBitTestAndSet(&pTransferCtx->bmTransferIds[0], idTransfer), ("idObject=%#x\n", idTransfer), VERR_INTERNAL_ERROR_2);
-    }
-    else
-    {
-        LogFunc(("Maximum number of transfers reached (%RU16 transfers)\n", pTransferCtx->cTransfers));
+        LogFunc(("Maximum number of transfer IDs consumed in this session (%RU16 IDs)\n", pTransferCtx->cTransferIdsUsed));
         return VERR_SHCLPB_MAX_TRANSFERS_REACHED;
     }
 
-    *pidTransfer = idTransfer;
+    /*
+     * Pick a random bit as starting point.  If it's in use, search forward,
+     * wrapping around.  We've reserved both the zero'th and max-1 IDs.
+     */
+    SHCLTRANSFERID idTransfer = RTRandU32Ex(1, VBOX_SHCL_MAX_TRANSFERS - 2);
+    for (uint32_t i = 0; i < VBOX_SHCL_MAX_TRANSFERS - 2; i++)
+    {
+        if (   !ASMBitTest(&pTransferCtx->bmTransferIdsUsed[0], idTransfer)
+            && !ASMBitTest(&pTransferCtx->bmTransferIds[0], idTransfer))
+        {
+            ASMBitSet(&pTransferCtx->bmTransferIds[0], idTransfer);
+            ASMBitSet(&pTransferCtx->bmTransferIdsUsed[0], idTransfer);
+            pTransferCtx->cTransferIdsUsed++;
+            *pidTransfer = idTransfer;
+            return VINF_SUCCESS;
+        }
 
-    return VINF_SUCCESS;
+        idTransfer++;
+        if (!shClTransferCtxIsValidTransferId(idTransfer))
+            idTransfer = 1;
+    }
+
+    LogFunc(("Maximum number of transfers reached (%RU16 IDs consumed)\n", pTransferCtx->cTransferIdsUsed));
+    return VERR_SHCLPB_MAX_TRANSFERS_REACHED;
 }
 
 /**
@@ -3212,25 +3399,33 @@ static int shClTransferCtxTransferRegisterExInternal(PSHCLTRANSFERCTX pTransferC
 {
     AssertPtrReturn(pTransferCtx, VERR_INVALID_POINTER);
     AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
-    Assert(idTransfer != NIL_SHCLTRANSFERID);
+    Assert(RTCritSectIsOwner(&pTransferCtx->CritSect));
+    Assert(shClTransferCtxIsValidTransferId(idTransfer));
 
-    shClTransferCtxLock(pTransferCtx);
-
-    pTransfer->State.uID = idTransfer;
+    shClTransferLock(pTransfer);
+    pTransfer->State.uID         = idTransfer;
+    pTransfer->State.idSession   = pTransferCtx->idSession;
+    pTransfer->State.uGeneration = shClTransferCtxCreateGenerationInternal(pTransferCtx);
+    shClTransferUnlock(pTransfer);
 
     RTListAppend(&pTransferCtx->List, &pTransfer->Node);
 
     pTransferCtx->cTransfers++;
 
-    Log2Func(("pTransfer=%p, idTransfer=%RU32 -- now %RU16 transfer(s)\n", pTransfer, idTransfer, pTransferCtx->cTransfers));
+    int rc = shClTransferCtxSignal(pTransferCtx, true /* fRegistered */, pTransfer);
+
+    Log2Func(("pTransfer=%p, idTransfer=%RU32, idSession=%RU16, uGeneration=%RU64 -- now %RU16 transfer(s)\n",
+              pTransfer, idTransfer, pTransferCtx->idSession, pTransfer->State.uGeneration, pTransferCtx->cTransfers));
 
     shClTransferCtxUnlock(pTransferCtx);
 
     if (pTransfer->Callbacks.pfnOnRegistered)
         pTransfer->Callbacks.pfnOnRegistered(&pTransfer->CallbackCtx, pTransferCtx);
 
-    LogFlowFuncLeaveRC(VINF_SUCCESS);
-    return VINF_SUCCESS;
+    shClTransferCtxLock(pTransferCtx);
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
 }
 
 /**
@@ -3254,11 +3449,8 @@ int ShClTransferCtxRegister(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTransf
     if (RT_SUCCESS(rc))
     {
         rc = shClTransferCtxTransferRegisterExInternal(pTransferCtx, pTransfer, idTransfer);
-        if (RT_SUCCESS(rc))
-        {
-            if (pidTransfer)
-                *pidTransfer = idTransfer;
-        }
+        if (RT_SUCCESS(rc) && pidTransfer)
+            *pidTransfer = idTransfer;
     }
 
     shClTransferCtxUnlock(pTransferCtx);
@@ -3270,47 +3462,54 @@ int ShClTransferCtxRegister(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTransf
  * Registers a clipboard transfer with a transfer context by specifying an ID for the transfer.
  *
  * @return  VBox status code.
- * @retval  VERR_ALREADY_EXISTS if a transfer with the given ID already exists.
+ * @retval  VERR_ALREADY_EXISTS if a transfer with the given ID already exists or was already consumed in this session.
  * @retval  VERR_SHCLPB_MAX_TRANSFERS_REACHED if the maximum of concurrent transfers for this context has been reached.
  * @param   pTransferCtx        Transfer context to register transfer to.
  * @param   pTransfer           Transfer to register.
  * @param   idTransfer          Transfer ID to use for registration.
- *
- * @note    This function ASSUMES you have created \a idTransfer with ShClTransferCtxCreateId().
  */
 int ShClTransferCtxRegisterById(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTransfer, SHCLTRANSFERID idTransfer)
 {
+    AssertPtrReturn(pTransferCtx, VERR_INVALID_POINTER);
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    AssertReturn(shClTransferCtxIsValidTransferId(idTransfer), VERR_INVALID_PARAMETER);
+
     shClTransferCtxLock(pTransferCtx);
 
+    int rc;
     if (pTransferCtx->cTransfers < VBOX_SHCL_MAX_TRANSFERS - 2 /* First and last are not used */)
     {
-        RTListAppend(&pTransferCtx->List, &pTransfer->Node);
+        PSHCLTRANSFER const pExisting = shClTransferCtxGetTransferByIdInternal(pTransferCtx, idTransfer);
+        bool const fLive = ASMBitTest(&pTransferCtx->bmTransferIds[0], idTransfer);
+        bool const fUsed = ASMBitTest(&pTransferCtx->bmTransferIdsUsed[0], idTransfer);
 
-        shClTransferLock(pTransfer);
+        if (pExisting)
+            rc = VERR_ALREADY_EXISTS;
+        else if (fUsed && !fLive)
+            rc = VERR_ALREADY_EXISTS;
+        else if (!fUsed && fLive)
+            rc = VERR_INTERNAL_ERROR_2;
+        else
+        {
+            if (!fUsed)
+            {
+                ASMBitSet(&pTransferCtx->bmTransferIds[0], idTransfer);
+                ASMBitSet(&pTransferCtx->bmTransferIdsUsed[0], idTransfer);
+                pTransferCtx->cTransferIdsUsed++;
+            }
 
-        pTransfer->State.uID = idTransfer;
-
-        shClTransferUnlock(pTransfer);
-
-        int rc = shClTransferCtxSignal(pTransferCtx, true /* fRegistered */, pTransfer);
-
-        pTransferCtx->cTransfers++;
-
-        LogFunc(("Registered transfer ID %RU16 -- now %RU16 transfers total\n", idTransfer, pTransferCtx->cTransfers));
-
-        shClTransferCtxUnlock(pTransferCtx);
-
-        if (pTransfer->Callbacks.pfnOnRegistered)
-            pTransfer->Callbacks.pfnOnRegistered(&pTransfer->CallbackCtx, pTransferCtx);
-
-        return rc;
+            rc = shClTransferCtxTransferRegisterExInternal(pTransferCtx, pTransfer, idTransfer);
+        }
     }
-
-    LogFunc(("Maximum number of transfers reached (%RU16 transfers)\n", pTransferCtx->cTransfers));
+    else
+    {
+        LogFunc(("Maximum number of transfers reached (%RU16 transfers)\n", pTransferCtx->cTransfers));
+        rc = VERR_SHCLPB_MAX_TRANSFERS_REACHED;
+    }
 
     shClTransferCtxUnlock(pTransferCtx);
 
-    return VERR_SHCLPB_MAX_TRANSFERS_REACHED;
+    return rc;
 }
 
 /**
@@ -3324,6 +3523,10 @@ int ShClTransferCtxRegisterById(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTr
 static void shclTransferCtxTransferRemoveAndUnregister(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTransfer)
 {
     Assert(RTCritSectIsOwner(&pTransferCtx->CritSect));
+
+    SHCLTRANSFERID const idTransfer = ShClTransferGetID(pTransfer);
+    if (shClTransferCtxIsValidTransferId(idTransfer))
+        ASMBitClear(&pTransferCtx->bmTransferIds[0], idTransfer);
 
     RTListNodeRemove(&pTransfer->Node);
 
@@ -3353,7 +3556,7 @@ static void shclTransferCtxTransferRemoveAndUnregister(PSHCLTRANSFERCTX pTransfe
 int ShClTransferCtxUnregisterById(PSHCLTRANSFERCTX pTransferCtx, SHCLTRANSFERID idTransfer)
 {
     AssertPtrReturn(pTransferCtx, VERR_INVALID_POINTER);
-    AssertReturn(idTransfer, VERR_INVALID_PARAMETER);
+    AssertReturn(shClTransferCtxIsValidTransferId(idTransfer), VERR_INVALID_PARAMETER);
 
     shClTransferCtxLock(pTransferCtx);
 
@@ -3361,15 +3564,17 @@ int ShClTransferCtxUnregisterById(PSHCLTRANSFERCTX pTransferCtx, SHCLTRANSFERID 
 
     LogFlowFunc(("idTransfer=%RU32\n", idTransfer));
 
-    if (ASMBitTestAndClear(&pTransferCtx->bmTransferIds, idTransfer))
+    PSHCLTRANSFER pTransfer = shClTransferCtxGetTransferByIdInternal(pTransferCtx, idTransfer);
+    if (pTransfer)
     {
-        PSHCLTRANSFER pTransfer = shClTransferCtxGetTransferByIdInternal(pTransferCtx, idTransfer);
-        if (pTransfer)
-        {
-            shclTransferCtxTransferRemoveAndUnregister(pTransferCtx, pTransfer);
+        shclTransferCtxTransferRemoveAndUnregister(pTransferCtx, pTransfer);
 
-            rc = shClTransferCtxSignal(pTransferCtx, false /* fRegistered */, pTransfer);
-        }
+        rc = shClTransferCtxSignal(pTransferCtx, false /* fRegistered */, pTransfer);
+    }
+    else if (ASMBitTest(&pTransferCtx->bmTransferIds[0], idTransfer))
+    {
+        ASMBitClear(&pTransferCtx->bmTransferIds[0], idTransfer);
+        rc = VERR_NOT_FOUND;
     }
     else
         rc = VERR_NOT_FOUND;
@@ -3437,9 +3642,9 @@ int ShClTransferCtxWait(PSHCLTRANSFERCTX pTransferCtx, RTMSINTERVAL msTimeout, b
 
         if (Event.fRegistered == fRegister)
         {
-            if (   idTransfer != NIL_SHCLTRANSFERID
-                && Event.pTransfer
-                && ShClTransferGetID(Event.pTransfer) == idTransfer)
+            if (   Event.pTransfer
+                && (   idTransfer == NIL_SHCLTRANSFERID
+                    || ShClTransferGetID(Event.pTransfer) == idTransfer))
             {
                 if (ppTransfer)
                     *ppTransfer = Event.pTransfer;
@@ -4008,7 +4213,7 @@ static int ShClSvcTransferGHRootListReadEntryAsync(PSHCLCLIENT pClient, PSHCLTRA
     if (RT_SUCCESS(rc))
     {
         HGCMSvcSetU64(&pMsgEntry->aParms[0],
-                      VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uClientID, ShClTransferGetID(pTransfer), pEvent->idEvent));
+                      VBOX_SHCL_CONTEXTID_MAKE(pClient->State.uSessionID, ShClTransferGetID(pTransfer), pEvent->idEvent));
         HGCMSvcSetU32(&pMsgEntry->aParms[1], 0 /* fFeatures */);
         HGCMSvcSetU64(&pMsgEntry->aParms[2], idxEntry /* uIndex */);
 

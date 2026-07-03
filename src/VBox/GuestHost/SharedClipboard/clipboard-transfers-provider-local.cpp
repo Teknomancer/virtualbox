@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers-provider-local.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers-provider-local.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Transfers interface implementation for local file systems.
  */
@@ -384,14 +384,8 @@ static DECLCALLBACK(int) shclTransferIfaceLocalListClose(PSHCLTXPROVIDERCTX pCtx
         switch (pInfo->enmType)
         {
             case SHCLOBJTYPE_DIRECTORY:
-            {
-                if (RTDirIsValid(pInfo->u.Local.hDir))
-                {
-                    RTDirClose(pInfo->u.Local.hDir);
-                    pInfo->u.Local.hDir = NIL_RTDIR;
-                }
+            case SHCLOBJTYPE_FILE:
                 break;
-            }
 
             default:
                 rc = VERR_NOT_SUPPORTED;
@@ -403,6 +397,7 @@ static DECLCALLBACK(int) shclTransferIfaceLocalListClose(PSHCLTXPROVIDERCTX pCtx
         Assert(pTransfer->cListHandles);
         pTransfer->cListHandles--;
 
+        ShClTransferListHandleInfoDestroy(pInfo);
         RTMemFree(pInfo);
     }
     else
@@ -555,7 +550,7 @@ static DECLCALLBACK(int) shclTransferIfaceLocalListEntryRead(PSHCLTXPROVIDERCTX 
 
                             case RTFS_TYPE_SYMLINK:
                             {
-                                rc = VERR_NOT_IMPLEMENTED; /** @todo Not implemented yet. */
+                                fSkipEntry = true;
                                 break;
                             }
 
@@ -587,7 +582,7 @@ static DECLCALLBACK(int) shclTransferIfaceLocalListEntryRead(PSHCLTXPROVIDERCTX 
                 RTFSOBJINFO objInfo;
                 rc = RTFileQueryInfo(pInfo->u.Local.hFile, &objInfo, RTFSOBJATTRADD_NOTHING);
                 if (RT_SUCCESS(rc))
-                    rc = shclTransferIfaceLocalListEntryInit(pEntry, pInfo->pszPathLocalAbs, &objInfo);
+                    rc = shclTransferIfaceLocalListEntryInit(pEntry, RTPathFilename(pInfo->pszPathLocalAbs), &objInfo);
 
                 break;
             }
@@ -645,7 +640,16 @@ static DECLCALLBACK(int) shclTransferIfaceLocalObjOpen(PSHCLTXPROVIDERCTX pCtx,
                         {
                             rc = RTFileOpen(&pInfo->u.Local.hFile, pInfo->pszPathLocalAbs, fOpen | RTFILE_O_NO_SYMLINKS);
                             if (RT_SUCCESS(rc))
-                                LogRel2(("Shared Clipboard: Opened file '%s'\n", pInfo->pszPathLocalAbs));
+                            {
+                                rc = ShClFsObjInfoFromIPRT(&pCreateParms->ObjInfo, &objInfo);
+                                if (RT_SUCCESS(rc))
+                                    LogRel2(("Shared Clipboard: Opened file '%s'\n", pInfo->pszPathLocalAbs));
+                                else
+                                {
+                                    RTFileClose(pInfo->u.Local.hFile);
+                                    pInfo->u.Local.hFile = NIL_RTFILE;
+                                }
+                            }
                             else
                                 LogRel(("Shared Clipboard: Error opening file '%s': rc=%Rrc\n", pInfo->pszPathLocalAbs, rc));
                         }
@@ -808,7 +812,10 @@ static DECLCALLBACK(int) shclTransferIfaceLocalObjWrite(PSHCLTXPROVIDERCTX pCtx,
         {
             case SHCLOBJTYPE_FILE:
             {
-                rc = RTFileWrite(pInfo->u.Local.hFile, pvData, cbData, (size_t *)pcbWritten);
+                size_t cbWritten = 0;
+                rc = RTFileWrite(pInfo->u.Local.hFile, pvData, cbData, &cbWritten);
+                if (RT_SUCCESS(rc) && pcbWritten)
+                    *pcbWritten = (uint32_t)cbWritten;
                 break;
             }
 

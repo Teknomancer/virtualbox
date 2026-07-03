@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferManagerImpl.h 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferManagerImpl.h 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer manager object.
  */
@@ -33,6 +33,10 @@
 
 #include "ClipboardTransferManagerWrap.h"
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include <VBox/GuestHost/SharedClipboard-transfers.h>
+#endif
+
 #include <vector>
 
 class Clipboard;
@@ -55,20 +59,49 @@ public:
 
     /** Resets the internally tracked transfer list. */
     void i_reset();
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    HRESULT i_handleTransferStatus(SHCLSESSIONID aServiceSessionId,
+                                   SHCLTRANSFERID aTransferId,
+                                   SHCLTRANSFERGEN aGeneration,
+                                   SHCLSOURCE enmShClSource,
+                                   SHCLTRANSFERSTATUS enmStatus,
+                                   int vrcTransfer);
+    HRESULT i_cancelTransferById(ULONG aTransferId);
+#endif
 
 private:
 
     void i_fireTransferEvent(IClipboardTransfer *aTransfer,
                              ClipboardTransferState_T aState,
+                             ClipboardTransferInteraction_T aInteraction,
+                             const com::Utf8Str &aPath,
                              const com::Utf8Str &aMessage,
                              ClipboardError_T aError);
 
     /** @name Wrapped IClipboardTransferManager properties and methods
      * @{ */
-    HRESULT getTransfers(std::vector<ComPtr<IClipboardTransfer> > &aTransfers);
+    HRESULT getTransfers(ClipboardTransferDirection_T aDirection,
+                          ULONG aFlags,
+                          std::vector<ComPtr<IClipboardTransfer> > &aTransfers);
+    HRESULT createTransfer(ClipboardTransferDirection_T aDirection,
+                           ClipboardSource_T aSource,
+                           ClipboardAction_T aAction,
+                           ComPtr<IClipboardTransfer> &aTransfer);
     HRESULT add(const ComPtr<IClipboardTransfer> &aTransfer);
     HRESULT remove(const ComPtr<IClipboardTransfer> &aTransfer);
     HRESULT cancel(const ComPtr<IClipboardTransfer> &aTransfer);
+    HRESULT approve(const ComPtr<IClipboardTransfer> &aTransfer,
+                    ULONG aFlags);
+    HRESULT deny(const ComPtr<IClipboardTransfer> &aTransfer,
+                 const com::Utf8Str &aReason);
+    HRESULT respond(const ComPtr<IClipboardTransfer> &aTransfer,
+                    ClipboardTransferInteraction_T aInteraction,
+                    const com::Utf8Str &aPath,
+                    ClipboardTransferResponse_T aResponse,
+                    const com::Utf8Str &aResponsePath,
+                    ULONG aFlags);
+    HRESULT pause(const ComPtr<IClipboardTransfer> &aTransfer);
+    HRESULT resume(const ComPtr<IClipboardTransfer> &aTransfer);
     HRESULT reset();
     /** @} */
 
@@ -76,14 +109,54 @@ private:
     {
         Data()
             : mParent(NULL)
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+            , mNextTransferId(1)
+#endif
         { }
+
+        struct TransferRecord
+        {
+            TransferRecord()
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+                : mServiceSessionId(NIL_SHCLSESSIONID)
+                , mTransferId(0)
+                , mGeneration(NIL_SHCLTRANSFERGEN)
+                , mStatus(SHCLTRANSFERSTATUS_NONE)
+                , mState(ClipboardTransferState_Added)
+                , mfTerminal(false)
+                , mfCancelRequested(false)
+                , mfPublished(false)
+#endif
+            { }
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+            SHCLSESSIONID                    mServiceSessionId;
+            ULONG                            mTransferId;
+            SHCLTRANSFERGEN                  mGeneration;
+            SHCLTRANSFERSTATUS               mStatus;
+            ClipboardTransferState_T         mState;
+            bool                             mfTerminal;
+            bool                             mfCancelRequested;
+#endif
+            ComPtr<IClipboardTransfer>       mTransfer;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+            /** Whether the transfer is visible through getTransfers(). */
+            bool                             mfPublished;
+            ComPtr<IProgress>                mProgress;
+            ComPtr<IInternalProgressControl> mProgressControl;
+#endif
+        };
 
         /** Parent clipboard object. */
         Clipboard *mParent;
         /** Clipboard event source. */
         ComPtr<IEventSource> mEventSource;
-        /** Current clipboard transfers. */
-        std::vector<ComPtr<IClipboardTransfer> > mTransfers;
+        /** Current clipboard transfer records. */
+        std::vector<TransferRecord> mTransfers;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        /** Next Main-created transfer identifier. */
+        ULONG mNextTransferId;
+#endif
     } mData;
 };
 

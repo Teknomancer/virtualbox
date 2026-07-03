@@ -1558,6 +1558,130 @@
   </enum>
 
   <enum
+    name="ClipboardTransferDirection"
+    uuid="87e953aa-cf26-4f57-8db9-1b0cf93d66d6"
+    >
+    <desc>
+      Clipboard file transfer direction.
+    </desc>
+
+    <const name="Any"               value="0">
+      <desc>Any transfer direction.</desc>
+    </const>
+    <const name="ToGuest"           value="1">
+      <desc>Transfer data from host or another external source to the guest.</desc>
+    </const>
+    <const name="ToHost"            value="2">
+      <desc>Transfer data from the guest to the host or another external receiver.</desc>
+    </const>
+  </enum>
+
+  <enum
+    name="ClipboardTransferDataType"
+    uuid="d0ea2678-657c-4c88-a1bc-860ddc9860af"
+    >
+    <desc>
+      Clipboard transfer data-plane object type.
+    </desc>
+
+    <const name="RootList"          value="0">
+      <desc>The transfer root list. Use the data handle as a zero-based root-list entry index for reads.</desc>
+    </const>
+    <const name="List"              value="1">
+      <desc>A transfer directory/list handle.</desc>
+    </const>
+    <const name="Object"            value="2">
+      <desc>A transfer object handle.</desc>
+    </const>
+  </enum>
+
+
+
+  <enum
+    name="ClipboardTransferListFlag"
+    uuid="bbd053b1-0a44-4da4-9b29-764ccebb6d79"
+    >
+    <desc>
+      Clipboard transfer listing flags. Values are used as a bit mask.
+    </desc>
+
+    <const name="None"              value="0">
+      <desc>Default listing behavior. Directory listings are recursive.</desc>
+    </const>
+    <const name="NoRecursion"       value="1">
+      <desc>Only list the immediate children of the requested directory.</desc>
+    </const>
+    <const name="IncludeRoot"       value="2">
+      <desc>Include the requested root node itself in the returned list.</desc>
+    </const>
+    <const name="NoFollowSymlinks"  value="4">
+      <desc>Do not follow symbolic links while listing.</desc>
+    </const>
+  </enum>
+
+  <enum
+    name="ClipboardTransferInteraction"
+    uuid="c3e1c3d3-ff60-46bc-a5be-a6d2e31fbd40"
+    >
+    <desc>
+      Clipboard transfer interaction requested from an API client.
+    </desc>
+
+    <const name="None"              value="0">
+      <desc>No interaction is requested.</desc>
+    </const>
+    <const name="Approval"          value="1">
+      <desc>The transfer requires client approval before continuing.</desc>
+    </const>
+    <const name="Destination"       value="2">
+      <desc>The transfer requires a destination decision.</desc>
+    </const>
+    <const name="Overwrite"         value="3">
+      <desc>The transfer requires an overwrite decision.</desc>
+    </const>
+    <const name="Rename"            value="4">
+      <desc>The transfer requires a rename decision.</desc>
+    </const>
+    <const name="ErrorRecovery"     value="5">
+      <desc>The transfer requires a retry, skip, cancel, or similar recovery decision.</desc>
+    </const>
+  </enum>
+
+  <enum
+    name="ClipboardTransferResponse"
+    uuid="582a4709-16f1-4955-b408-47e290ad9252"
+    >
+    <desc>
+      Response to a clipboard transfer interaction request.
+    </desc>
+
+    <const name="None"              value="0">
+      <desc>No response.</desc>
+    </const>
+    <const name="Accept"            value="1">
+      <desc>Accept or approve the requested interaction.</desc>
+    </const>
+    <const name="Reject"            value="2">
+      <desc>Reject or deny the requested interaction.</desc>
+    </const>
+    <const name="Overwrite"         value="3">
+      <desc>Overwrite the destination object.</desc>
+    </const>
+    <const name="Skip"              value="4">
+      <desc>Skip the current transfer object.</desc>
+    </const>
+    <const name="Rename"            value="5">
+      <desc>Rename the current transfer object.</desc>
+    </const>
+    <const name="Cancel"            value="6">
+      <desc>Cancel the transfer.</desc>
+    </const>
+    <const name="Retry"             value="7">
+      <desc>Retry the failed operation.</desc>
+    </const>
+  </enum>
+
+  <enum
     name="ClipboardTransferState"
     uuid="2b757ce6-a55c-466a-8a41-7f4e0ddc34ed"
     >
@@ -15753,13 +15877,168 @@
   </interface>
 
   <interface
+    name="IClipboardTransferData" extends="$unknown"
+    uuid="a0c987e7-800d-4586-a33a-14c0baadb77e"
+    wsmap="managed"
+    reservedMethods="8" reservedAttributes="4"
+    >
+    <desc>
+      Low-level clipboard transfer data plane.
+
+      This interface exposes the raw Shared Clipboard transfer root, list and object
+      primitives for advanced callers, protocol diagnostics and compatibility with
+      the underlying transfer backend. Normal clients should use
+      <link to="IClipboardTransfer::roots"/>, <link to="IClipboardTransfer::list"/>,
+      <link to="IClipboardTransfer::openDirectory"/> and
+      <link to="IClipboardTransfer::openFile"/> instead.
+
+      Handles returned by this interface are scoped to the parent
+      <link to="IClipboardTransfer"/> object and must be closed with
+      <link to="IClipboardTransferData::close"/> when they represent a list or object.
+      The root-list type returns a count/index space, not a persistent handle, and
+      does not need to be closed. Transfer paths are relative to the transfer root
+      and are still validated by the
+      Shared Clipboard transfer core before provider dispatch.
+
+      A low-level reader typically obtains this object from
+      <link to="IClipboardTransfer::data"/>, calls
+      <link to="IClipboardTransferData::open"/> with
+      <tt>ClipboardTransferDataType_RootList</tt> to discover root entries, opens a
+      list or object handle with <tt>ClipboardTransferDataType_List</tt> or
+      <tt>ClipboardTransferDataType_Object</tt>, reads metadata or payload chunks with
+      <link to="IClipboardTransferData::read"/>, and closes list/object handles with
+      <link to="IClipboardTransferData::close"/>. A low-level writer uses the same
+      object to write list entries and object bytes with
+      <link to="IClipboardTransferData::write"/> when the transfer direction and
+      provider support writable content.
+    </desc>
+
+    <method name="open">
+      <desc>
+        Opens or prepares a transfer data-plane object.
+
+        For <tt>ClipboardTransferDataType_RootList</tt>, this returns the current number of
+        root entries as the handle value. For <tt>ClipboardTransferDataType_List</tt>, this
+        opens a list at @a path and returns a list handle. For
+        <tt>ClipboardTransferDataType_Object</tt>, this opens an object at @a path using
+        Shared Clipboard object-open flags and returns an object handle.
+      </desc>
+      <param name="type" type="ClipboardTransferDataType" dir="in">
+        <desc>Transfer data-plane object type.</desc>
+      </param>
+      <param name="path" type="wstring" dir="in">
+        <desc>Relative transfer path, or empty for the root list.</desc>
+      </param>
+      <param name="filter" type="wstring" dir="in">
+        <desc>Optional list filter. Ignored for non-list objects.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>Shared Clipboard list or object-open flags.</desc>
+      </param>
+      <param name="handle" type="long long" dir="return">
+        <desc>Opened handle, or root-list entry count for the root-list type.</desc>
+      </param>
+    </method>
+
+    <method name="close">
+      <desc>
+        Closes an opened transfer list or object handle. Root-list counts returned by
+        <link to="IClipboardTransferData::open"/> are not persistent handles and do not
+        need to be closed.
+      </desc>
+      <param name="type" type="ClipboardTransferDataType" dir="in">
+        <desc>Transfer data-plane object type.</desc>
+      </param>
+      <param name="handle" type="long long" dir="in">
+        <desc>Handle returned by <link to="IClipboardTransferData::open"/>.</desc>
+      </param>
+    </method>
+
+    <method name="read">
+      <desc>
+        Reads from the transfer data plane.
+
+        Root-list and list reads return entry metadata in @a name, @a infoFlags and @a info.
+        Object reads return payload bytes in @a data. All guest, host and
+        filesystem-controlled metadata remains validated by the Shared Clipboard transfer
+        core before being returned.
+      </desc>
+      <param name="type" type="ClipboardTransferDataType" dir="in">
+        <desc>Transfer data-plane object type.</desc>
+      </param>
+      <param name="handle" type="long long" dir="in">
+        <desc>Root-list index, list handle, or object handle.</desc>
+      </param>
+      <param name="size" type="unsigned long" dir="in">
+        <desc>Maximum object bytes to read. Ignored for root-list and list entry reads.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>Read flags. Must currently be zero.</desc>
+      </param>
+      <param name="name" type="wstring" dir="out">
+        <desc>Root/list entry name, or empty for object reads.</desc>
+      </param>
+      <param name="infoFlags" type="unsigned long" dir="out">
+        <desc>Shared Clipboard entry information flags.</desc>
+      </param>
+      <param name="info" type="octet" safearray="yes" dir="out">
+        <desc>Shared Clipboard entry information payload.</desc>
+      </param>
+      <param name="data" type="octet" safearray="yes" dir="return">
+        <desc>Object payload bytes, empty for root/list entry reads.</desc>
+      </param>
+    </method>
+
+    <method name="write">
+      <desc>
+        Writes to the transfer data plane.
+
+        List writes consume @a name, @a infoFlags and @a info as a list entry. Object writes
+        consume @a data as the payload to write. Root-list writes are not supported by this
+        method. Writable provider support is provider- and direction-dependent.
+      </desc>
+      <param name="type" type="ClipboardTransferDataType" dir="in">
+        <desc>Transfer data-plane object type.</desc>
+      </param>
+      <param name="handle" type="long long" dir="in">
+        <desc>List or object handle returned by <link to="IClipboardTransferData::open"/>.</desc>
+      </param>
+      <param name="name" type="wstring" dir="in">
+        <desc>List entry name. Ignored for object writes.</desc>
+      </param>
+      <param name="infoFlags" type="unsigned long" dir="in">
+        <desc>Shared Clipboard entry information flags.</desc>
+      </param>
+      <param name="info" type="octet" safearray="yes" dir="in">
+        <desc>Shared Clipboard entry information payload.</desc>
+      </param>
+      <param name="data" type="octet" safearray="yes" dir="in">
+        <desc>Object payload bytes. Ignored for list writes.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>Write flags. Must currently be zero.</desc>
+      </param>
+      <param name="written" type="unsigned long" dir="return">
+        <desc>Number of object bytes written, or zero for list writes.</desc>
+      </param>
+    </method>
+  </interface>
+
+  <interface
     name="IClipboardTransfer" extends="$unknown"
-    uuid="77806335-7ab1-4083-89e5-e3a6836861b4"
+    uuid="d0897a02-ce1d-4ce6-afa1-9e6b2b7cc4dd"
     wsmap="managed"
     reservedMethods="4" reservedAttributes="8"
     >
     <desc>
       Single clipboard transfer.
+
+      A clipboard transfer is a filesystem-like transfer tree. It can contain files,
+      directories, recursively listed directory contents, and virtual or generated
+      nodes that do not necessarily exist as source filesystem objects. Normal clients
+      should use the root, query, list, file and directory abstractions. Advanced callers
+      can use the integral <link to="IClipboardTransfer::data"/> object for low-level
+      root/list/object data-plane access.
     </desc>
 
     <attribute name="id" type="unsigned long" readonly="yes">
@@ -15768,9 +16047,27 @@
       </desc>
     </attribute>
 
+    <attribute name="direction" type="ClipboardTransferDirection" readonly="yes">
+      <desc>
+        Transfer direction.
+      </desc>
+    </attribute>
+
+    <attribute name="source" type="ClipboardSource" readonly="yes">
+      <desc>
+        Clipboard source which owns or advertised the transfer.
+      </desc>
+    </attribute>
+
     <attribute name="action" type="ClipboardAction" readonly="yes">
       <desc>
         Clipboard action associated with the transfer.
+      </desc>
+    </attribute>
+
+    <attribute name="state" type="ClipboardTransferState" readonly="yes">
+      <desc>
+        Current transfer state.
       </desc>
     </attribute>
 
@@ -15785,11 +16082,222 @@
         Progress object used to track transfer completion.
       </desc>
     </attribute>
+
+    <attribute name="message" type="wstring" readonly="yes">
+      <desc>
+        Optional transfer status or interaction message.
+      </desc>
+    </attribute>
+
+    <attribute name="error" type="ClipboardError" readonly="yes">
+      <desc>
+        Last transfer error.
+      </desc>
+    </attribute>
+
+    <attribute name="data" type="IClipboardTransferData" readonly="yes">
+      <desc>
+        Low-level transfer data-plane interface for advanced callers. This object is
+        an integral part of the transfer and exposes raw root-list, directory/list and
+        object handles below the filesystem-like transfer tree abstraction. Prefer the
+        high-level <link to="IClipboardTransfer::roots"/>,
+        <link to="IClipboardTransfer::list"/>,
+        <link to="IClipboardTransfer::openDirectory"/> and
+        <link to="IClipboardTransfer::openFile"/> methods unless protocol-level access
+        is required.
+      </desc>
+    </attribute>
+
+    <method name="roots">
+      <desc>
+        Returns the transfer root nodes as transfer-relative filesystem objects.
+
+        The returned nodes describe what the receiver of the transfer sees at the
+        top level of the transfer tree. They are not necessarily identical to, and
+        must not be interpreted as, producer-side filesystem paths. For a local
+        host-to-guest transfer created with <link to="IClipboardTransfer::setSourcePaths"/>,
+        roots are derived from the configured source paths, normally using the
+        final path component as the transfer-relative root name. For guest-to-host,
+        remote, or virtual transfers, roots may be advertised by the remote peer or
+        generated by a provider even when <link to="IClipboardTransfer::getSourcePaths"/>
+        returns an empty array.
+
+        Examples:
+        <ul>
+          <li>After configuring source paths <tt>["/home/user/report.txt"]</tt>,
+          <link to="IClipboardTransfer::roots"/> may return one file node with path
+          <tt>report.txt</tt>. A receiver opens it as <tt>report.txt</tt>, not as
+          <tt>/home/user/report.txt</tt>.</li>
+          <li>After configuring <tt>["/home/user/photos"]</tt>, roots may return one
+          directory node with path <tt>photos</tt>. Its children are addressed with
+          transfer-relative paths such as <tt>photos/img001.jpg</tt>.</li>
+          <li>After configuring <tt>["/tmp/a.txt", "/tmp/b.txt"]</tt>, roots may
+          return two file nodes, <tt>a.txt</tt> and <tt>b.txt</tt>. The two local
+          source paths therefore form one transfer with two roots.</li>
+          <li>A virtual provider may return a root such as <tt>generated-report/</tt>
+          even though there is no corresponding local source path.</li>
+        </ul>
+      </desc>
+      <param name="nodes" type="IClipboardTransferFsObjInfo" safearray="yes" dir="return">
+        <desc>Top-level transfer-relative root nodes visible to the receiver.</desc>
+      </param>
+    </method>
+
+    <method name="query">
+      <desc>
+        Queries a transfer-relative node.
+      </desc>
+      <param name="path" type="wstring" dir="in">
+        <desc>Transfer-relative normalized path.</desc>
+      </param>
+      <param name="node" type="IClipboardTransferFsObjInfo" dir="return">
+        <desc>Information about the transfer node.</desc>
+      </param>
+    </method>
+
+    <method name="list">
+      <desc>
+        Lists a transfer directory. By default directory listing is recursive; use
+        <link to="ClipboardTransferListFlag_NoRecursion"/> to list immediate children only.
+      </desc>
+      <param name="path" type="wstring" dir="in">
+        <desc>Transfer-relative directory path, or empty for the transfer root.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>ClipboardTransferListFlag mask.</desc>
+      </param>
+      <param name="nodes" type="IClipboardTransferFsObjInfo" safearray="yes" dir="return">
+        <desc>Returned transfer nodes.</desc>
+      </param>
+    </method>
+
+    <method name="openDirectory">
+      <desc>
+        Opens a transfer directory handle. Use <link to="IClipboardTransfer::roots"/>
+        or <link to="IClipboardTransfer::list"/> with an empty path to inspect the
+        transfer root; this method opens a concrete transfer directory path and may
+        reject an empty path.
+      </desc>
+      <param name="path" type="wstring" dir="in">
+        <desc>Transfer-relative directory path.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>ClipboardTransferListFlag mask.</desc>
+      </param>
+      <param name="directory" type="IClipboardTransferDirectory" dir="return">
+        <desc>Opened transfer directory.</desc>
+      </param>
+    </method>
+
+    <method name="openFile">
+      <desc>
+        Opens a transfer file handle. The current local-provider implementation supports
+        read-only access to existing transfer files. Writable or newly-created virtual
+        file handles are reserved for providers which explicitly implement writable
+        transfer trees and may return E_NOTIMPL otherwise.
+      </desc>
+      <param name="path" type="wstring" dir="in">
+        <desc>Transfer-relative file path.</desc>
+      </param>
+      <param name="accessMode" type="FileAccessMode" dir="in">
+        <desc>File access mode.</desc>
+      </param>
+      <param name="openAction" type="FileOpenAction" dir="in">
+        <desc>File open action.</desc>
+      </param>
+      <param name="sharingMode" type="FileSharingMode" dir="in">
+        <desc>File sharing mode.</desc>
+      </param>
+      <param name="creationMode" type="unsigned long" dir="in">
+        <desc>UNIX-style creation mode for newly created files.</desc>
+      </param>
+      <param name="file" type="IClipboardTransferFile" dir="return">
+        <desc>Opened transfer file.</desc>
+      </param>
+    </method>
+
+    <method name="createDirectory">
+      <desc>
+        Creates a directory in a writable or virtual transfer tree. Providers which only
+        expose read-only transfer contents return E_NOTIMPL.
+      </desc>
+      <param name="path" type="wstring" dir="in">
+        <desc>Transfer-relative directory path.</desc>
+      </param>
+    </method>
+
+    <method name="setSourcePaths">
+      <desc>
+        Sets the producer-side local filesystem paths backing this transfer.
+
+        Source paths are configuration input for a Main-created local transfer;
+        they are not transfer paths and are not exposed to the receiver as-is. For
+        a host-to-guest transfer created by Main, this method creates or replaces
+        the local-provider backend for the transfer. The visible transfer tree is
+        inspected through <link to="IClipboardTransfer::roots"/> and addressed with
+        transfer-relative paths returned by that method and by
+        <link to="IClipboardTransfer::list"/>.
+
+        The distinction is important:
+        <ul>
+          <li><tt>sourcePaths</tt> name existing local producer-side objects, for
+          example <tt>/home/user/report.txt</tt> or <tt>C:\Users\User\report.txt</tt>.</li>
+          <li><link to="IClipboardTransfer::roots"/> returns transfer-relative nodes
+          visible to the receiver, for example <tt>report.txt</tt>. Receivers must
+          use those transfer-relative names for <link to="IClipboardTransfer::query"/>,
+          <link to="IClipboardTransfer::list"/>, <link to="IClipboardTransfer::openDirectory"/>
+          and <link to="IClipboardTransfer::openFile"/>.</li>
+          <li>Remote or virtual transfers can expose roots without any local source
+          paths, so callers must not require <link to="IClipboardTransfer::getSourcePaths"/>
+          to be non-empty before using <link to="IClipboardTransfer::roots"/>.</li>
+        </ul>
+
+        Examples:
+        <ul>
+          <li>Calling <tt>setSourcePaths(["/home/user/report.txt"])</tt> publishes
+          the local file as a transfer root such as <tt>report.txt</tt>.</li>
+          <li>Calling <tt>setSourcePaths(["/home/user/photos"])</tt> publishes the
+          local directory as a root such as <tt>photos</tt>; directory contents are
+          then addressed as transfer-relative paths below that root.</li>
+          <li>Calling <tt>setSourcePaths(["/tmp/a.txt", "/tmp/b.txt"])</tt> creates
+          one transfer with two roots, not two independent transfers.</li>
+        </ul>
+
+        Empty path entries, entries containing transfer-list separators, and unsupported
+        direction/source combinations are rejected.
+      </desc>
+      <param name="sourcePaths" type="wstring" safearray="yes" dir="in">
+        <desc>Producer-side local filesystem paths used to create the transfer roots.</desc>
+      </param>
+    </method>
+
+    <method name="getSourcePaths">
+      <desc>
+        Returns the producer-side local filesystem paths explicitly configured for
+        this transfer.
+
+        The returned values are the same kind of local paths accepted by
+        <link to="IClipboardTransfer::setSourcePaths"/>. They are useful for a local
+        producer or management UI that wants to show or verify what local objects
+        were offered. They are not the portable transfer names used by the receiver;
+        use <link to="IClipboardTransfer::roots"/> to discover those names.
+
+        For example, a local host-to-guest transfer may return
+        <tt>["/home/user/report.txt"]</tt> from this method while
+        <link to="IClipboardTransfer::roots"/> returns a root node named
+        <tt>report.txt</tt>. A remote guest-to-host transfer or a virtual provider may
+        return an empty array here while still returning one or more roots.
+      </desc>
+      <param name="sourcePaths" type="wstring" safearray="yes" dir="return">
+        <desc>Configured producer-side local filesystem paths.</desc>
+      </param>
+    </method>
+
   </interface>
 
   <interface
     name="IClipboardTransferManager" extends="$unknown"
-    uuid="d716987d-ee39-41c5-8234-7ec8e0ffa629"
+    uuid="9a02f603-2d55-4c20-aed0-d70f4af2c55b"
     wsmap="managed"
     reservedMethods="8" reservedAttributes="4"
     >
@@ -15797,11 +16305,22 @@
       Clipboard transfer manager.
     </desc>
 
-    <attribute name="transfers" type="IClipboardTransfer" safearray="yes" readonly="yes">
+    <method name="getTransfers">
       <desc>
-        Current clipboard transfers.
+        Returns all clipboard transfers matching the requested direction and flags.
+        Multiple copied files normally appear as one transfer with multiple roots,
+        not one transfer per copied file.
       </desc>
-    </attribute>
+      <param name="direction" type="ClipboardTransferDirection" dir="in">
+        <desc>Transfer direction to match, or Any for all directions.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>Reserved query flags. Must currently be zero.</desc>
+      </param>
+      <param name="transfers" type="IClipboardTransfer" safearray="yes" dir="return">
+        <desc>Matching clipboard transfers.</desc>
+      </param>
+    </method>
 
     <method name="add">
       <desc>
@@ -15830,10 +16349,103 @@
       </param>
     </method>
 
+    <method name="approve">
+      <desc>
+        Approves a transfer waiting for client approval.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to approve.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>Reserved approval flags. Must currently be zero.</desc>
+      </param>
+    </method>
+
+    <method name="deny">
+      <desc>
+        Denies a transfer waiting for client approval.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to deny.</desc>
+      </param>
+      <param name="reason" type="wstring" dir="in">
+        <desc>Optional denial reason.</desc>
+      </param>
+    </method>
+
+    <method name="respond">
+      <desc>
+        Supplies a response to a transfer interaction request.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer waiting for interaction.</desc>
+      </param>
+      <param name="interaction" type="ClipboardTransferInteraction" dir="in">
+        <desc>Interaction being answered.</desc>
+      </param>
+      <param name="path" type="wstring" dir="in">
+        <desc>Transfer-relative path associated with the interaction, or empty for the whole transfer.</desc>
+      </param>
+      <param name="response" type="ClipboardTransferResponse" dir="in">
+        <desc>Client response.</desc>
+      </param>
+      <param name="responsePath" type="wstring" dir="in">
+        <desc>
+          Optional transfer-relative path supplied by the response, for example
+          the selected destination directory or replacement name for rename
+          interactions. Empty when the response has no path payload.
+        </desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>Reserved response flags. Must currently be zero.</desc>
+      </param>
+    </method>
+
+    <method name="pause">
+      <desc>
+        Pauses a running transfer when supported.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to pause.</desc>
+      </param>
+    </method>
+
+    <method name="resume">
+      <desc>
+        Resumes a paused transfer when supported.
+      </desc>
+      <param name="transfer" type="IClipboardTransfer" dir="in">
+        <desc>Clipboard transfer to resume.</desc>
+      </param>
+    </method>
+
     <method name="reset">
       <desc>
         Resets all clipboard transfers tracked by the manager.
       </desc>
+    </method>
+
+    <method name="createTransfer">
+      <desc>
+        Creates an unpublished clipboard transfer owned by Main. The returned
+        transfer can be configured, for example by calling
+        <link to="IClipboardTransfer::setSourcePaths"/>, and then published with
+        <link to="IClipboardTransferManager::add"/>. The transfer is not visible
+        through <link to="IClipboardTransferManager::getTransfers"/> until it is
+        added.
+      </desc>
+      <param name="direction" type="ClipboardTransferDirection" dir="in">
+        <desc>Transfer direction. Use ToGuest for host-local source paths.</desc>
+      </param>
+      <param name="source" type="ClipboardSource" dir="in">
+        <desc>Clipboard source owning the new transfer.</desc>
+      </param>
+      <param name="action" type="ClipboardAction" dir="in">
+        <desc>Clipboard action associated with the new transfer.</desc>
+      </param>
+      <param name="transfer" type="IClipboardTransfer" dir="return">
+        <desc>Created unpublished transfer.</desc>
+      </param>
     </method>
   </interface>
 
@@ -16049,10 +16661,10 @@
 
   <interface
     name="IClipboard" extends="$unknown"
-    uuid="ee497f25-37cd-4b33-902f-355d44c84513"
+    uuid="2f6b9fab-289a-4507-95eb-1060b2d71ed7"
     wsmap="managed"
     wrap-hint-server-addinterfaces="IInternalClipboardControl"
-    reservedMethods="6" reservedAttributes="7"
+    reservedMethods="8" reservedAttributes="8"
     >
     <desc>
       Clipboard interface for a console session.
@@ -16184,11 +16796,6 @@
       </ul>
     </desc>
 
-    <attribute name="fileList" type="wstring" safearray="yes">
-      <desc>
-        Clipboard file list represented as host paths.
-      </desc>
-    </attribute>
 
     <attribute name="transfers" type="IClipboardTransferManager" readonly="yes">
       <desc>
@@ -18478,6 +19085,40 @@
   </interface>
 
   <interface
+    name="IClipboardTransferDirectory" extends="IDirectory"
+    uuid="823b61e2-6850-4884-b8d9-27cda72d970e"
+    wsmap="managed"
+    reservedMethods="4" reservedAttributes="4"
+    >
+    <desc>
+      Open directory handle inside a clipboard transfer tree.
+    </desc>
+
+    <attribute name="path" type="wstring" readonly="yes">
+      <desc>Transfer-relative normalized path of this opened directory.</desc>
+    </attribute>
+
+
+    <method name="listEx">
+      <desc>
+        Lists transfer directory entries with clipboard-specific metadata. By default
+        listing is recursive; use <link to="ClipboardTransferListFlag_NoRecursion"/> for direct children only.
+        Non-recursive enumeration consumes the opened directory handle position; use
+        <link to="IDirectory::rewind"/> before reading the entries again.
+      </desc>
+      <param name="maxEntries" type="unsigned long" dir="in">
+        <desc>Maximum entries to return. Zero means implementation default.</desc>
+      </param>
+      <param name="flags" type="unsigned long" dir="in">
+        <desc>ClipboardTransferListFlag mask.</desc>
+      </param>
+      <param name="entries" type="IClipboardTransferFsObjInfo" safearray="yes" dir="return">
+        <desc>Directory entries.</desc>
+      </param>
+    </method>
+  </interface>
+
+  <interface
     name="IFile" extends="$unknown"
     uuid="59a235ac-2f1a-4d6c-81fc-e3fa843f49ae"
     wsmap="managed"
@@ -18738,6 +19379,25 @@
   </interface>
 
   <interface
+    name="IClipboardTransferFile" extends="IFile"
+    uuid="1fd07de1-80b1-411b-bba5-6775fd5e7575"
+    wsmap="managed"
+    reservedAttributes="4"
+    >
+    <desc>
+      Open file handle inside a clipboard transfer tree. The inherited IFile write,
+      truncate and ACL methods are only available for writable providers; read-only
+      transfer files return E_NOTIMPL or a provider-specific access error for those
+      operations.
+    </desc>
+
+    <attribute name="path" type="wstring" readonly="yes">
+      <desc>Transfer-relative normalized path of this opened file.</desc>
+    </attribute>
+
+  </interface>
+
+  <interface
     name="IFsInfo" extends="$unknown"
     uuid="3db2ab1a-6cf7-42f1-8bf5-e1c0553e0b30"
     wsmap="managed"
@@ -18955,6 +19615,26 @@
       <link to="IFsObjInfo" /> object.
     </desc>
     <attribute name="midlDoesNotLikeEmptyInterfaces" readonly="yes" type="boolean"/>
+  </interface>
+
+  <interface
+    name="IClipboardTransferFsObjInfo" extends="IFsObjInfo"
+    uuid="1505918e-52c2-4c6d-93ee-d8a193e9663e"
+    wsmap="managed"
+    reservedAttributes="9"
+    >
+    <desc>
+      File-system object information for a node in a clipboard transfer tree.
+      Inherited attributes describe the object itself; this interface adds the
+      transfer-relative path used by transfer APIs.
+    </desc>
+
+    <attribute name="path" type="wstring" readonly="yes">
+      <desc>
+        Transfer-relative normalized path. This is never absolute and never contains ascent components.
+      </desc>
+    </attribute>
+
   </interface>
 
   <interface
@@ -30070,7 +30750,7 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
 
   <interface
     name="IClipboardTransferEvent" extends="IEvent"
-    uuid="7ff45a50-ff9a-4d7a-af87-9d497b4bcca6"
+    uuid="c59fa3d1-1646-4ab3-9ecc-6101723c53f9"
     wsmap="managed" autogen="VBoxEvent" id="OnClipboardTransfer"
     >
     <desc>
@@ -30104,6 +30784,21 @@ Snapshot 1 (B.vdi)            Snapshot 1 (B.vdi)
     <attribute name="state" type="ClipboardTransferState" readonly="yes">
       <desc>
         New clipboard transfer state.
+      </desc>
+    </attribute>
+
+    <attribute name="interaction" type="ClipboardTransferInteraction" readonly="yes">
+      <desc>
+        Interaction requested from the client when state is
+        <tt>ClipboardTransferState_Interaction</tt>; otherwise <tt>None</tt>.
+      </desc>
+    </attribute>
+
+    <attribute name="path" type="wstring" readonly="yes">
+      <desc>
+        Optional transfer-relative path associated with the event, for example
+        the object causing an overwrite conflict. Empty if the event applies to
+        the whole transfer.
       </desc>
     </attribute>
 

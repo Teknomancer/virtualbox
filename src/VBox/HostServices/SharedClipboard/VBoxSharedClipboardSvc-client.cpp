@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-client.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-client.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Client/session and message queue handling.
  */
@@ -73,6 +73,35 @@ static bool shClSvcClientIsValidFormat(SHCLFORMAT uFormat)
            && (uFormat & (uFormat - 1)) == 0;
 }
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+static SHCLSESSIONID shClSvcClientAllocSessionId(void)
+{
+    bool const fOwnsSvcLock = RTCritSectIsOwner(&g_CritSect);
+    if (!fOwnsSvcLock)
+    {
+        int rc = RTCritSectEnter(&g_CritSect);
+        AssertRCReturn(rc, 1);
+    }
+
+    if (   g_idNextSession == 0
+        || g_idNextSession == NIL_SHCLSESSIONID)
+        g_idNextSession = 1;
+
+    SHCLSESSIONID const idSession = g_idNextSession++;
+    if (   g_idNextSession == 0
+        || g_idNextSession == NIL_SHCLSESSIONID)
+        g_idNextSession = 1;
+
+    if (!fOwnsSvcLock)
+    {
+        int rc = RTCritSectLeave(&g_CritSect);
+        AssertRC(rc);
+    }
+
+    return idSession;
+}
+#endif
+
 /**
  * Resets a client's state message queue.
  *
@@ -145,7 +174,11 @@ int ShClSvcClientInit(PSHCLCLIENT pClient, uint32_t uClientID)
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
             if (RT_SUCCESS(rc))
+            {
                 rc = ShClTransferCtxInit(&pClient->Transfers.Ctx);
+                if (RT_SUCCESS(rc))
+                    rc = ShClTransferCtxBeginSession(&pClient->Transfers.Ctx, pClient->State.uSessionID);
+            }
 #endif
         }
     }
@@ -220,6 +253,8 @@ void shClSvcClientReset(PSHCLCLIENT pClient)
     LogFlowFunc(("[Client %RU32]\n", pClient->State.uClientID));
     RTCritSectEnter(&pClient->CritSect);
 
+    uint32_t const uClientID = pClient->State.uClientID;
+
     /* Reset message queue. */
     shClSvcClientMsgQueueReset(pClient);
 
@@ -234,6 +269,17 @@ void shClSvcClientReset(PSHCLCLIENT pClient)
 #endif
 
     shClSvcClientStateReset(&pClient->State);
+    int rc2 = shClSvcClientStateInit(&pClient->State, uClientID);
+    AssertRC(rc2);
+    pClient->State.uMode = ShClSvcGetMode();
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    pClient->State.Transfers.uTransferMode = g_fTransferMode;
+    if (RT_SUCCESS(rc2))
+    {
+        rc2 = ShClTransferCtxBeginSession(&pClient->Transfers.Ctx, pClient->State.uSessionID);
+        AssertRC(rc2);
+    }
+#endif
 
     RTCritSectLeave(&pClient->CritSect);
 }
@@ -349,7 +395,7 @@ DECLCALLBACK(void) shClSvcClientCall(void *,
         case VBOX_SHCL_GUEST_FN_ERROR:
         {
             int rcGuest;
-            rc = shClSvcClientMsgError(cParms, paParms, &rcGuest);
+            rc = shClSvcClientMsgError(pClient, cParms, paParms, &rcGuest);
             if (RT_SUCCESS(rc))
             {
                 LogRel(("Shared Clipboard: Error reported from guest side: %Rrc\n", rcGuest));
@@ -1228,20 +1274,30 @@ int shClSvcClientMsgDataWrite(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCP
  * Implements the VBOX_SHCL_GUEST_FN_ERROR.
  *
  * @returns VBox status code.
+ * @param   pClient             Client reporting the error.
  * @param   cParms              Number of HGCM parameters supplied in \a paParms.
  * @param   paParms             Array of HGCM parameters.
  * @param   pRc                 Where to store the received error code.
  */
-int shClSvcClientMsgError(uint32_t cParms, VBOXHGCMSVCPARM paParms[], int *pRc)
+int shClSvcClientMsgError(PSHCLCLIENT pClient, uint32_t cParms, VBOXHGCMSVCPARM paParms[], int *pRc)
 {
-    AssertPtrReturn(paParms, VERR_INVALID_PARAMETER);
-    AssertPtrReturn(pRc,     VERR_INVALID_PARAMETER);
+    AssertPtrReturn(pClient,  VERR_INVALID_PARAMETER);
+    AssertPtrReturn(paParms,  VERR_INVALID_PARAMETER);
+    AssertPtrReturn(pRc,      VERR_INVALID_PARAMETER);
 
     int rc;
 
     if (cParms == VBOX_SHCL_CPARMS_ERROR)
     {
-        rc = HGCMSvcGetU32(&paParms[1], (uint32_t *)pRc); /** @todo int vs. uint32_t !!! */
+        uint64_t uContextID;
+        rc = HGCMSvcGetU64(&paParms[0], &uContextID);
+        if (RT_SUCCESS(rc))
+        {
+            if (VBOX_SHCL_CONTEXTID_GET_SESSION(uContextID) == pClient->State.uSessionID)
+                rc = HGCMSvcGetU32(&paParms[1], (uint32_t *)pRc); /** @todo int vs. uint32_t !!! */
+            else
+                rc = VERR_INVALID_CONTEXT;
+        }
     }
     else
         rc = VERR_INVALID_PARAMETER;
@@ -1264,7 +1320,10 @@ static int shClSvcClientStateInit(PSHCLCLIENTSTATE pClientState, uint32_t uClien
     shClSvcClientStateReset(pClientState);
 
     /* Register the client. */
-    pClientState->uClientID    = uClientID;
+    pClientState->uClientID = uClientID;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    pClientState->uSessionID = shClSvcClientAllocSessionId();
+#endif
 
     return VINF_SUCCESS;
 }

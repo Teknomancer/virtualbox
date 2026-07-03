@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.h 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.h 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -34,6 +34,9 @@
 #include "ClipboardWrap.h"
 
 #include <VBox/GuestHost/SharedClipboard.h>
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include <VBox/GuestHost/SharedClipboard-transfers.h>
+#endif
 
 #include <vector>
 
@@ -96,7 +99,18 @@ public:
                                       std::vector<ComPtr<IClipboardFormat> > &aFormats);
     LONG64 i_nextEventRevision();
     HRESULT i_reset();
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     HRESULT i_transferCancel(ULONG aTransferId);
+    HRESULT i_transferCancel(SHCLSESSIONID aServiceSessionId, SHCLTRANSFERID aTransferId, SHCLTRANSFERGEN aGeneration);
+    HRESULT i_handleTransferStatus(SHCLSESSIONID aServiceSessionId,
+                                   SHCLTRANSFERID aTransferId,
+                                   SHCLTRANSFERGEN aGeneration,
+                                   SHCLSOURCE enmShClSource,
+                                   SHCLTRANSFERSTATUS enmStatus,
+                                   int vrcTransfer);
+#else
+    HRESULT i_transferCancel(ULONG aTransferId);
+#endif
     HRESULT i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t cbData, uint32_t *pcbActual);
     HRESULT i_requestData(const com::Utf8Str &aMimeType, ULONG *aRequestId);
     HRESULT i_reportData(ClipboardAction_T aAction, ClipboardSource_T aSource, uint32_t fFormat, const void *pvData, uint32_t cbData);
@@ -115,7 +129,7 @@ public:
                                    ClipboardSource_T aSource,
                                    const com::Utf8Str &aMimeType,
                                    const std::vector<BYTE> &aBuffer);
-    HRESULT i_hostClipboardClear();
+    HRESULT i_hostClipboardClear(VBOXSHCLMAINCLIENTID aClientId);
     HRESULT i_registerSession(VBOXSHCLMAINCLIENTID aClientId,
                               ClipboardSession *aSession,
                               uint32_t fFlags,
@@ -123,16 +137,20 @@ public:
     void i_unregisterSession(VBOXSHCLMAINCLIENTID aClientId);
     HRESULT i_fireSessionInitialState(VBOXSHCLMAINCLIENTID aClientId);
 
-    void i_reportFormats(VBOXSHCLMAINCLIENTID aClientId,
+    bool i_reportFormats(VBOXSHCLMAINCLIENTID aClientId,
                          uint32_t fFormats,
                          ClipboardSource_T aSource,
-                         bool fForceNotify = false);
+                         bool fForceNotify = false,
+                         bool fRequireCurrentClientId = false,
+                         VBOXSHCLMAINCLIENTID aRequiredCurrentClientId = VBOX_SHCL_MAIN_CLIENT_NONE);
     void i_fireClipboardError(const com::Utf8Str &aId, const com::Utf8Str &aErrMsg, LONG aRc);
     void i_fireClipboardModeChanged(ClipboardMode_T aClipboardMode);
     void i_fireClipboardFileTransferModeChanged(bool fEnabled);
     void i_fireClipboardTransferEvent(VBOXSHCLMAINCLIENTID aClientId,
                                       IClipboardTransfer *aTransfer,
                                       ClipboardTransferState_T aState,
+                                      ClipboardTransferInteraction_T aInteraction,
+                                      const com::Utf8Str &aPath,
                                       const com::Utf8Str &aMessage,
                                       ClipboardError_T aError);
     int i_changeMode(ClipboardMode_T aClipboardMode);
@@ -142,8 +160,6 @@ private:
 
     /** @name Wrapped IClipboard properties and methods
      * @{ */
-    HRESULT getFileList(std::vector<com::Utf8Str> &aFileList);
-    HRESULT setFileList(const std::vector<com::Utf8Str> &aFileList);
     HRESULT getTransfers(ComPtr<IClipboardTransferManager> &aTransfers);
     HRESULT getEventSource(ComPtr<IEventSource> &aEventSource);
     HRESULT getHostClipboard(ComPtr<IHostClipboard> &aHostClipboard);
@@ -196,6 +212,12 @@ private:
                      ClipboardSource_T aSource,
                      const com::Utf8Str &aMimeType,
                      const std::vector<BYTE> &aBuffer);
+    bool i_storeDataIfCurrentClient(VBOXSHCLMAINCLIENTID aClientId,
+                                    ClipboardAction_T aAction,
+                                    ClipboardSource_T aSource,
+                                    const com::Utf8Str &aMimeType,
+                                    const std::vector<BYTE> &aBuffer,
+                                    uint32_t fFormats);
     void i_storeDataLocked(ClipboardAction_T aAction,
                            ClipboardSource_T aSource,
                            const com::Utf8Str &aMimeType,
@@ -212,6 +234,8 @@ private:
                               ClipboardAction_T aAction,
                               ClipboardSource_T aSource,
                               uint32_t uFormat);
+    bool i_isClientIdRegisteredLocked(VBOXSHCLMAINCLIENTID aClientId) const;
+    bool i_isClientFormatOwnerLocked(VBOXSHCLMAINCLIENTID aClientId, uint32_t fFormats, ClipboardSource_T aSource) const;
     VBOXSHCLMAINCLIENTID i_allocateClientId();
 
     struct SessionEventTarget

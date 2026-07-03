@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114573 2026-06-30 15:35:20Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -57,20 +57,25 @@ static int shClSvcTransferModeSet(uint32_t fMode);
 
 
 /**
- * Looks up a transfer by ID across all connected clients.
+ * Looks up a transfer by service-session/transfer/generation key across all connected clients.
  *
  * @returns VBox status code.
+ * @param   idSession           Service session ID to look up.
  * @param   idTransfer          Transfer ID to look up.
+ * @param   uGeneration         Host-private transfer generation to look up.
  * @param   ppClient            Where to return the owning client.
  * @param   ppTransfer          Where to return the transfer.
  */
-static int shClSvcTransferFindById(SHCLTRANSFERID idTransfer, PSHCLCLIENT *ppClient, PSHCLTRANSFER *ppTransfer)
+static int shClSvcTransferFindByKey(SHCLSESSIONID idSession, SHCLTRANSFERID idTransfer, SHCLTRANSFERGEN uGeneration,
+                                    PSHCLCLIENT *ppClient, PSHCLTRANSFER *ppTransfer)
 {
     AssertPtrReturn(ppClient, VERR_INVALID_POINTER);
     AssertPtrReturn(ppTransfer, VERR_INVALID_POINTER);
+    AssertReturn(idSession != 0 && idSession != NIL_SHCLSESSIONID, VERR_INVALID_CONTEXT);
     AssertReturn(   idTransfer != NIL_SHCLTRANSFERID
                  && idTransfer > 0
-                 && idTransfer < VBOX_SHCL_MAX_TRANSFERS - 1, VERR_INVALID_PARAMETER);
+                 && idTransfer < VBOX_SHCL_MAX_TRANSFERS - 1, VERR_INVALID_CONTEXT);
+    AssertReturn(uGeneration != 0 && uGeneration != NIL_SHCLTRANSFERGEN, VERR_INVALID_CONTEXT);
 
     *ppClient   = NULL;
     *ppTransfer = NULL;
@@ -83,9 +88,11 @@ static int shClSvcTransferFindById(SHCLTRANSFERID idTransfer, PSHCLCLIENT *ppCli
     while (itClient != g_mapClients.end())
     {
         PSHCLCLIENT pClient = itClient->second;
-        if (pClient)
+        if (   pClient
+            && pClient->State.uSessionID == idSession)
         {
-            PSHCLTRANSFER pTransfer = ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
+            PSHCLTRANSFER pTransfer = ShClTransferCtxGetTransferByKey(&pClient->Transfers.Ctx, idSession,
+                                                                       idTransfer, uGeneration);
             if (pTransfer)
             {
                 if (*ppTransfer)
@@ -119,24 +126,30 @@ static int shClSvcTransferFindById(SHCLTRANSFERID idTransfer, PSHCLCLIENT *ppCli
  * Aborts a transfer from a host request and tears it down locally.
  *
  * @returns VBox status code.
- * @param   idTransfer          Transfer ID to abort.
+ * @param   uContextId          Context ID containing service session and transfer IDs.
+ * @param   uGeneration         Host-private transfer generation to abort.
  * @param   enmStatus           Terminal abort status to report.
  * @param   rcTransfer          Transfer result code to report.
  */
-static int shClSvcTransferAbortByHost(SHCLTRANSFERID idTransfer, SHCLTRANSFERSTATUS enmStatus, int rcTransfer)
+static int shClSvcTransferAbortByHostKey(uint64_t uContextId, SHCLTRANSFERGEN uGeneration,
+                                         SHCLTRANSFERSTATUS enmStatus, int rcTransfer)
 {
     AssertReturn(   enmStatus == SHCLTRANSFERSTATUS_CANCELED
                  || enmStatus == SHCLTRANSFERSTATUS_ERROR, VERR_INVALID_PARAMETER);
+    AssertReturn(VBOX_SHCL_CONTEXTID_GET_EVENT(uContextId) == 0, VERR_INVALID_CONTEXT);
+
+    SHCLSESSIONID const idSession  = VBOX_SHCL_CONTEXTID_GET_SESSION(uContextId);
+    SHCLTRANSFERID const idTransfer = VBOX_SHCL_CONTEXTID_GET_TRANSFER(uContextId);
 
     PSHCLCLIENT   pClient;
     PSHCLTRANSFER pTransfer;
-    int rc = shClSvcTransferFindById(idTransfer, &pClient, &pTransfer);
+    int rc = shClSvcTransferFindByKey(idSession, idTransfer, uGeneration, &pClient, &pTransfer);
     if (RT_FAILURE(rc))
         return rc;
 
     ShClSvcClientLock(pClient);
 
-    pTransfer = ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
+    pTransfer = ShClTransferCtxGetTransferByKey(&pClient->Transfers.Ctx, idSession, idTransfer, uGeneration);
     if (!pTransfer)
     {
         ShClSvcClientUnlock(pClient);
@@ -1010,6 +1023,9 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
     if (RT_FAILURE(rc))
         return rc;
 
+    if (VBOX_SHCL_CONTEXTID_GET_SESSION(uCID) != pClient->State.uSessionID)
+        return VERR_INVALID_CONTEXT;
+
     /*
      * Pre-check: For certain messages we need to make sure that a (right) transfer is present.
      */
@@ -1463,40 +1479,50 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
 
         case VBOX_SHCL_HOST_FN_CANCEL:
         {
-            if (cParms != 1)
+            if (cParms != 2)
                 rc = VERR_INVALID_PARAMETER;
             else
             {
-                uint32_t idTransfer;
-                rc = HGCMSvcGetU32(&aParms[0], &idTransfer);
+                uint64_t uContextId;
+                rc = HGCMSvcGetU64(&aParms[0], &uContextId);
                 if (RT_SUCCESS(rc))
-                    rc = shClSvcTransferAbortByHost((SHCLTRANSFERID)idTransfer,
-                                                    SHCLTRANSFERSTATUS_CANCELED, VERR_CANCELLED);
+                {
+                    uint64_t uGeneration;
+                    rc = HGCMSvcGetU64(&aParms[1], &uGeneration);
+                    if (RT_SUCCESS(rc))
+                        rc = shClSvcTransferAbortByHostKey(uContextId, uGeneration,
+                                                           SHCLTRANSFERSTATUS_CANCELED, VERR_CANCELLED);
+                }
             }
             break;
         }
 
         case VBOX_SHCL_HOST_FN_ERROR:
         {
-            if (cParms != 2)
+            if (cParms != 3)
                 rc = VERR_INVALID_PARAMETER;
             else
             {
-                uint32_t idTransfer;
-                rc = HGCMSvcGetU32(&aParms[0], &idTransfer);
+                uint64_t uContextId;
+                rc = HGCMSvcGetU64(&aParms[0], &uContextId);
                 if (RT_SUCCESS(rc))
                 {
-                    uint32_t uRcTransfer;
-                    rc = HGCMSvcGetU32(&aParms[1], &uRcTransfer);
+                    uint64_t uGeneration;
+                    rc = HGCMSvcGetU64(&aParms[1], &uGeneration);
                     if (RT_SUCCESS(rc))
                     {
-                        int const rcTransfer = (int32_t)uRcTransfer;
-                        if (   RT_FAILURE(rcTransfer)
-                            && rcTransfer != VERR_CANCELLED)
-                            rc = shClSvcTransferAbortByHost((SHCLTRANSFERID)idTransfer,
-                                                            SHCLTRANSFERSTATUS_ERROR, rcTransfer);
-                        else
-                            rc = VERR_INVALID_PARAMETER;
+                        uint32_t uRcTransfer;
+                        rc = HGCMSvcGetU32(&aParms[2], &uRcTransfer);
+                        if (RT_SUCCESS(rc))
+                        {
+                            int const rcTransfer = (int32_t)uRcTransfer;
+                            if (   RT_FAILURE(rcTransfer)
+                                && rcTransfer != VERR_CANCELLED)
+                                rc = shClSvcTransferAbortByHostKey(uContextId, uGeneration,
+                                                                   SHCLTRANSFERSTATUS_ERROR, rcTransfer);
+                            else
+                                rc = VERR_INVALID_PARAMETER;
+                        }
                     }
                 }
             }
