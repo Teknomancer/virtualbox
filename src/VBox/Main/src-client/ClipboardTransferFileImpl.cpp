@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferFileImpl.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferFileImpl.cpp 114613 2026-07-03 15:57:50Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer file handle.
  */
@@ -568,6 +568,4 @@ HRESULT ClipboardTransferFile::getPath(com::Utf8Str &aPath)
     aPath = mData.mPath;
     return S_OK;
 }
-
-
 
