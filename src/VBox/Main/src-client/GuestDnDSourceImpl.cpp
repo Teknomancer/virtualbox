@@ -1,4 +1,4 @@
-/* $Id: GuestDnDSourceImpl.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: GuestDnDSourceImpl.cpp 114608 2026-07-03 12:59:42Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Console COM Class implementation - Guest drag and drop source.
  */
@@ -295,17 +295,52 @@ HRESULT GuestDnDSource::dragIsPending(ULONG uScreenId, GuestDnDMIMEList &aFormat
 
     HRESULT hrc = S_OK;
 
-    GuestDnDMsg Msg;
-    Msg.setType(HOST_DND_FN_GH_REQ_PENDING);
-    if (m_pState->m_uProtocolVersion >= 3)
-        Msg.appendUInt32(0); /** @todo ContextID not used yet. */
-    Msg.appendUInt32(uScreenId);
-
-    int vrc = GuestDnDInst()->hostCall(Msg.getType(), Msg.getCount(), Msg.getParms());
-    if (RT_SUCCESS(vrc))
+    /*
+     * A previous short poll may have timed out just before the guest response arrived.
+     * Consume such a queued response instead of discarding it.
+     *
+     * If none is pending, ask the guest and wait below.
+     */
+    int vrcGuest = VINF_SUCCESS;
+    int vrc = pState->waitForGuestResponseEx(0 /* Timeout in ms */, &vrcGuest);
+    if (vrc == VERR_TIMEOUT)
     {
-        int vrcGuest;
-        vrc = pState->waitForGuestResponseEx(100 /* Timeout in ms */, &vrcGuest);
+        GuestDnDMsg Msg;
+        Msg.setType(HOST_DND_FN_GH_REQ_PENDING);
+        if (m_pState->m_uProtocolVersion >= 3)
+            Msg.appendUInt32(0); /** @todo ContextID not used yet. */
+        Msg.appendUInt32(uScreenId);
+
+        vrc = GuestDnDInst()->hostCall(Msg.getType(), Msg.getCount(), Msg.getParms());
+        if (RT_SUCCESS(vrc))
+            vrc = pState->waitForGuestResponseEx(100 /* Timeout in ms */, &vrcGuest);
+        else
+        {
+            switch (vrc)
+            {
+                case VERR_ACCESS_DENIED:
+                {
+                    hrc = i_setErrorAndReset(tr("Dragging from guest to host not allowed -- make sure that the correct drag'n drop mode is set"));
+                    break;
+                }
+
+                case VERR_NOT_SUPPORTED:
+                {
+                    hrc = i_setErrorAndReset(tr("Dragging from guest to host not supported by guest -- make sure that the Guest Additions are properly installed and running"));
+                    break;
+                }
+
+                default:
+                {
+                    hrc = i_setErrorAndReset(vrc, tr("Sending drag pending event to guest failed"));
+                    break;
+                }
+            }
+        }
+    }
+
+    if (SUCCEEDED(hrc))
+    {
         if (RT_SUCCESS(vrc))
         {
             if (!isDnDIgnoreAction(pState->getActionDefault()))
@@ -362,31 +397,8 @@ HRESULT GuestDnDSource::dragIsPending(ULONG uScreenId, GuestDnDMIMEList &aFormat
             /* Note: Don't report an error here when the action is "ignore" -- that only means that the current window on the guest
                      simply doesn't support the format or drag and drop at all. */
         }
-        else
+        else if (vrc != VERR_TIMEOUT)
             hrc = i_setErrorAndReset(vrc == VERR_DND_GUEST_ERROR ? vrcGuest : vrc, tr("Requesting pending data from guest failed"));
-    }
-    else
-    {
-        switch (vrc)
-        {
-            case VERR_ACCESS_DENIED:
-            {
-                hrc = i_setErrorAndReset(tr("Dragging from guest to host not allowed -- make sure that the correct drag'n drop mode is set"));
-                break;
-            }
-
-            case VERR_NOT_SUPPORTED:
-            {
-                hrc = i_setErrorAndReset(tr("Dragging from guest to host not supported by guest -- make sure that the Guest Additions are properly installed and running"));
-                break;
-            }
-
-            default:
-            {
-                hrc = i_setErrorAndReset(vrc, tr("Sending drag pending event to guest failed"));
-                break;
-            }
-        }
     }
 
     pState->set(VBOXDNDSTATE_UNKNOWN);
