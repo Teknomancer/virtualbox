@@ -239,6 +239,11 @@ void err_cleanup(void)
     lh_ERR_STRING_DATA_free(int_error_hash);
     int_error_hash = NULL;
 #endif
+#ifdef VBOX
+    set_err_thread_local = 0;
+    err_init = CRYPTO_ONCE_STATIC_INIT;
+    err_string_init = CRYPTO_ONCE_STATIC_INIT;
+#endif
 }
 
 #ifndef OPENSSL_NO_ERR

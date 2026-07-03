@@ -383,6 +383,10 @@ void OBJ_NAME_cleanup(int type)
         names_lh = NULL;
         name_funcs_stack = NULL;
         obj_lock = NULL;
+#ifdef VBOX
+        names_type_num = OBJ_NAME_TYPE_NUM;
+        init = CRYPTO_ONCE_STATIC_INIT;
+#endif
     } else
         lh_OBJ_NAME_set_down_load(names_lh, down_load);
 }

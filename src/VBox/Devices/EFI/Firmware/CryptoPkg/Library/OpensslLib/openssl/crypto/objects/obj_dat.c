@@ -42,6 +42,9 @@ static CRYPTO_RWLOCK *ossl_obj_lock = NULL;
 #ifdef TSAN_REQUIRES_LOCKING
 static CRYPTO_RWLOCK *ossl_obj_nid_lock = NULL;
 #endif
+#ifdef VBOX
+static TSAN_QUALIFIER int new_nid = NUM_NID;
+#endif
 
 static CRYPTO_ONCE ossl_obj_lock_init = CRYPTO_ONCE_STATIC_INIT;
 
@@ -52,6 +55,9 @@ static ossl_inline void objs_free_locks(void)
 #ifdef TSAN_REQUIRES_LOCKING
     CRYPTO_THREAD_lock_free(ossl_obj_nid_lock);
     ossl_obj_nid_lock = NULL;
+#endif
+#ifdef VBOX
+    ossl_obj_lock_init = CRYPTO_ONCE_STATIC_INIT;
 #endif
 }
 
@@ -217,6 +223,9 @@ void ossl_obj_cleanup_int(void)
         lh_ADDED_OBJ_doall(added, cleanup3_doall); /* free objects */
         lh_ADDED_OBJ_free(added);
         added = NULL;
+#ifdef VBOX
+        new_nid = NUM_NID;
+#endif
     }
     objs_free_locks();
 }
@@ -227,7 +236,9 @@ void ossl_obj_cleanup_int(void)
  */
 static int obj_new_nid_unlocked(int num)
 {
+#ifndef VBOX
     static TSAN_QUALIFIER int new_nid = NUM_NID;
+#endif
 #ifdef TSAN_REQUIRES_LOCKING
     int i;
 

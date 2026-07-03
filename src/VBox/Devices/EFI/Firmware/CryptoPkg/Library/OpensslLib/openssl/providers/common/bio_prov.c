@@ -157,6 +157,22 @@ int ossl_prov_bio_printf(OSSL_CORE_BIO *bio, const char *format, ...)
     return ret;
 }
 
+#ifdef VBOX
+void oss_prov_bio_cleanup(void)
+{
+    c_bio_new_file   = NULL;
+    c_bio_new_membuf = NULL;
+    c_bio_read_ex    = NULL;
+    c_bio_write_ex   = NULL;
+    c_bio_gets       = NULL;
+    c_bio_puts       = NULL;
+    c_bio_ctrl       = NULL;
+    c_bio_up_ref     = NULL;
+    c_bio_free       = NULL;
+    c_bio_vprintf    = NULL;
+}
+#endif
+
 #ifndef FIPS_MODULE
 
 /* No direct BIO support in the FIPS module */

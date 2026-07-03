@@ -104,6 +104,9 @@ void ossl_rand_cleanup_int(void)
 # endif
     ossl_release_default_drbg_ctx();
     rand_inited = 0;
+#ifdef VBOX
+    rand_init = CRYPTO_ONCE_STATIC_INIT;
+#endif
 }
 
 /*

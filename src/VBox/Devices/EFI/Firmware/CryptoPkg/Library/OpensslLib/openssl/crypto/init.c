@@ -465,6 +465,10 @@ void OPENSSL_cleanup(void)
     ossl_trace_cleanup();
 
     base_inited = 0;
+#ifdef VBOX
+    base = CRYPTO_ONCE_STATIC_INIT;
+    stopped = 0;
+#endif
 }
 
 /*

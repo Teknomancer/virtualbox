@@ -124,3 +124,18 @@ void ossl_prov_cleanup_nonce(PROV_CTX *prov_ctx, unsigned char *buf, size_t len)
     else if (c_cleanup_nonce != NULL)
         c_cleanup_nonce(handle, buf, len);
 }
+
+#ifdef VBOX
+void ossl_prov_deinit(void)
+{
+    c_get_entropy          = NULL;
+    c_get_user_entropy     = NULL;
+    c_cleanup_entropy      = NULL;
+    c_cleanup_user_entropy = NULL;
+    c_get_nonce            = NULL;
+    c_get_user_nonce       = NULL;
+    c_cleanup_nonce        = NULL;
+    c_cleanup_user_nonce   = NULL;
+}
+#endif
+

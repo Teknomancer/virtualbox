@@ -434,6 +434,9 @@ static int init_thread_deregister(void *index, int all)
             return 0;
     } else {
         glob_tevent_reg = NULL;
+#ifdef VBOX
+        tevent_register_runonce = CRYPTO_ONCE_STATIC_INIT;
+#endif
     }
     for (i = 0; i < sk_THREAD_EVENT_HANDLER_PTR_num(gtr->skhands); i++) {
         THREAD_EVENT_HANDLER **hands
@@ -477,4 +480,12 @@ int ossl_init_thread_deregister(void *index)
 {
     return init_thread_deregister(index, 0);
 }
+
+#ifdef VBOX
+int ossl_init_thread_deregister_all(void)
+{
+    return init_thread_deregister(NULL, 1);
+}
+#endif
+
 #endif

@@ -181,6 +181,9 @@ void engine_cleanup_int(void)
     }
     CRYPTO_THREAD_lock_free(global_engine_lock);
     global_engine_lock = NULL;
+#ifdef VBOX
+    engine_lock_init = CRYPTO_ONCE_STATIC_INIT;
+#endif
 }
 
 /* Now the "ex_data" support */

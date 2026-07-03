@@ -413,6 +413,9 @@ void ossl_lib_ctx_default_deinit(void)
     context_deinit(&default_context_int);
     CRYPTO_THREAD_cleanup_local(&default_context_thread_local);
     default_context_inited = 0;
+#ifdef VBOX
+    default_context_init = CRYPTO_ONCE_STATIC_INIT;
+#endif
 }
 
 static OSSL_LIB_CTX *get_thread_default_context(void)
