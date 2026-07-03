@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferManagerImpl.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferManagerImpl.cpp 114614 2026-07-03 17:00:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer manager object.
  */
@@ -339,6 +339,8 @@ void ClipboardTransferManager::i_reset()
  *
  * @param   aTransfer       Transfer associated with the event.
  * @param   aState          Transfer state.
+ * @param   aInteraction    Transfer interaction type.
+ * @param   aPath           Transfer-relative path associated with the event, if any.
  * @param   aMessage        Optional event message.
  * @param   aError          Clipboard transfer error code.
  */
@@ -387,6 +389,8 @@ void ClipboardTransferManager::i_fireTransferEvent(IClipboardTransfer *aTransfer
  * Returns the current clipboard transfers.
  *
  * @returns COM status code.
+ * @param   aDirection      Transfer direction filter.
+ * @param   aFlags          Reserved flags, must be zero.
  * @param   aTransfers      Where to return the transfer list.
  */
 HRESULT ClipboardTransferManager::getTransfers(ClipboardTransferDirection_T aDirection,
