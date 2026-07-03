@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114610 2026-07-03 15:33:14Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -290,8 +290,6 @@ public:
     NS_IMETHOD InternalAndReservedMethod2IClipboardTransfer(void) NS_OVERRIDE { return E_NOTIMPL; }
     NS_IMETHOD InternalAndReservedMethod3IClipboardTransfer(void) NS_OVERRIDE { return E_NOTIMPL; }
     NS_IMETHOD InternalAndReservedMethod4IClipboardTransfer(void) NS_OVERRIDE { return E_NOTIMPL; }
-    NS_IMETHOD InternalAndReservedMethod5IClipboardTransfer(void) NS_OVERRIDE { return E_NOTIMPL; }
-    NS_IMETHOD InternalAndReservedMethod6IClipboardTransfer(void) NS_OVERRIDE { return E_NOTIMPL; }
 
 private:
     virtual ~TstClipboardTransfer()
