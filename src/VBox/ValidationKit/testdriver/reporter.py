@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# $Id: reporter.py 113971 2026-04-22 11:29:49Z knut.osmundsen@oracle.com $
+# $Id: reporter.py 114615 2026-07-03 17:19:11Z andreas.loeffler@oracle.com $
 # pylint: disable=too-many-lines
 
 """
@@ -39,7 +39,7 @@ terms and conditions of either the GPL or the CDDL or both.
 
 SPDX-License-Identifier: GPL-3.0-only OR CDDL-1.0
 """
-__version__ = "$Revision: 113971 $"
+__version__ = "$Revision: 114615 $"
 
 
 # Standard Python imports.
@@ -220,7 +220,11 @@ class ReporterBase(object):
         return None;
 
     def xmlFlush(self, fRetry = False, fForce = False):
-        """Flushes XML output if buffered."""
+        """
+        Flushes XML output if buffered.
+        Returns True if the XML was successfully delivered to the Test Manager,
+        False if there was no flush attempt or delivery failed.
+        """
         _ = fRetry; _ = fForce;
         return True;
 
@@ -1027,11 +1031,12 @@ class RemoteReporter(ReporterBase):
                     self.testIncErrors();
 
                 self._fXmlFlushing = False;
-                if asXml is None:
+                fRc = asXml is None;
+                if fRc:
                     self._secTsXmlFlush = utils.timestampSecond();
                 else:
                     self._asXml = asXml + self._asXml;
-                return True;
+                return fRc;
 
             self._secTsXmlFlush = utils.timestampSecond();
         return False;
@@ -1859,13 +1864,13 @@ def testCleanup():
 
     Returns True if no open tests, False if something had to be closed with failure.
     """
+    fRc = False;
     g_oLock.acquire();
     try:
         fRc = g_oReporter.testCleanup(utils.getCallerName());
         g_oReporter.xmlFlush(fRetry = False, fForce = True);
     finally:
         g_oLock.release();
-        fRc = False;
     return fRc;
 
 
@@ -1940,12 +1945,12 @@ def checkTestManagerConnection():
 
     Note! This as the sideeffect of flushing XML.
     """
+    fRc = None;
     g_oLock.acquire();
     try:
         fRc = g_oReporter.xmlFlush(fRetry = False, fForce = True);
     finally:
         g_oLock.release();
-        fRc = False;
     return fRc;
 
 def flushall(fSkipXml = False):
