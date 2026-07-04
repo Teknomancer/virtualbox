@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114625 2026-07-04 01:31:07Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -302,10 +302,11 @@ static DECLCALLBACK(int) vbclWaylandClipboardWorker(RTTHREAD ThreadSelf, void *p
             while (!ASMAtomicReadBool(pfShutdown))
             {
                 rc = VBClClipboardReadHostEvent(pCtx, vbclWaylandClipboardHgReportCommon, vbclWaylandClipboardGhReadCommon);
-                if (RT_FAILURE(rc))
+                if (RT_FAILURE(rc) && rc == VERR_INTERRUPTED)
                 {
                     VBClLogInfo("cannot process host clipboard event: %Rrc\n", rc);
-                    RTThreadSleep(RT_MS_1SEC / 2);
+                    if (!ASMAtomicReadBool(pfShutdown))
+                        RTThreadSleep(RT_MS_1SEC / 2);
                 }
             }
 
