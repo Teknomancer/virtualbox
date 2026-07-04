@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114621 2026-07-04 00:17:04Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -58,15 +58,6 @@ typedef struct
 {
     /* Generic VBoxClient Wayland session data (synchronization point). */
     vbcl_wl_session_t                       Base;
-    /** Randomly generated session ID, should be used by
-     *  both VBoxClient and vboxwl tool. */
-    uint32_t                                uSessionId;
-    /** IPC connection flow control between VBoxClient and vboxwl tool. */
-    vbcl::ipc::data::DataIpc                *oDataIpc;
-    /** IPC connection handle. */
-    RTLOCALIPCSESSION                       hIpcSession;
-    /** Popup window process handle. */
-    RTPROCESS                               popupProc;
 } vbox_wl_gtk_ipc_session_t;
 
 /**
@@ -77,21 +68,12 @@ typedef struct
     /** Wayland event loop thread. */
     RTTHREAD                                Thread;
 
-    /** A flag which indicates that Wayland event loop should terminate. */
-    volatile bool                           fShutdown;
-
     /** Communication session between host event loop and Wayland. */
     vbox_wl_gtk_ipc_session_t               Session;
 
     /** Pointer to the VBoxClient shared clipboard context (where this structure
      *  probably should live). */
     PSHCLCONTEXT                            pShClCtx;
-
-    /** Local IPC server object. */
-    RTLOCALIPCSERVER                        hIpcServer;
-
-    /** IPC server socket name prefix. */
-    const char                              *pcszIpcSockPrefix;
 } vbox_wl_gtk_ctx_t;
 
 /** Private data for a callback when host reports clipboard formats. */
@@ -118,156 +100,42 @@ static vbox_wl_gtk_ctx_t g_GtkClipCtx;
 
 
 /**
- * Reset session, terminate popup process and free allocated resources.
- *
- * @returns IPRT status code.
- * @param   enmSessionType      Session type (unused).
- * @param   pvUser              User data.
+ * Helper for terminating (kill -9 if not quitting by itself) a child and
+ * waiting for it (zombie management).
  */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_session_end_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
+static int vbclWaylandHlpGtkTerminateAndWaitForChild(RTPROCESS hProcess, PRTPROCSTATUS pProcStatus)
 {
-    vbox_wl_gtk_ipc_session_t *pSession = (vbox_wl_gtk_ipc_session_t *)pvUser;
-    AssertPtrReturn(pSession, VERR_INVALID_PARAMETER);
-
-    RT_NOREF(enmSessionType);
-
-    /* Make sure valid session is in progress. */
-    AssertReturn(pSession->uSessionId > 0, VERR_INVALID_PARAMETER);
-
-    int rc = RTProcWait(pSession->popupProc, RTPROCWAIT_FLAGS_BLOCK, NULL);
-    if (RT_FAILURE(rc))
-        rc = RTProcTerminate(pSession->popupProc);
-    if (RT_FAILURE(rc))
-        VBClLogError("session %u: unable to stop popup window process: rc=%Rrc\n",
-                     pSession->uSessionId, rc);
-
-    if (RT_SUCCESS(rc))
-    {
-        pSession->uSessionId = 0;
-
-        pSession->oDataIpc->reset();
-        delete pSession->oDataIpc;
-    }
-
-    return rc;
-}
-
-/**
- * Session callback: Handle sessions started by host events.
- *
- * @returns IPRT status code.
- * @param   enmSessionType      Session type, must be verified as
- *                              a consistency check.
- * @param   pvUser              User data (IPC connection handle
- *                              to vboxwl tool).
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker_join_cb(
-    vbcl_wl_session_type_t enmSessionType, void *pvUser)
-{
-    vbox_wl_gtk_ctx_t *pCtx = (vbox_wl_gtk_ctx_t *)pvUser;
-    AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
-
-    VBCL_LOG_CALLBACK;
-
-    /* Make sure valid session is in progress. */
-    AssertReturn(pCtx->Session.uSessionId > 0, VERR_INVALID_PARAMETER);
-
-    /* Select corresponding IPC flow depending on session type. */
-    const vbcl::ipc::flow_t *pFlow;
-    if      (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_GUEST)
-        pFlow = vbcl::ipc::data::HGCopyFlow;
-    else if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_ANNOUNCE_TO_HOST)
-        pFlow = vbcl::ipc::data::GHAnnounceAndCopyFlow;
-    else if (enmSessionType == VBCL_WL_CLIPBOARD_SESSION_TYPE_COPY_TO_HOST)
-        pFlow = vbcl::ipc::data::GHCopyFlow;
-    else
-        AssertFailedReturn(VERR_INVALID_PARAMETER);
-    AssertPtr(pFlow);
-
-    /* Proceed with selected flow. */
-    return pCtx->Session.oDataIpc->flow(pFlow, pCtx->Session.hIpcSession);
-}
-
-/**
- * @callback_method_impl{FNRTTHREAD, IPC server thread worker.}
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_worker(RTTHREAD ThreadSelf, void *pvUser)
-{
-    vbox_wl_gtk_ctx_t * const pCtx = (vbox_wl_gtk_ctx_t *)pvUser;
-    AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
-    AssertPtrReturn(pCtx->pcszIpcSockPrefix, VERR_INVALID_POINTER);
+    RTPROCSTATUS ProcStatusTmp;
+    if (!pProcStatus)
+        pProcStatus = &ProcStatusTmp;
 
     /*
-     * Create & configure IPC server.
+     * Since we cannot wait on children with a generic timeout, we first poll
+     * for 1 second, then do kill -9 and poll for another 5 seconds, and repeat
+     * that once again before giving up.  A total of ~11 seconds.
      */
-    VBClLogVerbose(1, "starting IPC...\n");
-    char szIpcServerName[128];
-    int rc = vbcl_wayland_hlp_gtk_ipc_srv_name(pCtx->pcszIpcSockPrefix, szIpcServerName, sizeof(szIpcServerName));
-    if (RT_SUCCESS(rc))
+    pProcStatus->enmReason = RTPROCEXITREASON_ABEND;
+    pProcStatus->iStatus   = -1;
+    int rc = RTProcWait(hProcess, RTPROCWAIT_FLAGS_NOBLOCK, pProcStatus);
+    for (unsigned i = 0; rc == VERR_PROCESS_RUNNING && i < 3; i++)
     {
-        rc = RTLocalIpcServerCreate(&pCtx->hIpcServer, szIpcServerName, 0);
-        if (RT_SUCCESS(rc))
+        uint64_t const msStart = RTTimeMilliTS();
+        do
         {
-            rc = RTLocalIpcServerSetAccessMode(pCtx->hIpcServer, RTFS_UNIX_IRUSR | RTFS_UNIX_IWUSR);
-            if (RT_SUCCESS(rc))
-            {
-                VBClLogVerbose(1, "started IPC server '%s'\n", szIpcServerName);
-                RTThreadUserSignal(ThreadSelf);
-
-                vbcl_wayland_session_init(&pCtx->Session.Base);
-
-                /*
-                 * Process IPC requests till we're told to shut down.
-                 */
-                while (!ASMAtomicReadBool(&pCtx->fShutdown))
-                {
-                    rc = RTLocalIpcServerListen(pCtx->hIpcServer, &pCtx->Session.hIpcSession);
-                    if (RT_SUCCESS(rc))
-                    {
-                        /* Authenticate remote user. Only allow connection from
-                           process who belongs to the same UID. */
-                        RTUID uUid;
-                        rc = RTLocalIpcSessionQueryUserId(pCtx->Session.hIpcSession, &uUid);
-                        if (RT_SUCCESS(rc))
-                        {
-                            RTUID uLocalUID = geteuid();
-                            if (   uLocalUID != 0
-                                && uLocalUID == uUid)
-                            {
-                                VBClLogVerbose(1, "new IPC connection\n");
-
-                                rc = VBClWaylandSessionJoinAnyType(&pCtx->Session.Base, vbcl_wayland_hlp_gtk_worker_join_cb, pCtx);
-
-                                VBClLogVerbose(1, "IPC flow completed, rc=%Rrc\n", rc);
-
-                                rc = vbcl_wayland_session_end(&pCtx->Session.Base,
-                                                              vbcl_wayland_hlp_gtk_session_end_cb,  &pCtx->Session);
-                                VBClLogVerbose(1, "IPC session ended, rc=%Rrc\n", rc);
-                            }
-                            else
-                                VBClLogError("incoming IPC connection rejected - UID mismatch: %d/%d\n", uLocalUID, uUid);
-                        }
-                        else
-                            VBClLogError("failed to get remote IPC UID, rc=%Rrc\n", rc);
-
-                        RTLocalIpcSessionClose(pCtx->Session.hIpcSession);
-                    }
-                    else if (rc != VERR_CANCELLED)
-                        VBClLogVerbose(1, "IPC connection has failed, rc=%Rrc\n", rc);
-                } /* loop */
-
-                rc = VINF_SUCCESS;
-            }
-            int rc2 = RTLocalIpcServerDestroy(pCtx->hIpcServer);
-            AssertRCStmt(rc2, rc = RT_SUCCESS(rc) ? rc2 : rc);
-        }
-        else
-            VBClLogError("Failed to create IPC server instance: %Rrc\n", rc);
+            RTThreadSleep(32);
+            pProcStatus->enmReason = RTPROCEXITREASON_ABEND;
+            pProcStatus->iStatus   = -1;
+            rc = RTProcWait(hProcess, RTPROCWAIT_FLAGS_NOBLOCK, pProcStatus);
+        } while (   rc == VERR_PROCESS_RUNNING
+                 && RTTimeMilliTS() - msStart < (!i ? RT_MS_1SEC : RT_MS_5SEC));
+        if (rc == VERR_PROCESS_RUNNING)
+            RTProcTerminate(hProcess);
     }
+    if (RT_SUCCESS(rc))
+        LogRel2(("--clipboard-set process %u (%#x) exited: iStatus=%d enmReason=%d (rc=%Rrc)\n",
+                 hProcess, hProcess, pProcStatus->iStatus, pProcStatus->enmReason, rc));
     else
-        VBClLogError("Failed to assemble IPC server name: %Rrc\n", rc);
-    VBClLogVerbose(1, "IPC stopped\n");
+        VBClLogError("Failed to terminate --clipboard-set process %u (%#x): %Rrc\n", hProcess, hProcess, rc);
     return rc;
 }
 
@@ -293,10 +161,7 @@ RTDECL(int) vbcl_wayland_hlp_gtk_clip_init(void)
 
     RT_ZERO(g_GtkClipCtx);
 
-    /* Set IPC server socket name prefix before server is started. */
-    g_GtkClipCtx.pcszIpcSockPrefix = VBOXWL_SRV_NAME_PREFIX_CLIP;
-
-    return vbcl_wayland_thread_start(&g_GtkClipCtx.Thread, vbcl_wayland_hlp_gtk_worker, "wl-gtk-ipc", &g_GtkClipCtx);
+    return VINF_SUCCESS;
 }
 
 /**
@@ -304,28 +169,20 @@ RTDECL(int) vbcl_wayland_hlp_gtk_clip_init(void)
  */
 RTDECL(int) vbcl_wayland_hlp_gtk_clip_term(void)
 {
-    int rc;
-    int rcThread = 0;
-    vbox_wl_gtk_ctx_t *pCtx = &g_GtkClipCtx;
+    PSHCLCONTEXT const pShClCtx = &g_Ctx;
 
-    /* Set termination flag. */
-    pCtx->fShutdown = true;
-
-    /* Cancel IPC loop. */
-    rc = RTLocalIpcServerCancel(pCtx->hIpcServer);
-    if (RT_FAILURE(rc))
-        VBClLogError("unable to notify IPC server about shutdown, rc=%Rrc\n", rc);
-
-    if (RT_SUCCESS(rc))
+    if (pShClCtx->Wl.hPipeClipboardSet != NIL_RTPIPE)
     {
-        /* Wait for Gtk event loop thread to shutdown. */
-        rc = RTThreadWait(pCtx->Thread, RT_MS_30SEC, &rcThread);
-        VBClLogInfo("gtk event thread exited with status, rc=%Rrc\n", rcThread);
+        RTPipeClose(pShClCtx->Wl.hPipeClipboardSet);
+        pShClCtx->Wl.hPipeClipboardSet = NIL_RTPIPE;
     }
-    else
-        VBClLogError("unable to stop gtk thread, rc=%Rrc\n", rc);
+    if (pShClCtx->Wl.hProcClipboardSet != NIL_RTPROCESS)
+    {
+        vbclWaylandHlpGtkTerminateAndWaitForChild(pShClCtx->Wl.hProcClipboardSet, NULL);
+        pShClCtx->Wl.hProcClipboardSet = NIL_RTPROCESS;
+    }
 
-    return rc;
+    return VINF_SUCCESS;
 }
 
 /**
@@ -394,21 +251,8 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_popup(void)
             /*
              * Make sure it terminates.
              */
-            RTPROCSTATUS ProcStatus = { -1, RTPROCEXITREASON_ABEND };
-            uint64_t const msProcWait = RTTimeMilliTS();
-            for (;;)
-            {
-                rc = RTProcWait(hProcess, RTPROCWAIT_FLAGS_NOBLOCK, &ProcStatus);
-                if (   (rc != VERR_PROCESS_RUNNING && rc != VERR_INTERRUPTED)
-                    || RTTimeMilliTS() - msProcWait > RT_MS_1SEC)
-                    break;
-                RTThreadSleep(8 /*ms*/);
-            }
-            if (rc == VERR_PROCESS_RUNNING || rc == VERR_INTERRUPTED)
-            {
-                rc = RTProcTerminate(hProcess);
-                rc = RTProcWait(hProcess, RT_SUCCESS(rc) ? RTPROCWAIT_FLAGS_BLOCK : RTPROCWAIT_FLAGS_NOBLOCK, &ProcStatus);
-            }
+            RTPROCSTATUS ProcStatus;
+            rc = vbclWaylandHlpGtkTerminateAndWaitForChild(hProcess, &ProcStatus);
             if (   RT_SUCCESS(rc)
                 && ProcStatus.enmReason == RTPROCEXITREASON_NORMAL)
             {
@@ -477,39 +321,6 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_popup(void)
     else
         VBClLogError("RTPipeCreate failed: %Rrc\n", rc);
     return VINF_SUCCESS;
-}
-
-/**
- * Helper for terminating (kill -9 if not quitting by itself) a child and
- * waiting for it (zombie management).
- */
-static int vbclWaylandHlpGtkTerminateAndWaitForChild(RTPROCESS hProcess)
-{
-    /*
-     * Since we cannot wait on children with a generic timeout, we first poll
-     * for 1 second, then do kill -9 and poll for another 5 seconds, and repeat
-     * that once again before giving up.  A total of ~11 seconds.
-     */
-    RTPROCSTATUS ProcStatus =  { -1, RTPROCEXITREASON_ABEND };
-    int rc = RTProcWait(hProcess, RTPROCWAIT_FLAGS_NOBLOCK, &ProcStatus);
-    for (unsigned i = 0; rc == VERR_PROCESS_RUNNING && i < 3; i++)
-    {
-        uint64_t const msStart = RTTimeMilliTS();
-        do
-        {
-            RTThreadSleep(32);
-            rc = RTProcWait(hProcess, RTPROCWAIT_FLAGS_NOBLOCK, &ProcStatus);
-        } while (   rc == VERR_PROCESS_RUNNING
-                 && RTTimeMilliTS() - msStart < (!i ? RT_MS_1SEC : RT_MS_5SEC));
-        if (rc == VERR_PROCESS_RUNNING)
-            RTProcTerminate(hProcess);
-    }
-    if (RT_SUCCESS(rc))
-        LogRel2(("--clipboard-set process %u (%#x) exited: iStatus=%d enmReason=%d (rc=%Rrc)\n",
-                 hProcess, hProcess, ProcStatus.iStatus, ProcStatus.enmReason, rc));
-    else
-        VBClLogError("Failed to terminate --clipboard-set process %u (%#x): %Rrc\n", hProcess, hProcess, rc);
-    return rc;
 }
 
 /**
@@ -648,7 +459,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report(PSHCLCONTEXT pCtx, 
                      */
                     VBClLogError("Terminating --clipboard-set child because VBClClipboardSerializeCache failed (%Rrc) ...\n", rc);
                     RTPipeClose(hPipeWriteTerm);
-                    vbclWaylandHlpGtkTerminateAndWaitForChild(hProcess);
+                    vbclWaylandHlpGtkTerminateAndWaitForChild(hProcess, NULL);
                 }
                 hProcess       = NIL_RTPROCESS;
                 hPipeWriteTerm = NIL_RTPIPE;
@@ -670,7 +481,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report(PSHCLCONTEXT pCtx, 
      * If there was a previous process, do zombie processing for it.
      */
     if (hProcPrev != NIL_RTPROCESS)
-        vbclWaylandHlpGtkTerminateAndWaitForChild(hProcPrev);
+        vbclWaylandHlpGtkTerminateAndWaitForChild(hProcPrev, NULL);
 
     return rc;
 }
