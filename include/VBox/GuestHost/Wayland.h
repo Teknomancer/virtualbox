@@ -1,4 +1,4 @@
-/* $Id: Wayland.h 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
+/* $Id: Wayland.h 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest / Host common code - Wayland.
  */
@@ -153,8 +153,9 @@ VBGH_DECL(void)             VbghWaylandDisconnect(PVBGHWAYLANDCORE pThis);
 VBGH_DECL(PVBGHWAYLANDSEAT) VbghWaylandGetBestSeatEntry(PVBGHWAYLANDCORE pThis);
 VBGH_DECL(int)              VbghWaylandReadFdToBuffer(int fd, RTMSINTERVAL cMsTimeout, void **ppvBuf, size_t *pcbBuf);
 VBGH_DECL(void)             VbghWaylandReadFdToBufferFree(void *pvBuf);
+VBGH_DECL(int)              VbghWaylandWriteBufferToFd(void const *pvBuf, size_t cbBuf, int fdDst, RTMSINTERVAL cMsTimeout);
 
-VBGH_DECL(int)              VbghWaylandRunloopForDisplay(struct wl_display *pDisplay, RTPIPE hPipeWakeup,
+VBGH_DECL(int)              VbghWaylandRunloopForDisplay(struct wl_display *pDisplay, RTPIPE hPipeWakeup, RTPIPE hPipeMonClose,
                                                          RTMSINTERVAL cMsPollInterval, bool volatile *pfReturn);
 
 RT_C_DECLS_END

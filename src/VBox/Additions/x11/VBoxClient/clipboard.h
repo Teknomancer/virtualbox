@@ -1,4 +1,4 @@
-/** $Id: clipboard.h 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard.h 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard - Main header.
  */
@@ -99,5 +99,11 @@ int VBClClipboardReadHostClipboard(PSHCLCONTEXT pCtx, SHCLFORMAT uFmt, void **pp
 
 int      VBClWaylandClipboardQueryHostData(PSHCLCONTEXT pCtx, const char *pszMimeType, void **ppvOutData, size_t *pcbOutData);
 uint64_t VBClWaylandClipboardResetOurState(PSHCLCONTEXT pCtx, const char *pszCaller, struct SHCLWLOFFERSLOT *pOffer);
+
+struct RTHANDLE;
+int     VBClClipboardSerializeCache(SHCLCACHE const *pCache, SHCLFORMATS fFormats, struct RTHANDLE const *pHandleDst,
+                                    RTMSINTERVAL cMsTimeout);
+int     VBClClipboardDeserializeCache(struct RTHANDLE const *pHandleSrc, PSHCLCACHE pCache, SHCLFORMATS *pfFormats,
+                                      RTMSINTERVAL cMsTimeout);
 
 #endif /* !GA_INCLUDED_SRC_x11_VBoxClient_clipboard_h */
