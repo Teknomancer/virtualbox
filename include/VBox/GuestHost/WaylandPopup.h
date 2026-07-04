@@ -1,4 +1,4 @@
-/* $Id: WaylandPopup.h 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: WaylandPopup.h 114622 2026-07-04 00:18:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest / Host common code - Wayland Popup (for focus grabbing).
  */
@@ -62,6 +62,7 @@ struct gtk_surface1;
 /* Forward declaration of our own structures: */
 struct VBGHWAYLANDCORE;
 struct VBGHWAYLANDSEAT;
+struct VBGHWAYLANDPOPUP;
 
 
 /**
