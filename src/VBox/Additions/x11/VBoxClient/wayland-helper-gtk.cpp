@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114621 2026-07-04 00:17:04Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114624 2026-07-04 01:27:52Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -49,54 +49,6 @@
 
 #include "vbox-gtk.h"
 
-/** Gtk session data.
- *
- * A structure which accumulates all the necessary data required to
- * maintain session between host and Wayland for clipboard sharing
- * and drag-n-drop.*/
-typedef struct
-{
-    /* Generic VBoxClient Wayland session data (synchronization point). */
-    vbcl_wl_session_t                       Base;
-} vbox_wl_gtk_ipc_session_t;
-
-/**
- * A set of objects required to handle clipboard sharing over
- * and drag-n-drop using Gtk library. */
-typedef struct
-{
-    /** Wayland event loop thread. */
-    RTTHREAD                                Thread;
-
-    /** Communication session between host event loop and Wayland. */
-    vbox_wl_gtk_ipc_session_t               Session;
-
-    /** Pointer to the VBoxClient shared clipboard context (where this structure
-     *  probably should live). */
-    PSHCLCONTEXT                            pShClCtx;
-} vbox_wl_gtk_ctx_t;
-
-/** Private data for a callback when host reports clipboard formats. */
-struct vbcl_wayland_hlp_gtk_clip_hg_report_priv
-{
-    /** Helper context. */
-    vbox_wl_gtk_ctx_t *pCtx;
-    /** Clipboard formats. */
-    SHCLFORMATS fFormats;
-};
-
-/** Private data for a callback when host requests clipboard
- *  data in specified format. */
-struct vbcl_wayland_hlp_gtk_clip_gh_read_priv
-{
-    /** Helper context. */
-    vbox_wl_gtk_ctx_t *pCtx;
-    /** Clipboard format. */
-    SHCLFORMAT uFormat;
-};
-
-/** Helper context. */
-static vbox_wl_gtk_ctx_t g_GtkClipCtx;
 
 
 /**
@@ -159,8 +111,6 @@ RTDECL(int) vbcl_wayland_hlp_gtk_clip_init(void)
 {
     VBCL_LOG_CALLBACK;
 
-    RT_ZERO(g_GtkClipCtx);
-
     return VINF_SUCCESS;
 }
 
@@ -171,6 +121,7 @@ RTDECL(int) vbcl_wayland_hlp_gtk_clip_term(void)
 {
     PSHCLCONTEXT const pShClCtx = &g_Ctx;
 
+    /** @todo move this into the GuestHost code... */
     if (pShClCtx->Wl.hPipeClipboardSet != NIL_RTPIPE)
     {
         RTPipeClose(pShClCtx->Wl.hPipeClipboardSet);
@@ -190,7 +141,7 @@ RTDECL(int) vbcl_wayland_hlp_gtk_clip_term(void)
  */
 static DECLCALLBACK(void) vbcl_wayland_hlp_gtk_clip_set_ctx(PSHCLCONTEXT pCtx)
 {
-    g_GtkClipCtx.pShClCtx = pCtx;
+    RT_NOREF(pCtx);
 }
 
 /**
