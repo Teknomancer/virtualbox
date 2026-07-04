@@ -1,4 +1,4 @@
-/** $Id: clipboard-cmds.cpp 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard-cmds.cpp 114623 2026-07-04 00:21:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Clipboard commands.
  */
@@ -660,7 +660,7 @@ static RTPIPE g_hPipeTerm = NIL_RTPIPE;
 
 
 /**
- * @callback_method_impl{FNVBCLOPTPARSE},
+ * @callback_method_impl{FNVBCLOPTPARSE}
  */
 static DECLCALLBACK(int) vbclCmdClipboardSetOption(PRTGETOPTSTATE pGetOptState)
 {
@@ -685,8 +685,8 @@ static DECLCALLBACK(int) vbclCmdClipboardSetOption(PRTGETOPTSTATE pGetOptState)
 
 
 /**
- * @interface_method_impl{SHCLWAYLANDCTX,pfnDataSourceCancelled, }
-  */
+ * @interface_method_impl{SHCLWAYLANDCTX,pfnDataSourceCancelled}
+ */
 static DECLCALLBACK(void) vbclCmdClipbordSet_DataSourceCancelled(PSHCLWAYLANDCTX pWlCtx)
 {
     VBCLCMDCLIPBOARDSTATE *pThis = RT_FROM_MEMBER(pWlCtx, VBCLCMDCLIPBOARDSTATE, Wl);
