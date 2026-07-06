@@ -1,4 +1,4 @@
-/* $Id: VBoxNetAdp-darwin.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxNetAdp-darwin.cpp 114628 2026-07-06 13:24:13Z vadim.galitsyn@oracle.com $ */
 /** @file
  * VBoxNetAdp - Virtual Network Adapter Driver (Host), Darwin Specific Code.
  */
@@ -416,7 +416,7 @@ static int VBoxNetAdpDarwinIOCtl(dev_t Dev, u_long iCmd, caddr_t pData, int fFla
                 return rc == VERR_OUT_OF_RESOURCES ? ENOMEM : EINVAL;
 
             Assert(strlen(pReq->szName) < sizeof(pReq->szName));
-            strncpy(pReq->szName, pNew->szName, sizeof(pReq->szName) - 1);
+            vboxNetAdpStrncpy(pReq->szName, pNew->szName, sizeof(pReq->szName) - 1);
             pReq->szName[sizeof(pReq->szName) - 1] = '\0';
             Log(("VBoxNetAdpDarwinIOCtl: Added '%s'\n", pReq->szName));
             break;
