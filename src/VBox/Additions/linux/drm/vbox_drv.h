@@ -1,4 +1,4 @@
-/* $Id: vbox_drv.h 114186 2026-05-26 16:37:15Z vadim.galitsyn@oracle.com $ */
+/* $Id: vbox_drv.h 114629 2026-07-06 15:59:47Z vadim.galitsyn@oracle.com $ */
 /** @file
  * VirtualBox Additions Linux kernel video driver
  */
@@ -193,7 +193,7 @@
 # include <drm/drm_framebuffer.h>
 #endif
 
-#if RTLNX_VER_MIN(6,19,0)
+#if RTLNX_VER_MIN(6,19,0) || RTLNX_RHEL_RANGE(9,9, 9,99)
 #include <drm/drm_print.h>
 #endif
 
