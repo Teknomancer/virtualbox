@@ -1,4 +1,4 @@
-/* $Id: tstClipboardDataObjectWin.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardDataObjectWin.cpp 114636 2026-07-07 15:43:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Windows IDataObject testcase.
  */
@@ -859,34 +859,59 @@ static void testClipboardFormatToVBoxFileTransferFormats(void)
     RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_URI_LIST,
                       ("CF_HDROP: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_URI_LIST));
 
-    CLIPFORMAT const cfFileDescriptorA = (CLIPFORMAT)RegisterClipboardFormatA(CFSTR_FILEDESCRIPTORA);
+    CLIPFORMAT const cfFileDescriptorA = (CLIPFORMAT)RegisterClipboardFormatA("FileGroupDescriptor");
     if (!cfFileDescriptorA)
-        RTTestIFailed("RegisterClipboardFormatA(CFSTR_FILEDESCRIPTORA) failed, lasterr=%u", GetLastError());
-    else
+        RTTestIFailed("RegisterClipboardFormatA(\"FileGroupDescriptor\") failed, lasterr=%u", GetLastError());
+    if (cfFileDescriptorA)
     {
         uFmt = ShClWinClipboardFormatToVBox(cfFileDescriptorA);
         RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
-                          ("CFSTR_FILEDESCRIPTORA: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_NONE));
+                          ("FileGroupDescriptor via RegisterClipboardFormatA: uFmt=%#x expected=%#x\n",
+                           uFmt, VBOX_SHCL_FMT_NONE));
     }
 
-    CLIPFORMAT const cfFileDescriptorW = (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW);
+    CLIPFORMAT const cfFileDescriptorAU = (CLIPFORMAT)RegisterClipboardFormatW(L"FileGroupDescriptor");
+    if (!cfFileDescriptorAU)
+        RTTestIFailed("RegisterClipboardFormatW(L\"FileGroupDescriptor\") failed, lasterr=%u", GetLastError());
+    if (cfFileDescriptorAU)
+    {
+        uFmt = ShClWinClipboardFormatToVBox(cfFileDescriptorAU);
+        RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
+                          ("FileGroupDescriptor via RegisterClipboardFormatW: uFmt=%#x expected=%#x\n",
+                           uFmt, VBOX_SHCL_FMT_NONE));
+    }
+
+    CLIPFORMAT const cfFileDescriptorW = (CLIPFORMAT)RegisterClipboardFormatW(L"FileGroupDescriptorW");
     if (!cfFileDescriptorW)
-        RTTestIFailed("RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW) failed, lasterr=%u", GetLastError());
-    else
+        RTTestIFailed("RegisterClipboardFormatW(L\"FileGroupDescriptorW\") failed, lasterr=%u", GetLastError());
+    if (cfFileDescriptorW)
     {
         uFmt = ShClWinClipboardFormatToVBox(cfFileDescriptorW);
         RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
-                          ("CFSTR_FILEDESCRIPTORW: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_NONE));
+                          ("FileGroupDescriptorW via RegisterClipboardFormatW: uFmt=%#x expected=%#x\n",
+                           uFmt, VBOX_SHCL_FMT_NONE));
     }
 
-    CLIPFORMAT const cfFileContents = (CLIPFORMAT)RegisterClipboardFormatA(CFSTR_FILECONTENTS);
+    CLIPFORMAT const cfFileContents = (CLIPFORMAT)RegisterClipboardFormatA("FileContents");
     if (!cfFileContents)
-        RTTestIFailed("RegisterClipboardFormatA(CFSTR_FILECONTENTS) failed, lasterr=%u", GetLastError());
-    else
+        RTTestIFailed("RegisterClipboardFormatA(\"FileContents\") failed, lasterr=%u", GetLastError());
+    if (cfFileContents)
     {
         uFmt = ShClWinClipboardFormatToVBox(cfFileContents);
         RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
-                          ("CFSTR_FILECONTENTS: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_NONE));
+                          ("FileContents via RegisterClipboardFormatA: uFmt=%#x expected=%#x\n",
+                           uFmt, VBOX_SHCL_FMT_NONE));
+    }
+
+    CLIPFORMAT const cfFileContentsU = (CLIPFORMAT)RegisterClipboardFormatW(L"FileContents");
+    if (!cfFileContentsU)
+        RTTestIFailed("RegisterClipboardFormatW(L\"FileContents\") failed, lasterr=%u", GetLastError());
+    if (cfFileContentsU)
+    {
+        uFmt = ShClWinClipboardFormatToVBox(cfFileContentsU);
+        RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
+                          ("FileContents via RegisterClipboardFormatW: uFmt=%#x expected=%#x\n",
+                           uFmt, VBOX_SHCL_FMT_NONE));
     }
 }
 
