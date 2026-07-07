@@ -1,4 +1,4 @@
-/* $Id: UISharedClipboardProvider.h 114562 2026-06-29 10:30:36Z andreas.loeffler@oracle.com $ */
+/* $Id: UISharedClipboardProvider.h 114637 2026-07-07 16:21:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISharedClipboardProvider class declaration.
  */
@@ -39,6 +39,10 @@
 #include "CEventListener.h"
 #include "CEventSource.h"
 #include "CHostClipboard.h"
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include "CClipboardTransfer.h"
+# include "CClipboardTransferManager.h"
+#endif
 
 /* Forward declarations: */
 class UISession;
@@ -70,6 +74,11 @@ private slots:
 
     /** Handles event worker thread termination. */
     void sltHandleThreadFinished();
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    /** Handles shared clipboard transfer progress notification.
+      * @param  comTransfer  Brings the transfer to show. */
+    void sltHandleTransferProgress(const CClipboardTransfer &comTransfer);
+#endif
 
 private:
     /** Prepares the clipboard session. */
@@ -96,6 +105,10 @@ private:
     CHostClipboard m_comHostClipboard;
     /** Holds the session event source. */
     CEventSource m_comEventSource;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    /** Holds the clipboard transfer manager. */
+    CClipboardTransferManager m_comTransferManager;
+#endif
     /** Holds the passive event listener. */
     CEventListener m_comEventListener;
     /** Holds the clipboard event worker thread. */

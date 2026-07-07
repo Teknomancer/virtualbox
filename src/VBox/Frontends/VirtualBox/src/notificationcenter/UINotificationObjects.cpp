@@ -1,4 +1,4 @@
-/* $Id: UINotificationObjects.cpp 113907 2026-04-16 14:33:46Z sergey.dubov@oracle.com $ */
+/* $Id: UINotificationObjects.cpp 114637 2026-07-07 16:21:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - Various UINotificationObjects implementations.
  */
@@ -593,6 +593,94 @@ CProgress UINotificationProgressDranAndDropReceive::createProgress(COMResult &co
     /* Return progress-wrapper: */
     return comProgress;
 }
+
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+
+
+/*********************************************************************************************************************************
+*   Class UINotificationProgressSharedClipboardTransfer implementation.                                                          *
+*********************************************************************************************************************************/
+
+/** Returns a translated transfer direction name.
+  * @returns Transfer direction name.
+  * @param  enmDirection  Brings the direction to name. */
+static QString shclTransferDirectionName(KClipboardTransferDirection enmDirection)
+{
+    switch (enmDirection)
+    {
+        case KClipboardTransferDirection_ToGuest:
+            return UINotificationProgress::tr("to guest");
+        case KClipboardTransferDirection_ToHost:
+            return UINotificationProgress::tr("to host");
+        case KClipboardTransferDirection_Any:
+            return UINotificationProgress::tr("any direction");
+        default:
+            break;
+    }
+    return UINotificationProgress::tr("unknown direction");
+}
+
+
+/** Returns a translated clipboard source name.
+  * @returns Clipboard source name.
+  * @param  enmSource  Brings the source to name. */
+static QString shclTransferSourceName(KClipboardSource enmSource)
+{
+    switch (enmSource)
+    {
+        case KClipboardSource_Host:
+            return UINotificationProgress::tr("host");
+        case KClipboardSource_Guest:
+            return UINotificationProgress::tr("guest");
+        case KClipboardSource_Remote:
+            return UINotificationProgress::tr("remote");
+        case KClipboardSource_Custom:
+            return UINotificationProgress::tr("custom");
+        default:
+            break;
+    }
+    return UINotificationProgress::tr("unknown");
+}
+
+
+UINotificationProgressSharedClipboardTransfer::UINotificationProgressSharedClipboardTransfer(const CClipboardTransfer &comTransfer)
+    : m_comTransfer(comTransfer)
+{
+}
+
+QString UINotificationProgressSharedClipboardTransfer::name() const
+{
+    return UINotificationProgress::tr("Shared clipboard transfer ...");
+}
+
+QString UINotificationProgressSharedClipboardTransfer::details() const
+{
+    if (m_comTransfer.isNull())
+        return QString();
+
+    const ULONG uId = m_comTransfer.GetId();
+    const KClipboardTransferDirection enmDirection = m_comTransfer.GetDirection();
+    const KClipboardSource enmSource = m_comTransfer.GetSource();
+    if (!m_comTransfer.isOk())
+        return UINotificationProgress::tr("<b>Transfer:</b> unavailable");
+
+    return UINotificationProgress::tr("<b>Transfer ID:</b> %1<br><b>Direction:</b> %2<br><b>Source:</b> %3")
+                                  .arg(uId)
+                                  .arg(shclTransferDirectionName(enmDirection))
+                                  .arg(shclTransferSourceName(enmSource));
+}
+
+CProgress UINotificationProgressSharedClipboardTransfer::createProgress(COMResult &comResult)
+{
+    CProgress comProgress;
+    if (m_comTransfer.isNotNull())
+        comProgress = m_comTransfer.GetProgress();
+    comResult = m_comTransfer;
+    return comProgress;
+}
+
+#endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
 
 /*********************************************************************************************************************************

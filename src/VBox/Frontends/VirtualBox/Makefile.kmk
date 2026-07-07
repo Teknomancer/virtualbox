@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114562 2026-06-29 10:30:36Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114637 2026-07-07 16:21:39Z andreas.loeffler@oracle.com $
 ## @file
 # Makefile for the VirtualBox Qt GUI.
 #
@@ -1272,6 +1272,11 @@ VirtualBoxVM_SOURCES = \
 	src/runtime/seamless/UIMachineWindowSeamless.cpp \
 	src/softkeyboard/UISoftKeyboard.cpp \
 	src/widgets/UIMiniToolBar.cpp
+
+ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+ VirtualBoxVM_SOURCES += \
+ 	src/runtime/UISharedClipboardTransferMgr.cpp
+endif
 
 ifdef VBOX_WITH_DRAG_AND_DROP
  VirtualBoxVM_SOURCES += \

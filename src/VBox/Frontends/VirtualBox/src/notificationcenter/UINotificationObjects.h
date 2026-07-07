@@ -1,4 +1,4 @@
-/* $Id: UINotificationObjects.h 113907 2026-04-16 14:33:46Z sergey.dubov@oracle.com $ */
+/* $Id: UINotificationObjects.h 114637 2026-07-07 16:21:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - Various UINotificationObjects declarations.
  */
@@ -46,6 +46,9 @@
 #include "CDataStream.h"
 #include "CDnDSource.h"
 #include "CDnDTarget.h"
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include "CClipboardTransfer.h"
+#endif
 #include "CExtPackFile.h"
 #include "CExtPackManager.h"
 #include "CForm.h"
@@ -510,6 +513,34 @@ private:
     /** Holds the action type. */
     KDnDAction  m_enmAction;
 };
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+/** UINotificationProgress extension for shared clipboard transfer functionality. */
+class SHARED_LIBRARY_STUFF UINotificationProgressSharedClipboardTransfer : public UINotificationProgress
+{
+    Q_OBJECT
+
+public:
+
+    /** Constructs shared clipboard transfer notification-progress.
+      * @param  comTransfer  Brings the clipboard transfer to track. */
+    UINotificationProgressSharedClipboardTransfer(const CClipboardTransfer &comTransfer);
+
+protected:
+
+    /** Returns object name. */
+    virtual QString name() const RT_OVERRIDE RT_FINAL;
+    /** Returns object details. */
+    virtual QString details() const RT_OVERRIDE RT_FINAL;
+    /** Creates and returns started progress-wrapper. */
+    virtual CProgress createProgress(COMResult &comResult) RT_OVERRIDE RT_FINAL;
+
+private:
+
+    /** Holds the clipboard transfer being tracked. */
+    CClipboardTransfer m_comTransfer;
+};
+#endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
 /** UINotificationProgress extension for machine save-state functionality. */
 class SHARED_LIBRARY_STUFF UINotificationProgressMachineSaveState : public UINotificationProgress

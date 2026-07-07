@@ -1,4 +1,4 @@
-/* $Id: UISharedClipboardProvider.cpp 114563 2026-06-29 12:25:11Z andreas.loeffler@oracle.com $ */
+/* $Id: UISharedClipboardProvider.cpp 114637 2026-07-07 16:21:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISharedClipboardProvider class implementation.
  */
@@ -26,6 +26,7 @@
  */
 
 /* Qt includes: */
+#include <QMetaType>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QThread>
@@ -33,7 +34,14 @@
 /* GUI includes: */
 #include "UIGlobalSession.h"
 #include "UILoggingDefs.h"
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include "UINotificationCenter.h"
+# include "UINotificationObjects.h"
+#endif
 #include "UISharedClipboardProvider.h"
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+# include "UISharedClipboardTransferMgr.h"
+#endif
 #include "UISession.h"
 
 /* COM includes: */
@@ -169,6 +177,11 @@ signals:
     /** Notifies about a shared clipboard error suitable for the notification center.
       * @param  strMsg  Brings the error message. */
     void sigClipboardError(const QString &strMsg);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    /** Notifies about a shared clipboard transfer progress object suitable for the notification center.
+      * @param  comTransfer  Brings the transfer to show. */
+    void sigClipboardTransferProgress(const CClipboardTransfer &comTransfer);
+#endif
 
 public:
 
@@ -177,17 +190,26 @@ public:
       * @param  comClipboardSession  Brings the clipboard session to serve.
       * @param  comHostClipboard     Brings the session host clipboard endpoint.
       * @param  comEventSource       Brings the session event source.
-      * @param  comEventListener     Brings the passive event listener. */
+      * @param  comEventListener     Brings the passive event listener.
+      * @param  comTransferManager   Brings the clipboard transfer manager when transfer support is enabled. */
     UISharedClipboardProviderThread(QObject *pParent,
                                     const CClipboardSession &comClipboardSession,
                                     const CHostClipboard &comHostClipboard,
                                     const CEventSource &comEventSource,
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+                                    const CEventListener &comEventListener,
+                                    const CClipboardTransferManager &comTransferManager)
+#else
                                     const CEventListener &comEventListener)
+#endif
         : QThread(pParent)
         , m_comClipboardSession(comClipboardSession)
         , m_comHostClipboard(comHostClipboard)
         , m_comEventSource(comEventSource)
         , m_comEventListener(comEventListener)
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        , m_transferManager(comTransferManager)
+#endif
         , m_fShutdown(false)
     {
         setObjectName("UISharedClipboardProviderThread");
@@ -284,6 +306,18 @@ private:
                 return handleDataChanged(comClipboardSession, comHostClipboard, comEvent);
             case KVBoxEventType_OnClipboardSourceChanged:
                 return handleSourceChanged(comClipboardSession, comHostClipboard, comEvent);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+            case KVBoxEventType_OnClipboardTransfer:
+            {
+                CClipboardTransfer comNotifyTransfer;
+                QString strError;
+                if (m_transferManager.handleEvent(comEvent, &comNotifyTransfer, &strError))
+                    emit sigClipboardTransferProgress(comNotifyTransfer);
+                if (!strError.isEmpty())
+                    emit sigClipboardError(strError);
+                return true;
+            }
+#endif
             case KVBoxEventType_OnClipboardError:
                 handleClipboardError(comEvent);
                 return false;
@@ -496,6 +530,10 @@ private:
     CEventSource m_comEventSource;
     /** Holds the passive event listener. */
     CEventListener m_comEventListener;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    /** Holds the clipboard transfer event manager. */
+    UISharedClipboardTransferMgr m_transferManager;
+#endif
     /** Holds the mutex instance which protects thread access. */
     mutable QMutex m_mutex;
     /** Holds whether shutdown was requested. */
@@ -535,6 +573,16 @@ void UISharedClipboardProvider::sltHandleThreadFinished()
     cleanupSession();
 }
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+void UISharedClipboardProvider::sltHandleTransferProgress(const CClipboardTransfer &comTransfer)
+{
+    if (comTransfer.isNull() || !gpNotificationCenter)
+        return;
+
+    gpNotificationCenter->append(new UINotificationProgressSharedClipboardTransfer(comTransfer));
+}
+#endif
+
 void UISharedClipboardProvider::prepareSession()
 {
     AssertPtrReturnVoid(m_pSession);
@@ -569,6 +617,18 @@ void UISharedClipboardProvider::prepareSession()
         cleanupSession();
         return;
     }
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    m_comTransferManager = comClipboard.GetTransfers();
+    if (m_comTransferManager.isNull() || !comClipboard.isOk())
+    {
+        LogRel(("GUI: UISharedClipboardProvider: clipboard transfer manager is unavailable: %Rhrc\n",
+                comClipboard.lastRC()));
+        m_comTransferManager.detach();
+    }
+    else
+        LogRel2(("GUI: UISharedClipboardProvider: clipboard transfer manager acquired\n"));
+#endif
 }
 
 void UISharedClipboardProvider::prepareListener()
@@ -595,6 +655,10 @@ void UISharedClipboardProvider::prepareListener()
                << KVBoxEventType_OnClipboardDataChanged
                << KVBoxEventType_OnClipboardError
                << KVBoxEventType_OnClipboardSourceChanged;
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    if (m_comTransferManager.isNotNull())
+        eventTypes << KVBoxEventType_OnClipboardTransfer;
+#endif
     m_comEventSource.RegisterListener(m_comEventListener, eventTypes, FALSE /* active? */);
     if (!m_comEventSource.isOk())
     {
@@ -608,14 +672,25 @@ void UISharedClipboardProvider::prepareThread()
     if (m_comClipboardSession.isNull() || m_comHostClipboard.isNull() || m_comEventSource.isNull() || m_comEventListener.isNull())
         return;
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    qRegisterMetaType<CClipboardTransfer>("CClipboardTransfer");
+    m_pThread = new UISharedClipboardProviderThread(this, m_comClipboardSession, m_comHostClipboard, m_comEventSource,
+                                                   m_comEventListener, m_comTransferManager);
+#else
     m_pThread = new UISharedClipboardProviderThread(this, m_comClipboardSession, m_comHostClipboard, m_comEventSource,
                                                    m_comEventListener);
+#endif
     if (!m_pThread)
         return;
 
     connect(m_pThread, &UISharedClipboardProviderThread::sigClipboardError,
             this, &UISharedClipboardProvider::sigClipboardError,
             Qt::QueuedConnection);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    connect(m_pThread, &UISharedClipboardProviderThread::sigClipboardTransferProgress,
+            this, &UISharedClipboardProvider::sltHandleTransferProgress,
+            Qt::QueuedConnection);
+#endif
     connect(m_pThread, &UISharedClipboardProviderThread::finished,
             this, &UISharedClipboardProvider::sltHandleThreadFinished,
             Qt::QueuedConnection);
@@ -660,6 +735,10 @@ void UISharedClipboardProvider::cleanupSession()
     if (m_comHostClipboard.isNotNull())
         m_comHostClipboard.Clear();
     m_comHostClipboard.detach();
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    m_comTransferManager.detach();
+#endif
 
     if (m_comClipboardSession.isNotNull())
         m_comClipboardSession.Close();
