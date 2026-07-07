@@ -1,4 +1,4 @@
-# $Id: .scm-settings 114642 2026-07-07 18:33:04Z klaus.espenlaub@oracle.com $
+# $Id: .scm-settings 114643 2026-07-07 18:37:35Z klaus.espenlaub@oracle.com $
 ## @file
 # Source code massager settings for PC devices/drivers.
 #
@@ -63,7 +63,7 @@
 /BIOS/*.asm|/BIOS/*.inc: --no-convert-tabs
 
 /BIOS/makefile:     --treat-as make
-/BIOS/VBoxBiosAlternative*.asm: --external-copyright --no-update-license --allow-lgpl-without-disclaimer ## @todo the latter is a bug in the generator.
+/BIOS/VBoxBiosAlternative*.asm: --external-copyright --allow-lgpl-without-disclaimer ## @todo the latter is a bug in the generator.
 /BIOS/VBoxBiosAlternative*.md5sum: --treat-as plaintext
 
 # iPXE
