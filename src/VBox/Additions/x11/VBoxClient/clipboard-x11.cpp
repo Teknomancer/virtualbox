@@ -1,4 +1,4 @@
-/** $Id: clipboard-x11.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
+/** $Id: clipboard-x11.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard implementation.
  */
@@ -95,12 +95,14 @@ static DECLCALLBACK(int) vbclX11OnTransferInitializeCallback(PSHCLTRANSFERCALLBA
         {
             /* Retrieve the root entries as a first action, so that the transfer is ready to go
              * once it gets registered to HTTP server. */
-            int rc2 = ShClTransferRootListRead(pTransfer);
-            if (   RT_SUCCESS(rc2)
-                /* As soon as we register the transfer with the HTTP server, the transfer needs to have its roots set. */
-                && ShClTransferRootsCount(pTransfer))
+            rc = ShClTransferRootListRead(pTransfer);
+            if (RT_SUCCESS(rc))
             {
-                rc2 = ShClTransferHttpServerRegisterTransfer(&pCtx->X11.HttpCtx.HttpServer, pTransfer);
+                if (ShClTransferRootsCount(pTransfer))
+                    /* As soon as we register the transfer with the HTTP server, the transfer needs to have its roots set. */
+                    rc = ShClTransferHttpServerRegisterTransfer(&pCtx->X11.HttpCtx.HttpServer, pTransfer);
+                else
+                    rc = VERR_SHCLPB_NO_DATA;
             }
             break;
         }
@@ -230,6 +232,14 @@ static DECLCALLBACK(int) vbclX11OnRequestDataFromSourceCallback(PSHCLCONTEXT pCt
 
     LogFlowFunc(("pCtx=%p, uFmt=%#x\n", pCtx, uFmt));
 
+    *ppv = NULL;
+    *pcb = 0;
+
+#if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS) && !defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP)
+    if (uFmt == VBOX_SHCL_FMT_URI_LIST)
+        return VERR_NOT_SUPPORTED;
+#endif
+
     int rc;
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP
@@ -268,7 +278,10 @@ static DECLCALLBACK(int) vbclX11OnRequestDataFromSourceCallback(PSHCLCONTEXT pCt
                         }
                     }
                     else
+                    {
                         AssertMsgFailed(("No registered transfer found for HTTP server\n"));
+                        rc = VERR_SHCLPB_TRANSFER_ID_NOT_FOUND;
+                    }
                 }
                 else
                     LogRel(("Shared Clipboard: Could not start transfer, as no new HTTP transfer was registered in time\n"));
@@ -300,6 +313,14 @@ static DECLCALLBACK(int) vbclX11ReportFormatsCallback(PSHCLCONTEXT pCtx, uint32_
     RT_NOREF(pvUser);
 
     LogFlowFunc(("fFormats=%#x\n", fFormats));
+
+#if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS) && !defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP)
+    if (fFormats & VBOX_SHCL_FMT_URI_LIST)
+    {
+        LogRel2(("Shared Clipboard: X11 guest requires HTTP transfer support for URI-list offers, masking format\n"));
+        fFormats &= ~VBOX_SHCL_FMT_URI_LIST;
+    }
+#endif
 
     int rc = VbglR3ClipboardReportFormats(pCtx->CmdCtx.idClient, fFormats);
 

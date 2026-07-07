@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendDarwin.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendDarwin.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Mac OS X host.
  */
@@ -272,8 +272,19 @@ int ShClBackendReportFormats(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFOR
     }
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-    if (fFormats & VBOX_SHCL_FMT_URI_LIST) /* No transfer support yet. */
-        return VINF_SUCCESS;
+    if (fFormats & VBOX_SHCL_FMT_URI_LIST)
+    {
+        LogRel2(("Shared Clipboard: Darwin backend does not support file-transfer clipboard offers yet\n"));
+        fFormats &= ~VBOX_SHCL_FMT_URI_LIST;
+        if (fFormats == VBOX_SHCL_FMT_NONE)
+        {
+            SHCLCONTEXT *pCtx = pClient->State.pCtx;
+            RTCritSectEnter(&g_ctx.CritSect);
+            int vrcClear = clearPasteboard(pCtx->hPasteboard, &pCtx->hStrOwnershipFlavor);
+            RTCritSectLeave(&g_ctx.CritSect);
+            return vrcClear;
+        }
+    }
 #endif
 
     SHCLCONTEXT *pCtx = pClient->State.pCtx;
@@ -374,42 +385,25 @@ int ShClBackendWriteData(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLCLIENT
 }
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-
-int ShClBackendTransferReadDir(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLDIRDATA pDirData)
+# ifndef UNIT_TEST
+/**
+ * Handles transfer status replies from the guest.
+ *
+ * @returns VBox status code.
+ * @param   pBackend            Shared Clipboard backend.
+ * @param   pClient             Shared Clipboard client context.
+ * @param   pTransfer           Shared Clipboard transfer.
+ * @param   enmSource           Transfer source which issued the reply.
+ * @param   enmStatus           Transfer status.
+ * @param   rcStatus            Transfer status code.
+ */
+int ShClBackendTransferHandleStatusReply(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer,
+                                         SHCLSOURCE enmSource, SHCLTRANSFERSTATUS enmStatus, int rcStatus)
 {
-    RT_NOREF(pBackend, pClient, pDirData);
-    return VERR_NOT_IMPLEMENTED;
-}
+    RT_NOREF(pBackend, pClient, pTransfer, enmSource, enmStatus, rcStatus);
 
-int ShClBackendTransferWriteDir(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLDIRDATA pDirData)
-{
-    RT_NOREF(pBackend, pClient, pDirData);
-    return VERR_NOT_IMPLEMENTED;
+    return VINF_SUCCESS;
 }
-
-int ShClBackendTransferReadFileHdr(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLFILEHDR pFileHdr)
-{
-    RT_NOREF(pBackend, pClient, pFileHdr);
-    return VERR_NOT_IMPLEMENTED;
-}
-
-int ShClBackendTransferWriteFileHdr(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLFILEHDR pFileHdr)
-{
-    RT_NOREF(pBackend, pClient, pFileHdr);
-    return VERR_NOT_IMPLEMENTED;
-}
-
-int ShClBackendTransferReadFileData(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLFILEDATA pFileData)
-{
-    RT_NOREF(pBackend, pClient, pFileData);
-    return VERR_NOT_IMPLEMENTED;
-}
-
-int ShClBackendTransferWriteFileData(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLFILEDATA pFileData)
-{
-    RT_NOREF(pBackend, pClient, pFileData);
-    return VERR_NOT_IMPLEMENTED;
-}
-
+# endif /* !UNIT_TEST */
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 

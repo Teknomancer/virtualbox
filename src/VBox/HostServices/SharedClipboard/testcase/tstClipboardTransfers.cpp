@@ -1,4 +1,4 @@
-/* $Id: tstClipboardTransfers.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardTransfers.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard transfers test case.
  */
@@ -392,6 +392,32 @@ static void testTransferBasics(void)
     RTTESTI_CHECK_RC_OK(rc);
 }
 
+/**
+ * Tests zero-length object data chunk duplication.
+ */
+static void testTransferObjDataChunkDupZeroLength(void)
+{
+    RTTestISub("Testing zero-length transfer object data chunk duplication");
+
+    SHCLOBJDATACHUNK Chunk;
+    RT_ZERO(Chunk);
+    Chunk.uHandle = 42;
+    Chunk.pvData  = NULL;
+    Chunk.cbData  = 0;
+
+    PSHCLOBJDATACHUNK pDup = ShClTransferObjDataChunkDup(&Chunk);
+    RTTESTI_CHECK_RETV(pDup != NULL);
+    RTTESTI_CHECK(pDup->uHandle == Chunk.uHandle);
+    RTTESTI_CHECK(pDup->pvData == NULL);
+    RTTESTI_CHECK(pDup->cbData == 0);
+    ShClTransferObjDataChunkFree(pDup);
+
+    Chunk.cbData = 1;
+    pDup = ShClTransferObjDataChunkDup(&Chunk);
+    RTTESTI_CHECK(pDup == NULL);
+}
+
+
 static void testTransferContextIdentity(void)
 {
     RTTestISub("Testing transfer context identity");
@@ -420,6 +446,12 @@ static void testTransferContextIdentity(void)
     RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 8, idTransfer, uGeneration) == NULL);
     RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 7, idTransfer, uGeneration + 1) == NULL);
     RTTESTI_CHECK(ShClTransferCtxGetTransferByKey(&Ctx, 7, idTransfer + 1, uGeneration) == NULL);
+
+    SHCLTRANSFERID idDuplicate = NIL_SHCLTRANSFERID;
+    rc = ShClTransferCtxRegister(&Ctx, pTransfer, &idDuplicate);
+    RTTESTI_CHECK_RC(rc, VERR_ALREADY_EXISTS);
+    rc = ShClTransferCtxRegisterById(&Ctx, pTransfer, idTransfer + 1);
+    RTTESTI_CHECK_RC(rc, VERR_ALREADY_EXISTS);
 
     rc = ShClTransferCtxUnregisterById(&Ctx, idTransfer);
     RTTESTI_CHECK_RC_OK(rc);
@@ -566,6 +598,70 @@ static void testTransferObjOpenPrefixBoundary(RTTEST hTest)
     rc = ShClTransferDestroy(pTransfer);
     RTTESTI_CHECK_RC_OK(rc);
 }
+
+/**
+ * Tests that resetting a transfer closes active object handles.
+ *
+ * @param   hTest       The test handle.
+ */
+static void testTransferResetClosesObjectHandles(RTTEST hTest)
+{
+    RTTestISub("Testing transfer reset closes object handles");
+
+    PSHCLTRANSFER pTransfer;
+    int rc = ShClTransferCreateEx(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, SHCL_TRANSFER_DEFAULT_MAX_CHUNK_SIZE,
+                                  SHCL_TRANSFER_DEFAULT_MAX_LIST_HANDLES, 1 /* cMaxObjHandles */, &pTransfer);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    SHCLTXPROVIDER Provider;
+    ShClTransferProviderLocalQueryInterface(&Provider);
+
+    rc = ShClTransferSetProvider(pTransfer, &Provider);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    char szTestTransferResetDir[RTPATH_MAX];
+    rc = testCreateTempDir(hTest, "testTransferResetHandleAccounting", szTestTransferResetDir,
+                           sizeof(szTestTransferResetDir));
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char *pszFilePathAbs = NULL;
+    rc = testCreateFile(hTest, szTestTransferResetDir, "file1.txt", 0, 0, &pszFilePathAbs);
+    RTTESTI_CHECK_RC_OK_RETV(rc);
+
+    char *pszRoots = NULL;
+    rc = RTStrAAppend(&pszRoots, pszFilePathAbs);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = RTStrAAppend(&pszRoots, "\r\n");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    rc = ShClTransferRootsSetFromStringList(pTransfer, pszRoots, strlen(pszRoots) + 1);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = ShClTransferInit(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    SHCLOBJOPENCREATEPARMS OpenParms;
+    rc = ShClTransferObjOpenParmsInit(&OpenParms);
+    RTTESTI_CHECK_RC_OK(rc);
+    rc = RTStrCopy(OpenParms.pszPath, OpenParms.cbPath, "file1.txt");
+    RTTESTI_CHECK_RC_OK(rc);
+
+    SHCLOBJHANDLE hObj = NIL_SHCLOBJHANDLE;
+    rc = ShClTransferObjOpen(pTransfer, &OpenParms, &hObj);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    ShClTransferReset(pTransfer);
+
+    rc = ShClTransferObjClose(pTransfer, hObj);
+    RTTESTI_CHECK_RC(rc, VERR_NOT_FOUND);
+
+    ShClTransferObjOpenParmsDestroy(&OpenParms);
+    RTStrFree(pszRoots);
+    RTStrFree(pszFilePathAbs);
+
+    rc = ShClTransferDestroy(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+}
+
 
 static void testTransferObjReadWriteValidation(void)
 {
@@ -917,7 +1013,9 @@ int main(int argc, char *argv[])
     testPathSanitize();
     testEvents();
     testTransferBasics();
+    testTransferObjDataChunkDupZeroLength();
     testTransferContextIdentity();
+    testTransferResetClosesObjectHandles(hTest);
     testTransferRootsSet(hTest);
     testTransferObjOpenPrefixBoundary(hTest);
     testTransferObjReadWriteValidation();

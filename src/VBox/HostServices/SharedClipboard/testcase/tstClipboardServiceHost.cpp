@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -342,6 +342,103 @@ static void testSetTransferKeyParms(VBOXHGCMSVCPARM aParms[], SHCLSESSIONID idSe
     HGCMSvcSetU64(&aParms[1], uGeneration);
 }
 
+/**
+ * Tests transfer format filtering for disabled or unsupported transfers.
+ */
+static void testTransferFormatFiltering(void)
+{
+    RTTestISub("Testing transfer format filtering");
+
+    static const struct
+    {
+        const char *pszName;
+        uint32_t    fTransferMode;
+        uint64_t    fGuestFeatures0;
+        SHCLFORMATS fExpected;
+    } s_aTests[] =
+    {
+        { "disabled",      VBOX_SHCL_TRANSFER_MODE_F_NONE,    VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS, VBOX_SHCL_FMT_UNICODETEXT },
+        { "no features",   VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_NONE,                                VBOX_SHCL_FMT_UNICODETEXT },
+        { "transfers",     VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_TRANSFERS,                         VBOX_SHCL_FMT_UNICODETEXT },
+        { "context-id",    VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_CONTEXT_ID,                        VBOX_SHCL_FMT_UNICODETEXT },
+        { "both features", VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS,
+                                                                                                                    VBOX_SHCL_FMT_URI_LIST | VBOX_SHCL_FMT_UNICODETEXT }
+    };
+
+    SHCLFORMATS const fInput = VBOX_SHCL_FMT_URI_LIST | VBOX_SHCL_FMT_UNICODETEXT;
+    for (size_t i = 0; i < RT_ELEMENTS(s_aTests); i++)
+    {
+        RT_ZERO(g_Client);
+        g_Client.State.Transfers.uTransferMode = s_aTests[i].fTransferMode;
+        g_Client.State.fGuestFeatures0 = s_aTests[i].fGuestFeatures0;
+        for (unsigned iDirection = 0; iDirection < 2; iDirection++)
+        {
+            bool const fHostToGuest = iDirection == 0;
+            SHCLFORMATS const fFiltered = shClSvcHandleFormats(fHostToGuest, &g_Client, fInput);
+            RTTESTI_CHECK_MSG(fFiltered == s_aTests[i].fExpected,
+                              ("%s/%s fFiltered=%#x expected=%#x\n", s_aTests[i].pszName,
+                               fHostToGuest ? "H2G" : "G2H", fFiltered, s_aTests[i].fExpected));
+        }
+    }
+}
+
+
+/**
+ * Tests that transfer messages require both guest feature bits.
+ */
+static void testTransferGuestFeatures(void)
+{
+    struct VBOXHGCMSVCPARM parms[2];
+    VBOXHGCMSVCFNTABLE table;
+    VBOXHGCMCALLHANDLE_TYPEDEF call;
+
+    RTTestISub("Testing transfer guest features");
+    int rc = setupTable(&table);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    HGCMSvcSetU32(&parms[0], VBOX_SHCL_MODE_BIDIRECTIONAL);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_MODE, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    HGCMSvcSetU32(&parms[0], VBOX_SHCL_TRANSFER_MODE_F_ENABLED);
+    rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_SET_TRANSFER_MODE, 1, parms);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    RT_ZERO(g_Client);
+    rc = table.pfnConnect(NULL, 1 /* clientId */, &g_Client, 0, 0);
+    RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
+
+    HGCMSvcSetU64(&parms[0], VBOX_SHCL_CONTEXTID_MAKE(g_Client.State.uSessionID, 42, 0));
+    HGCMSvcSetU64(&parms[1], 1);
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_OBJ_CLOSE, RT_ELEMENTS(parms), parms, 0);
+    RTTESTI_CHECK_RC(call.rc, VERR_NOT_IMPLEMENTED);
+
+    g_Client.State.fGuestFeatures0 = VBOX_SHCL_GF_0_TRANSFERS;
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_OBJ_CLOSE, RT_ELEMENTS(parms), parms, 0);
+    RTTESTI_CHECK_RC(call.rc, VERR_NOT_IMPLEMENTED);
+
+    g_Client.State.fGuestFeatures0 = VBOX_SHCL_GF_0_CONTEXT_ID;
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_OBJ_CLOSE, RT_ELEMENTS(parms), parms, 0);
+    RTTESTI_CHECK_RC(call.rc, VERR_ACCESS_DENIED);
+
+    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_TRANSFERS;
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_OBJ_CLOSE, RT_ELEMENTS(parms), parms, 0);
+    RTTESTI_CHECK_RC(call.rc, VERR_SHCLPB_TRANSFER_ID_NOT_FOUND);
+
+    rc = table.pfnDisconnect(NULL, 1 /* clientId */, &g_Client);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+    rc = table.pfnUnload(NULL);
+    RTTESTI_CHECK_RC(rc, VINF_SUCCESS);
+}
+
 static void testTransferHostCancelError(void)
 {
     struct VBOXHGCMSVCPARM parms[3];
@@ -366,13 +463,13 @@ static void testTransferHostCancelError(void)
     RTTESTI_CHECK_MSG_RETV(RT_SUCCESS(rc), ("rc=%Rrc\n", rc));
     RTTESTI_CHECK(g_Client.State.uSessionID != 0);
     RTTESTI_CHECK(g_Client.State.uSessionID != NIL_SHCLSESSIONID);
-    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
+    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS;
 
     SHCLSESSIONID const idSessionBeforeReset = g_Client.State.uSessionID;
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 0, parms);
     RTTESTI_CHECK_RC_OK(rc);
     RTTESTI_CHECK(g_Client.State.uSessionID != idSessionBeforeReset);
-    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID;
+    g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS;
 
     HGCMSvcSetU32(&parms[0], 42);
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 1, parms);
@@ -885,6 +982,8 @@ static void testHostCall(void)
     testSetMode();
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     testSetTransferMode();
+    testTransferFormatFiltering();
+    testTransferGuestFeatures();
     testTransferHostCancelError();
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
     testSetHeadless();

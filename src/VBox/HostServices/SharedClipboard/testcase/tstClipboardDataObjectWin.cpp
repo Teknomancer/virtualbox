@@ -1,4 +1,4 @@
-/* $Id: tstClipboardDataObjectWin.cpp 114189 2026-05-27 12:24:10Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardDataObjectWin.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Windows IDataObject testcase.
  */
@@ -848,6 +848,49 @@ static void testCheckFileContents(ShClWinDataObject *pDataObj)
 }
 
 
+/**
+ * Tests Windows clipboard format conversion for file-transfer formats.
+ */
+static void testClipboardFormatToVBoxFileTransferFormats(void)
+{
+    RTTestISub("ShClWinClipboardFormatToVBox / file-transfer formats");
+
+    SHCLFORMAT uFmt = ShClWinClipboardFormatToVBox(CF_HDROP);
+    RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_URI_LIST,
+                      ("CF_HDROP: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_URI_LIST));
+
+    CLIPFORMAT const cfFileDescriptorA = (CLIPFORMAT)RegisterClipboardFormatA(CFSTR_FILEDESCRIPTORA);
+    if (!cfFileDescriptorA)
+        RTTestIFailed("RegisterClipboardFormatA(CFSTR_FILEDESCRIPTORA) failed, lasterr=%u", GetLastError());
+    else
+    {
+        uFmt = ShClWinClipboardFormatToVBox(cfFileDescriptorA);
+        RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
+                          ("CFSTR_FILEDESCRIPTORA: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_NONE));
+    }
+
+    CLIPFORMAT const cfFileDescriptorW = (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW);
+    if (!cfFileDescriptorW)
+        RTTestIFailed("RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW) failed, lasterr=%u", GetLastError());
+    else
+    {
+        uFmt = ShClWinClipboardFormatToVBox(cfFileDescriptorW);
+        RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
+                          ("CFSTR_FILEDESCRIPTORW: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_NONE));
+    }
+
+    CLIPFORMAT const cfFileContents = (CLIPFORMAT)RegisterClipboardFormatA(CFSTR_FILECONTENTS);
+    if (!cfFileContents)
+        RTTestIFailed("RegisterClipboardFormatA(CFSTR_FILECONTENTS) failed, lasterr=%u", GetLastError());
+    else
+    {
+        uFmt = ShClWinClipboardFormatToVBox(cfFileContents);
+        RTTESTI_CHECK_MSG(uFmt == VBOX_SHCL_FMT_NONE,
+                          ("CFSTR_FILECONTENTS: uFmt=%#x expected=%#x\n", uFmt, VBOX_SHCL_FMT_NONE));
+    }
+}
+
+
 static void testFileDescriptorW(void)
 {
     RTTestISub("IDataObject / CFSTR_FILEDESCRIPTORW");
@@ -1024,6 +1067,7 @@ int main(int argc, char **argv)
     bool const fMayPanic = RTAssertSetMayPanic(false);
     bool const fQuiet    = RTAssertSetQuiet(true);
 
+    testClipboardFormatToVBoxFileTransferFormats();
     testFileDescriptorW();
 
     RTAssertSetQuiet(fQuiet);

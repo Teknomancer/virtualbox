@@ -1,4 +1,4 @@
-/* $Id: GuestShClPrivate.cpp 114560 2026-06-29 08:32:23Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClPrivate.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Private Shared Clipboard code.
  */
@@ -533,7 +533,12 @@ int GuestShCl::ReportFormatsToHost(SHCLFORMATS fFormats)
     PSHCLCLIENT pClient = m_pClient;
     if (   pClient
         && pClient->pBackend)
+    {
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        fFormats = shClSvcHandleFormats(false /* fHostToGuest */, pClient, fFormats);
+#endif
         vrc = ShClBackendReportFormats(pClient->pBackend, pClient, fFormats);
+    }
     else
         vrc = VINF_SUCCESS;
 
@@ -590,7 +595,12 @@ int GuestShCl::ReportFormatsToGuest(SHCLFORMATS fFormats)
     PSHCLCLIENT pClient = m_pClient;
     if (   pClient
         && pClient->pBackend)
+    {
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+        fFormats = shClSvcHandleFormats(true /* fHostToGuest */, pClient, fFormats);
+#endif
         vrc = ShClBackendReportFormatsToGuest(pClient->pBackend, pClient, fFormats);
+    }
     else
         vrc = VINF_SUCCESS;
 
@@ -627,6 +637,10 @@ int GuestShCl::ReportFormatsToGuest(PSHCLCLIENT pClient, SHCLFORMATS fFormats, S
         default:
             AssertFailedReturn(VERR_INVALID_PARAMETER);
     }
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    fFormats = shClSvcHandleFormats(true /* fHostToGuest */, pClient, fFormats);
+#endif
 
     int vrc;
     if (pClient->pBackend)

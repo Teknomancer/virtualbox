@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendWin.cpp 114535 2026-06-25 12:39:42Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendWin.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Win32 host.
  */
@@ -1117,7 +1117,7 @@ int ShClBackendReadData(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLCLIENTC
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
         else if (uFmt & VBOX_SHCL_FMT_URI_LIST)
         {
-            hClip = hClip = GetClipboardData(CF_HDROP);
+            hClip = GetClipboardData(CF_HDROP);
             if (hClip)
             {
                 HDROP hDrop = (HDROP)GlobalLock(hClip);
@@ -1131,21 +1131,33 @@ int ShClBackendReadData(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, PSHCLCLIENTC
 
                     if (RT_SUCCESS(vrc))
                     {
+                        *pcbActual = cbList;
                         if (cbList <= cbData)
-                        {
                             memcpy(pvData, pszList, cbList);
-                            *pcbActual = cbList;
-                        }
+                        else
+                            vrc = VINF_BUFFER_OVERFLOW;
 
                         RTStrFree(pszList);
                     }
                 }
                 else
-                    LogRel(("Shared Clipboard: Unable to lock clipboard data, last error: %ld\n", GetLastError()));
+                {
+                    DWORD const dwLastErr = GetLastError();
+                    vrc = RTErrConvertFromWin32(dwLastErr);
+                    if (RT_SUCCESS(vrc))
+                        vrc = VERR_INVALID_HANDLE;
+                    LogRel(("Shared Clipboard: Unable to lock clipboard data, last error: %ld\n", dwLastErr));
+                }
             }
             else
+            {
+                DWORD const dwLastErr = GetLastError();
+                vrc = RTErrConvertFromWin32(dwLastErr);
+                if (RT_SUCCESS(vrc))
+                    vrc = VERR_NOT_FOUND;
                 LogRel(("Shared Clipboard: Unable to retrieve clipboard data from clipboard (CF_HDROP), last error: %ld\n",
-                        GetLastError()));
+                        dwLastErr));
+            }
         }
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
         ShClWinClose();

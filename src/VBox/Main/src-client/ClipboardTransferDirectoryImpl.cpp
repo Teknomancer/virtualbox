@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferDirectoryImpl.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferDirectoryImpl.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer directory handle.
  */
@@ -275,7 +275,11 @@ HRESULT ClipboardTransferDirectory::close()
     }
     if (!pTransfer || hList == NIL_SHCLLISTHANDLE)
         return S_OK;
-    return clipboardTransferDirectoryRcToHrc(ShClTransferListClose(pTransfer, hList));
+    int vrc = ShClTransferListClose(pTransfer, hList);
+    HRESULT hrc = clipboardTransferDirectoryRcToHrc(vrc);
+    if (FAILED(hrc))
+        return setErrorBoth(hrc, vrc, tr("Closing clipboard transfer directory failed with %Rrc"), vrc);
+    return S_OK;
 #endif
 }
 
@@ -289,7 +293,7 @@ HRESULT ClipboardTransferDirectory::list(ULONG aMaxEntries, std::vector<ComPtr<I
     std::vector<ComPtr<IClipboardTransferFsObjInfo> > vecEntries;
     HRESULT hrc = listEx(aMaxEntries, ClipboardTransferListFlag_NoRecursion, vecEntries);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Listing clipboard transfer directory failed"));
     aObjInfo.clear();
     for (std::vector<ComPtr<IClipboardTransferFsObjInfo> >::const_iterator it = vecEntries.begin(); it != vecEntries.end(); ++it)
     {
@@ -310,9 +314,9 @@ HRESULT ClipboardTransferDirectory::read(ComPtr<IFsObjInfo> &aObjInfo)
     std::vector<ComPtr<IFsObjInfo> > vecInfo;
     HRESULT hrc = list(1, vecInfo);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Reading clipboard transfer directory failed"));
     if (vecInfo.empty())
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("No clipboard transfer directory entry is available"));
     aObjInfo = vecInfo[0];
     return S_OK;
 #endif
@@ -334,12 +338,15 @@ HRESULT ClipboardTransferDirectory::rewind()
         strPath = mData.mPath;
     }
     if (!pTransfer || hOld == NIL_SHCLLISTHANDLE)
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("Clipboard transfer directory is closed"));
 
     SHCLLISTHANDLE hNew = NIL_SHCLLISTHANDLE;
     int vrc = clipboardTransferDirectoryOpenList(pTransfer, strPath, &hNew);
     if (RT_FAILURE(vrc))
-        return clipboardTransferDirectoryRcToHrc(vrc);
+    {
+        HRESULT hrc = clipboardTransferDirectoryRcToHrc(vrc);
+        return setErrorBoth(hrc, vrc, tr("Rewinding clipboard transfer directory failed with %Rrc"), vrc);
+    }
 
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
@@ -373,7 +380,7 @@ HRESULT ClipboardTransferDirectory::listEx(ULONG aMaxEntries,
     ReturnComNotImplemented();
 #else
     if (aFlags & ~(ClipboardTransferListFlag_NoRecursion | ClipboardTransferListFlag_IncludeRoot | ClipboardTransferListFlag_NoFollowSymlinks))
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer directory-list flags %RU32"), aFlags);
 
     aEntries.clear();
     if (!(aFlags & ClipboardTransferListFlag_NoRecursion))
@@ -386,11 +393,11 @@ HRESULT ClipboardTransferDirectory::listEx(ULONG aMaxEntries,
             strPath = mData.mPath;
         }
         if (ptrParent.isNull())
-            return E_FAIL;
+            return setError(E_FAIL, tr("Clipboard transfer directory has no parent transfer for recursive listing"));
         SafeIfaceArray<IClipboardTransferFsObjInfo> aSafeEntries;
         HRESULT hrc = ptrParent->List(Bstr(strPath).raw(), aFlags, ComSafeArrayAsOutParam(aSafeEntries));
         if (FAILED(hrc))
-            return hrc;
+            return setError(hrc, tr("Recursively listing clipboard transfer directory failed"));
         for (size_t i = 0; i < aSafeEntries.size(); ++i)
         {
             if (aMaxEntries && aEntries.size() >= aMaxEntries)
@@ -410,7 +417,7 @@ HRESULT ClipboardTransferDirectory::listEx(ULONG aMaxEntries,
         strPath = mData.mPath;
     }
     if (!pTransfer || hList == NIL_SHCLLISTHANDLE)
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("Clipboard transfer directory is closed"));
 
     ULONG cEntries = 0;
     for (;;)
@@ -421,21 +428,25 @@ HRESULT ClipboardTransferDirectory::listEx(ULONG aMaxEntries,
         SHCLLISTENTRY Entry;
         int vrc = ShClTransferListEntryInit(&Entry);
         if (RT_FAILURE(vrc))
-            return clipboardTransferDirectoryRcToHrc(vrc);
+        {
+            HRESULT hrc = clipboardTransferDirectoryRcToHrc(vrc);
+            return setErrorBoth(hrc, vrc, tr("Initializing clipboard transfer directory entry failed with %Rrc"), vrc);
+        }
         vrc = ShClTransferListRead(pTransfer, hList, &Entry);
         if (RT_FAILURE(vrc))
         {
             ShClTransferListEntryDestroy(&Entry);
             if (vrc == VERR_NO_MORE_FILES || vrc == VERR_NO_DATA || vrc == VERR_NOT_FOUND)
                 break;
-            return clipboardTransferDirectoryRcToHrc(vrc);
+            HRESULT hrc = clipboardTransferDirectoryRcToHrc(vrc);
+            return setErrorBoth(hrc, vrc, tr("Reading clipboard transfer directory entry failed with %Rrc"), vrc);
         }
 
         ComPtr<IClipboardTransferFsObjInfo> ptrInfo;
         HRESULT hrc = clipboardTransferDirectoryEntryToInfo(strPath, Entry, ptrInfo);
         ShClTransferListEntryDestroy(&Entry);
         if (FAILED(hrc))
-            return hrc;
+            return setError(hrc, tr("Creating clipboard transfer directory entry information failed"));
         aEntries.push_back(ptrInfo);
         ++cEntries;
     }

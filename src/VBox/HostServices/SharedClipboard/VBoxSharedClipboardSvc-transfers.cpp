@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -998,6 +998,12 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
     if (   u32Function > VBOX_SHCL_GUEST_FN_LAST
         || !(pClient->State.fGuestFeatures0 & VBOX_SHCL_GF_0_CONTEXT_ID))
         return VERR_NOT_IMPLEMENTED;
+
+    if (!(pClient->State.fGuestFeatures0 & VBOX_SHCL_GF_0_TRANSFERS))
+    {
+        LogRel2(("Shared Clipboard: Guest attempted file transfer message without negotiated transfer support\n"));
+        return VERR_ACCESS_DENIED;
+    }
 
     if (!(g_fTransferMode & VBOX_SHCL_TRANSFER_MODE_F_ENABLED))
     {

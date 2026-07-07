@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -1237,18 +1237,19 @@ PSHCLOBJDATACHUNK ShClTransferObjDataChunkDup(PSHCLOBJDATACHUNK pDataChunk)
     if (!pDataChunkDup)
         return NULL;
 
-    if (pDataChunk->pvData)
-    {
-        Assert(pDataChunk->cbData);
+    pDataChunkDup->uHandle = pDataChunk->uHandle;
+    pDataChunkDup->cbData  = pDataChunk->cbData;
 
-        pDataChunkDup->uHandle = pDataChunk->uHandle;
-        pDataChunkDup->pvData  = RTMemDup(pDataChunk->pvData, pDataChunk->cbData);
+    if (pDataChunk->cbData)
+    {
+        AssertPtrReturnStmt(pDataChunk->pvData, RTMemFree(pDataChunkDup), NULL);
+
+        pDataChunkDup->pvData = RTMemDup(pDataChunk->pvData, pDataChunk->cbData);
         if (!pDataChunkDup->pvData)
         {
             RTMemFree(pDataChunkDup);
             return NULL;
         }
-        pDataChunkDup->cbData  = pDataChunk->cbData;
     }
 
     return pDataChunkDup;
@@ -1274,7 +1275,7 @@ void ShClTransferObjDataChunkDestroy(PSHCLOBJDATACHUNK pDataChunk)
         pDataChunk->cbData = 0;
     }
 
-    pDataChunk->uHandle = 0;
+    pDataChunk->uHandle = NIL_SHCLOBJHANDLE;
 }
 
 /**
@@ -1365,28 +1366,33 @@ static int shClTransferCreateInternal(SHCLTRANSFERDIR enmDir, SHCLSOURCE enmSour
 
     ShClTransferListInit(&pTransfer->lstRoots);
 
+    pTransfer->StatusChangeEvent = NIL_RTSEMEVENT;
+
     int rc = RTCritSectInit(&pTransfer->CritSect);
-    AssertRCReturn(rc, rc);
-
-    rc = RTSemEventCreate(&pTransfer->StatusChangeEvent);
-    AssertRCReturn(rc, rc);
-
-    rc = ShClEventSourceInit(&pTransfer->Events, 0 /* uID */);
     if (RT_SUCCESS(rc))
     {
-        if (pTransfer->Callbacks.pfnOnCreated)
-            pTransfer->Callbacks.pfnOnCreated(&pTransfer->CallbackCtx);
-
-        *ppTransfer = pTransfer;
-    }
-    else
-    {
-        if (pTransfer)
+        rc = RTSemEventCreate(&pTransfer->StatusChangeEvent);
+        if (RT_SUCCESS(rc))
         {
-            ShClTransferDestroy(pTransfer);
-            RTMemFree(pTransfer);
+            rc = ShClEventSourceInit(&pTransfer->Events, 0 /* uID */);
+            if (RT_SUCCESS(rc))
+            {
+                if (pTransfer->Callbacks.pfnOnCreated)
+                    pTransfer->Callbacks.pfnOnCreated(&pTransfer->CallbackCtx);
+
+                *ppTransfer = pTransfer;
+                LogFlowFuncLeaveRC(rc);
+                return rc;
+            }
+
+            RTSemEventDestroy(pTransfer->StatusChangeEvent);
+            pTransfer->StatusChangeEvent = NIL_RTSEMEVENT;
         }
+
+        RTCritSectDelete(&pTransfer->CritSect);
     }
+
+    RTMemFree(pTransfer);
 
     LogFlowFuncLeaveRC(rc);
     return rc;
@@ -1994,6 +2000,11 @@ void ShClTransferReset(PSHCLTRANSFER pTransfer)
 
         RTMemFree(pItObj);
     }
+
+    pTransfer->cListHandles   = 0;
+    pTransfer->uListHandleNext = 0;
+    pTransfer->cObjHandles    = 0;
+    pTransfer->uObjHandleNext = 0;
 
     shClTransferUnlock(pTransfer);
 }
@@ -3445,7 +3456,11 @@ int ShClTransferCtxRegister(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTransf
     shClTransferCtxLock(pTransferCtx);
 
     SHCLTRANSFERID idTransfer;
-    int rc = shClTransferCreateIDInternal(pTransferCtx, &idTransfer);
+    int rc;
+    if (shClTransferCtxIsValidTransferId(pTransfer->State.uID))
+        rc = VERR_ALREADY_EXISTS;
+    else
+        rc = shClTransferCreateIDInternal(pTransferCtx, &idTransfer);
     if (RT_SUCCESS(rc))
     {
         rc = shClTransferCtxTransferRegisterExInternal(pTransferCtx, pTransfer, idTransfer);
@@ -3477,7 +3492,9 @@ int ShClTransferCtxRegisterById(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTr
     shClTransferCtxLock(pTransferCtx);
 
     int rc;
-    if (pTransferCtx->cTransfers < VBOX_SHCL_MAX_TRANSFERS - 2 /* First and last are not used */)
+    if (shClTransferCtxIsValidTransferId(pTransfer->State.uID))
+        rc = VERR_ALREADY_EXISTS;
+    else if (pTransferCtx->cTransfers < VBOX_SHCL_MAX_TRANSFERS - 2 /* First and last are not used */)
     {
         PSHCLTRANSFER const pExisting = shClTransferCtxGetTransferByIdInternal(pTransferCtx, idTransfer);
         bool const fLive = ASMBitTest(&pTransferCtx->bmTransferIds[0], idTransfer);
@@ -4994,7 +5011,7 @@ int ShClSvcTransferCreate(PSHCLCLIENT pClient, SHCLTRANSFERDIR enmDir, SHCLSOURC
     /* When creating a new transfer, this is a good time to clean up old stuff we don't need anymore. */
     shClSvcTransferCleanupAllUnused(pClient);
 
-    PSHCLTRANSFER pTransfer;
+    PSHCLTRANSFER pTransfer = NULL;
     int rc = ShClTransferCreate(enmDir, enmSource, &pClient->Transfers.Callbacks, &pTransfer);
     if (RT_SUCCESS(rc))
     {

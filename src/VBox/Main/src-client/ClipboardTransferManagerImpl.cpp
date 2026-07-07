@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferManagerImpl.cpp 114614 2026-07-03 17:00:30Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferManagerImpl.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer manager object.
  */
@@ -403,7 +403,11 @@ HRESULT ClipboardTransferManager::getTransfers(ClipboardTransferDirection_T aDir
 #else /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
     if (aFlags != 0)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer manager flags %RU32"), aFlags);
+    if (   aDirection != ClipboardTransferDirection_Any
+        && aDirection != ClipboardTransferDirection_ToGuest
+        && aDirection != ClipboardTransferDirection_ToHost)
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer direction %RU32"), (uint32_t)aDirection);
 
     AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
     aTransfers.clear();
@@ -417,7 +421,7 @@ HRESULT ClipboardTransferManager::getTransfers(ClipboardTransferDirection_T aDir
             ClipboardTransferDirection_T enmDirection = ClipboardTransferDirection_Any;
             HRESULT hrc = it->mTransfer->COMGETTER(Direction)(&enmDirection);
             if (FAILED(hrc))
-                return hrc;
+                return setError(hrc, tr("Querying clipboard transfer direction failed"));
             if (enmDirection != aDirection)
                 continue;
         }
@@ -479,18 +483,18 @@ HRESULT ClipboardTransferManager::createTransfer(ClipboardTransferDirection_T aD
     ComObjPtr<ClipboardTransfer> ptrTransferObj;
     HRESULT hrc = ptrTransferObj.createObject();
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Creating clipboard transfer object failed"));
 
     ComPtr<IClipboardItem> ptrItem;
     ComPtr<IProgress> ptrProgress;
     hrc = ptrTransferObj->init(idTransfer, aDirection, aSource, aAction, ptrItem, ptrProgress);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Initializing clipboard transfer object failed"));
 
     ComPtr<IClipboardTransfer> ptrTransfer;
     hrc = ptrTransferObj.queryInterfaceTo(ptrTransfer.asOutParam());
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Querying clipboard transfer interface failed"));
 
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
@@ -524,13 +528,13 @@ HRESULT ClipboardTransferManager::add(const ComPtr<IClipboardTransfer> &aTransfe
     if (aTransfer.isNull())
     {
         LogFunc(("Rejecting NULL transfer add\n"));
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer to add must not be NULL"));
     }
 
     ULONG idTransfer = 0;
     HRESULT hrc = aTransfer->COMGETTER(Id)(&idTransfer);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Querying clipboard transfer ID failed"));
 
     bool fFireEvent = false;
     {
@@ -588,7 +592,7 @@ HRESULT ClipboardTransferManager::remove(const ComPtr<IClipboardTransfer> &aTran
     if (aTransfer.isNull())
     {
         LogFunc(("Rejecting NULL transfer remove\n"));
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer to remove must not be NULL"));
     }
 
     bool fRemoved = false;
@@ -641,7 +645,7 @@ HRESULT ClipboardTransferManager::cancel(const ComPtr<IClipboardTransfer> &aTran
     if (aTransfer.isNull())
     {
         LogFunc(("Rejecting NULL transfer cancel\n"));
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer to cancel must not be NULL"));
     }
 
     bool fCanceled = false;
@@ -686,13 +690,13 @@ HRESULT ClipboardTransferManager::cancel(const ComPtr<IClipboardTransfer> &aTran
                 autoCaller.attach(pParent);
         }
         if (!pParent)
-            return E_FAIL;
+            return setError(E_FAIL, tr("Clipboard transfer cannot be canceled because no clipboard backend is available"));
         if (FAILED(autoCaller.hrc()))
-            return autoCaller.hrc();
+            return setError(autoCaller.hrc(), tr("Clipboard backend is not ready for canceling clipboard transfers"));
 
         HRESULT hrc = pParent->i_transferCancel(idSession, (SHCLTRANSFERID)idTransfer, uGeneration);
         if (FAILED(hrc))
-            return hrc;
+            return setError(hrc, tr("Canceling clipboard transfer through the backend failed"));
 
         {
             AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
@@ -739,7 +743,7 @@ HRESULT ClipboardTransferManager::approve(const ComPtr<IClipboardTransfer> &aTra
     ReturnComNotImplemented();
 #else
     if (aFlags != 0)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer approval flags %RU32"), aFlags);
     return respond(aTransfer, ClipboardTransferInteraction_Approval, com::Utf8Str(), ClipboardTransferResponse_Accept,
                    com::Utf8Str(), 0);
 #endif
@@ -791,20 +795,24 @@ HRESULT ClipboardTransferManager::respond(const ComPtr<IClipboardTransfer> &aTra
     RT_NOREF(aTransfer, aInteraction, aPath, aResponse, aResponsePath, aFlags);
     ReturnComNotImplemented();
 #else
-    if (aTransfer.isNull() || aInteraction == ClipboardTransferInteraction_None || aResponse == ClipboardTransferResponse_None)
-        return E_INVALIDARG;
+    if (aTransfer.isNull())
+        return setError(E_INVALIDARG, tr("Clipboard transfer response requires a transfer object"));
+    if (aInteraction == ClipboardTransferInteraction_None)
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer interaction %RU32"), (uint32_t)aInteraction);
+    if (aResponse == ClipboardTransferResponse_None)
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer response %RU32"), (uint32_t)aResponse);
     if (aFlags != 0)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer response flags %RU32"), aFlags);
     if (   aResponsePath.isNotEmpty()
         && aInteraction != ClipboardTransferInteraction_Destination
         && aInteraction != ClipboardTransferInteraction_Rename)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer response path is only valid for destination or rename interactions"));
     HRESULT hrc = clipboardTransferManagerValidatePath(aPath, true /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Invalid clipboard transfer interaction path"));
     hrc = clipboardTransferManagerValidatePath(aResponsePath, true /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Invalid clipboard transfer response path"));
 
     bool fKnown = false;
     {
@@ -818,7 +826,7 @@ HRESULT ClipboardTransferManager::respond(const ComPtr<IClipboardTransfer> &aTra
             }
     }
     if (!fKnown)
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("Clipboard transfer object is not known to this manager"));
 
     ClipboardTransferState_T const enmState = aResponse == ClipboardTransferResponse_Reject
                                             || aResponse == ClipboardTransferResponse_Cancel
@@ -840,7 +848,7 @@ HRESULT ClipboardTransferManager::respond(const ComPtr<IClipboardTransfer> &aTra
 HRESULT ClipboardTransferManager::pause(const ComPtr<IClipboardTransfer> &aTransfer)
 {
     RT_NOREF(aTransfer);
-    return E_NOTIMPL;
+    ReturnComNotImplemented();
 }
 
 
@@ -853,7 +861,7 @@ HRESULT ClipboardTransferManager::pause(const ComPtr<IClipboardTransfer> &aTrans
 HRESULT ClipboardTransferManager::resume(const ComPtr<IClipboardTransfer> &aTransfer)
 {
     RT_NOREF(aTransfer);
-    return E_NOTIMPL;
+    ReturnComNotImplemented();
 }
 
 

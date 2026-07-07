@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendX11.cpp 114526 2026-06-25 10:37:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendX11.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - X11 backend.
  */
@@ -283,6 +283,14 @@ int ShClBackendReportFormats(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, SHCLFOR
 {
     RT_NOREF(pBackend);
 
+#if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS) && !defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP)
+    if (fFormats & VBOX_SHCL_FMT_URI_LIST)
+    {
+        LogRel2(("Shared Clipboard: X11 backend requires HTTP transfer support for URI-list offers, masking format\n"));
+        fFormats &= ~VBOX_SHCL_FMT_URI_LIST;
+    }
+#endif
+
     int vrc = ShClX11ReportFormatsToX11Async(&pClient->State.pCtx->X11, fFormats);
 
     LogFlowFuncLeaveRC(vrc);
@@ -297,6 +305,14 @@ int ShClBackendReportFormatsToGuest(PSHCLBACKEND pBackend, PSHCLCLIENT pClient, 
     RT_NOREF(pBackend);
 
     int vrc;
+
+#if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS) && !defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP)
+    if (fFormats & VBOX_SHCL_FMT_URI_LIST)
+    {
+        LogRel2(("Shared Clipboard: X11 backend requires HTTP transfer support for URI-list offers, masking format\n"));
+        fFormats &= ~VBOX_SHCL_FMT_URI_LIST;
+    }
+#endif
 
     PSHCLCLIENTMSG pMsg = ShClSvcClientMsgAlloc(pClient, VBOX_SHCL_HOST_MSG_FORMATS_REPORT, 2);
     if (pMsg)
@@ -600,12 +616,24 @@ static DECLCALLBACK(int) shClSvcX11RequestDataFromSourceCallback(PSHCLCONTEXT pC
 
     LogFlowFunc(("pCtx=%p, uFmt=0x%x\n", pCtx, uFmt));
 
+    *ppv = NULL;
+    *pcb = 0;
+
     if (pCtx->fShuttingDown)
     {
         /* The shared clipboard is disconnecting. */
         LogRel(("Shared Clipboard: Host requested guest clipboard data after guest had disconnected\n"));
         return VERR_WRONG_ORDER;
     }
+
+#if defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS) && !defined(VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP)
+    if (uFmt == VBOX_SHCL_FMT_URI_LIST)
+    {
+        *ppv = NULL;
+        *pcb = 0;
+        return VERR_NOT_SUPPORTED;
+    }
+#endif
 
     PSHCLCLIENT const pClient = pCtx->pClient;
     int vrc = ShClSvcReadDataFromGuest(pClient, uFmt, ppv, pcb);
@@ -620,15 +648,13 @@ static DECLCALLBACK(int) shClSvcX11RequestDataFromSourceCallback(PSHCLCONTEXT pC
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     if (uFmt == VBOX_SHCL_FMT_URI_LIST)
     {
-        PSHCLTRANSFER pTransfer;
+        PSHCLTRANSFER pTransfer = NULL;
         vrc = ShClSvcTransferCreate(pClient, SHCLTRANSFERDIR_FROM_REMOTE, SHCLSOURCE_REMOTE,
                                     NIL_SHCLTRANSFERID /* Creates a new transfer ID */, &pTransfer);
         if (RT_SUCCESS(vrc))
         {
             /* Initialize the transfer on the host side. */
             vrc = ShClSvcTransferInit(pClient, pTransfer);
-            if (RT_FAILURE(vrc))
-                 ShClSvcTransferDestroy(pClient, pTransfer);
         }
 
         if (RT_SUCCESS(vrc))
@@ -652,6 +678,7 @@ static DECLCALLBACK(int) shClSvcX11RequestDataFromSourceCallback(PSHCLCONTEXT pC
                         vrc = ShClTransferHttpConvertToStringList(pHttpSrv, pTransfer, &pszData, &cbData);
                         if (RT_SUCCESS(vrc))
                         {
+                            RTMemFree(*ppv);
                             *ppv = pszData;
                             *pcb = cbData;
                             /* ppv has ownership of pszData now. */
@@ -662,6 +689,17 @@ static DECLCALLBACK(int) shClSvcX11RequestDataFromSourceCallback(PSHCLCONTEXT pC
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS_HTTP */
                 }
             }
+        }
+
+        if (   RT_FAILURE(vrc)
+            && pTransfer)
+            ShClSvcTransferDestroy(pClient, pTransfer);
+
+        if (RT_FAILURE(vrc))
+        {
+            RTMemFree(*ppv);
+            *ppv = NULL;
+            *pcb = 0;
         }
     }
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */

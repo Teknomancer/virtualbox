@@ -1,4 +1,4 @@
-/* $Id: tstClipboard.cpp 114612 2026-07-03 15:47:47Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboard.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main API Testcase - Clipboard.
  */
@@ -2211,6 +2211,9 @@ static void tstClipboardPublicApi(RTTEST hTest)
         hrc = ptrTransfers->GetTransfers(ClipboardTransferDirection_Any, 0, ComSafeArrayAsOutParam(aTransfers));
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("GetTransfers(Any initial) failed, hrc=%Rhrc\n", hrc));
         RTTESTI_CHECK(aTransfers.size() == 0);
+        aTransfers.setNull();
+        hrc = ptrTransfers->GetTransfers((ClipboardTransferDirection_T)999, 0, ComSafeArrayAsOutParam(aTransfers));
+        RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("GetTransfers(invalid direction) returned hrc=%Rhrc, expected E_INVALIDARG\n", hrc));
 
         char szTmpDir[RTPATH_MAX];
         char szFile1[RTPATH_MAX];
@@ -2250,6 +2253,11 @@ static void tstClipboardPublicApi(RTTEST hTest)
 
         hrc = ptrTransfers->Add(ptrTransfer);
         RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardTransferManager::Add(source-path transfer) failed, hrc=%Rhrc\n", hrc));
+
+        hrc = ptrTransfers->Pause(ptrTransfer);
+        RTTESTI_CHECK_MSG(hrc == E_NOTIMPL, ("IClipboardTransferManager::Pause returned hrc=%Rhrc, expected E_NOTIMPL\n", hrc));
+        hrc = ptrTransfers->Resume(ptrTransfer);
+        RTTESTI_CHECK_MSG(hrc == E_NOTIMPL, ("IClipboardTransferManager::Resume returned hrc=%Rhrc, expected E_NOTIMPL\n", hrc));
 
         aTransfers.setNull();
         hrc = ptrTransfers->GetTransfers(ClipboardTransferDirection_Any, 0, ComSafeArrayAsOutParam(aTransfers));
@@ -2350,6 +2358,20 @@ static void tstClipboardPublicApi(RTTEST hTest)
             RTTESTI_CHECK_MSG(SUCCEEDED(hrc), ("IClipboardTransferData::Read(RootList) failed, hrc=%Rhrc\n", hrc));
             RTTESTI_CHECK(fInfo & VBOX_SHCL_INFO_F_FSOBJINFO);
             RTTESTI_CHECK(aInfo.size() == sizeof(SHCLFSOBJINFO));
+
+            LONG64 hInvalid = 0;
+            hrc = ptrTransferData->Open(ClipboardTransferDataType_List, Bstr("../parent").raw(), Bstr("").raw(),
+                                        0 /* aFlags */, &hInvalid);
+            RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("IClipboardTransferData::Open(List '../parent') returned hrc=%Rhrc\n", hrc));
+            hrc = ptrTransferData->Open(ClipboardTransferDataType_List, Bstr("/absolute").raw(), Bstr("").raw(),
+                                        0 /* aFlags */, &hInvalid);
+            RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("IClipboardTransferData::Open(List '/absolute') returned hrc=%Rhrc\n", hrc));
+            hrc = ptrTransferData->Open(ClipboardTransferDataType_Object, Bstr("dir\\file").raw(), Bstr("").raw(),
+                                        SHCL_OBJ_CF_ACCESS_READ | SHCL_OBJ_CF_ACCESS_DENYWRITE, &hInvalid);
+            RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("IClipboardTransferData::Open(Object 'dir\\file') returned hrc=%Rhrc\n", hrc));
+            hrc = ptrTransferData->Open(ClipboardTransferDataType_Object, Bstr("C:file").raw(), Bstr("").raw(),
+                                        SHCL_OBJ_CF_ACCESS_READ | SHCL_OBJ_CF_ACCESS_DENYWRITE, &hInvalid);
+            RTTESTI_CHECK_MSG(hrc == E_INVALIDARG, ("IClipboardTransferData::Open(Object 'C:file') returned hrc=%Rhrc\n", hrc));
 
             LONG64 hObj = 0;
             hrc = ptrTransferData->Open(ClipboardTransferDataType_Object, bstrRootName.raw(), Bstr("").raw(),

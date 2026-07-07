@@ -16404,6 +16404,12 @@
     <method name="pause">
       <desc>
         Pauses a running transfer when supported.
+        <note>
+          Currently not implemented.
+        </note>
+        <result name="E_NOTIMPL">
+          The method is not implemented yet.
+        </result>
       </desc>
       <param name="transfer" type="IClipboardTransfer" dir="in">
         <desc>Clipboard transfer to pause.</desc>
@@ -16413,6 +16419,12 @@
     <method name="resume">
       <desc>
         Resumes a paused transfer when supported.
+        <note>
+          Currently not implemented.
+        </note>
+        <result name="E_NOTIMPL">
+          The method is not implemented yet.
+        </result>
       </desc>
       <param name="transfer" type="IClipboardTransfer" dir="in">
         <desc>Clipboard transfer to resume.</desc>

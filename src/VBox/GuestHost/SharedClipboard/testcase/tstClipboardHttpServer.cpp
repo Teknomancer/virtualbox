@@ -1,4 +1,4 @@
-/* $Id: tstClipboardHttpServer.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardHttpServer.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard HTTP server test case.
  */
@@ -92,23 +92,175 @@ static struct
     /*
      * Other stuff (not supported).
      */
-    { RTFS_TYPE_DIRECTORY, "test-directory",                "test-directory",             0,          VERR_HTTP_NOT_SUPPORTED },
-    { RTFS_TYPE_SYMLINK,   "test-symlink",                  "test-symlink",               0,          VERR_HTTP_NOT_SUPPORTED }
+    { RTFS_TYPE_DIRECTORY, "test-directory",                "test-directory",             0,          VERR_HTTP_NOT_SUPPORTED }
 };
 
-
-static void tstCreateTransferSingle(RTTEST hTest, PSHCLTRANSFERCTX pTransferCtx, PSHCLHTTPSERVER pSrv,
-                                    const char *pszPath, PSHCLTXPROVIDER pProvider)
+/**
+ * Creates and registers a single local transfer for HTTP serving.
+ *
+ * @returns VBox status code.
+ * @param   hTest           The test handle.
+ * @param   pTransferCtx    Transfer context to register with.
+ * @param   pSrv            HTTP server to register with.
+ * @param   pszPath         Local path to serve.
+ * @param   pProvider       Local transfer provider.
+ */
+static int tstCreateTransferSingle(RTTEST hTest, PSHCLTRANSFERCTX pTransferCtx, PSHCLHTTPSERVER pSrv,
+                                   const char *pszPath, PSHCLTXPROVIDER pProvider)
 {
     RTTestPrintf(hTest, RTTESTLVL_DEBUG, "tstCreateTransferSingle: pszPath=%s\n", pszPath);
 
-    PSHCLTRANSFER pTx;
-    RTTEST_CHECK_RC_OK(hTest, ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL, NULL /* Callbacks */, &pTx));
-    RTTEST_CHECK_RC_OK(hTest, ShClTransferSetProvider(pTx, pProvider));
-    RTTEST_CHECK_RC_OK(hTest, ShClTransferRootsSetFromPath(pTx, pszPath));
-    RTTEST_CHECK_RC_OK(hTest, ShClTransferInit(pTx));
-    RTTEST_CHECK_RC_OK(hTest, ShClTransferCtxRegister(pTransferCtx, pTx, NULL));
-    RTTEST_CHECK_RC_OK(hTest, ShClTransferHttpServerRegisterTransfer(pSrv, pTx));
+    PSHCLTRANSFER pTx = NULL;
+    bool fCtxRegistered = false;
+    bool fHttpRegistered = false;
+    int rc = VINF_SUCCESS;
+
+    do
+    {
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL,
+                                                                NULL /* Callbacks */, &pTx));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferSetProvider(pTx, pProvider));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferRootsSetFromPath(pTx, pszPath));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferInit(pTx));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferCtxRegister(pTransferCtx, pTx, NULL));
+        fCtxRegistered = true;
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferHttpServerRegisterTransfer(pSrv, pTx));
+        fHttpRegistered = true;
+    } while (0);
+
+    if (RT_FAILURE(rc))
+    {
+        if (fHttpRegistered)
+        {
+            int rc2 = ShClTransferHttpServerUnregisterTransfer(pSrv, pTx);
+            RTTEST_CHECK_RC_OK(hTest, rc2);
+            fHttpRegistered = RT_FAILURE(rc2);
+        }
+        if (!fHttpRegistered && fCtxRegistered)
+        {
+            int rc2 = ShClTransferCtxUnregisterById(pTransferCtx, ShClTransferGetID(pTx));
+            RTTEST_CHECK_RC_OK(hTest, rc2);
+            fCtxRegistered = RT_FAILURE(rc2);
+        }
+        if (!fHttpRegistered && !fCtxRegistered && pTx)
+            RTTEST_CHECK_RC_OK(hTest, ShClTransferDestroy(pTx));
+    }
+
+    return rc;
+}
+
+/**
+ * Performs one malformed HTTP GET request and checks the returned status.
+ *
+ * @param   hTest       The test handle.
+ * @param   hClient     HTTP client handle.
+ * @param   pszUrl      URL to request.
+ * @param   rcExpected  Expected IPRT status code.
+ */
+static void tstMalformedGet(RTTEST hTest, RTHTTP hClient, const char *pszUrl, int rcExpected)
+{
+    char szDstFile[RTPATH_MAX];
+    RTTEST_CHECK_RC_OK_RETV(hTest, RTPathTemp(szDstFile, sizeof(szDstFile)));
+    RTTEST_CHECK_RC_OK_RETV(hTest, RTPathAppend(szDstFile, sizeof(szDstFile), "tstClipboardHttpServer-XXXXXX"));
+    RTTEST_CHECK_RC_OK_RETV(hTest, RTFileCreateTemp(szDstFile, 0600));
+    RTTEST_CHECK_RC(hTest, RTHttpGetFile(hClient, pszUrl, szDstFile), rcExpected);
+    RTTEST_CHECK_RC_OK(hTest, RTFileDelete(szDstFile));
+}
+
+
+/**
+ * Tests malformed HTTP paths.
+ *
+ * @param   hTest       The test handle.
+ * @param   hClient     HTTP client handle.
+ * @param   pszBaseUrl  Base URL of a registered transfer.
+ */
+static void tstMalformedPaths(RTTEST hTest, RTHTTP hClient, const char *pszBaseUrl)
+{
+    RTTestSub(hTest, "malformed HTTP transfer paths");
+
+    char szUrl[RTPATH_MAX];
+    RTTEST_CHECK(hTest, RTStrPrintf2(szUrl, sizeof(szUrl), "%s", pszBaseUrl));
+    tstMalformedGet(hTest, hClient, szUrl, VERR_HTTP_BAD_REQUEST);
+
+    RTTEST_CHECK(hTest, RTStrPrintf2(szUrl, sizeof(szUrl), "%s/", pszBaseUrl));
+    tstMalformedGet(hTest, hClient, szUrl, VERR_HTTP_BAD_REQUEST);
+
+    RTTEST_CHECK(hTest, RTStrPrintf2(szUrl, sizeof(szUrl), "%sx/file1.txt", pszBaseUrl));
+    tstMalformedGet(hTest, hClient, szUrl, VERR_HTTP_NOT_FOUND);
+}
+
+
+/**
+ * Tests duplicate HTTP transfer registration handling.
+ *
+ * @param   hTest           The test handle.
+ * @param   pTransferCtx    Transfer context to register with.
+ * @param   pSrv            HTTP server to register with.
+ * @param   pszPath         Local path to serve.
+ * @param   pProvider       Local transfer provider.
+ */
+static void tstDuplicateTransferRegistration(RTTEST hTest, PSHCLTRANSFERCTX pTransferCtx, PSHCLHTTPSERVER pSrv,
+                                             const char *pszPath, PSHCLTXPROVIDER pProvider)
+{
+    RTTestSub(hTest, "duplicate HTTP transfer registration");
+
+    PSHCLTRANSFER pTx = NULL;
+    bool fCtxRegistered = false;
+    bool fHttpRegistered = false;
+    int rc = VINF_SUCCESS;
+
+    do
+    {
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferCreate(SHCLTRANSFERDIR_TO_REMOTE, SHCLSOURCE_LOCAL,
+                                                                NULL /* Callbacks */, &pTx));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferSetProvider(pTx, pProvider));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferRootsSetFromPath(pTx, pszPath));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferInit(pTx));
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferCtxRegister(pTransferCtx, pTx, NULL));
+        fCtxRegistered = true;
+        RTTEST_CHECK_RC_OK_BREAK(hTest, rc = ShClTransferHttpServerRegisterTransfer(pSrv, pTx));
+        fHttpRegistered = true;
+
+        uint32_t const cTransfers = ShClTransferHttpServerGetTransferCount(pSrv);
+        RTTEST_CHECK_RC(hTest, ShClTransferHttpServerRegisterTransfer(pSrv, pTx), VERR_ALREADY_EXISTS);
+        RTTEST_CHECK(hTest, ShClTransferHttpServerGetTransferCount(pSrv) == cTransfers);
+
+        rc = ShClTransferHttpServerUnregisterTransfer(pSrv, pTx);
+        RTTEST_CHECK_RC_OK(hTest, rc);
+        fHttpRegistered = RT_FAILURE(rc);
+        if (RT_FAILURE(rc))
+            break;
+        RTTEST_CHECK(hTest, ShClTransferHttpServerGetTransferCount(pSrv) + 1 == cTransfers);
+
+        rc = ShClTransferCtxUnregisterById(pTransferCtx, ShClTransferGetID(pTx));
+        RTTEST_CHECK_RC_OK(hTest, rc);
+        fCtxRegistered = RT_FAILURE(rc);
+        if (RT_FAILURE(rc))
+            break;
+
+        rc = ShClTransferDestroy(pTx);
+        RTTEST_CHECK_RC_OK(hTest, rc);
+        pTx = NULL;
+    } while (0);
+
+    if (RT_FAILURE(rc))
+    {
+        if (fHttpRegistered)
+        {
+            int rc2 = ShClTransferHttpServerUnregisterTransfer(pSrv, pTx);
+            RTTEST_CHECK_RC_OK(hTest, rc2);
+            fHttpRegistered = RT_FAILURE(rc2);
+        }
+        if (!fHttpRegistered && fCtxRegistered)
+        {
+            int rc2 = ShClTransferCtxUnregisterById(pTransferCtx, ShClTransferGetID(pTx));
+            RTTEST_CHECK_RC_OK(hTest, rc2);
+            fCtxRegistered = RT_FAILURE(rc2);
+        }
+        if (!fHttpRegistered && !fCtxRegistered && pTx)
+            RTTEST_CHECK_RC_OK(hTest, ShClTransferDestroy(pTx));
+    }
 }
 
 /**
@@ -135,10 +287,20 @@ static void tstManual(RTTEST hTest, PSHCLTRANSFERCTX pTransferCtx, PSHCLHTTPSERV
         char          *pszUrl = ShClTransferHttpServerGetUrlA(pHttpSrv, uId, 0 /* Entry index */);
         RTTEST_CHECK(hTest, pszUrl != NULL);
         RTTestPrintf(hTest, RTTESTLVL_ALWAYS, "URL #%02RU32: %s\n", i, pszUrl);
-        RTStrAPrintf(&pszUrls, "%s", pszUrl);
+        int rcAppend = VINF_SUCCESS;
         if (i > 0)
-            RTStrAPrintf(&pszUrls, "\n");
+        {
+            rcAppend = RTStrAAppend(&pszUrls, "\n");
+            RTTEST_CHECK_RC(hTest, rcAppend, VINF_SUCCESS);
+        }
+        if (RT_SUCCESS(rcAppend))
+        {
+            rcAppend = RTStrAAppend(&pszUrls, pszUrl);
+            RTTEST_CHECK_RC(hTest, rcAppend, VINF_SUCCESS);
+        }
         RTStrFree(pszUrl);
+        if (RT_FAILURE(rcAppend))
+            break;
     }
 
 #ifdef TESTCASE_WITH_X11
@@ -357,7 +519,7 @@ int main(int argc, char *argv[])
         {
             case VINF_GETOPT_NOT_OPTION:
             {
-                tstCreateTransferSingle(hTest, &TxCtx, &HttpSrv, ValueUnion.psz, &Provider);
+                RTTEST_CHECK_RC_OK(hTest, tstCreateTransferSingle(hTest, &TxCtx, &HttpSrv, ValueUnion.psz, &Provider));
                 break;
             }
 
@@ -370,6 +532,8 @@ int main(int argc, char *argv[])
     RTTEST_CHECK_RC_OK(hTest, RTPathTemp(szTempDir, sizeof(szTempDir)));
     RTTEST_CHECK_RC_OK(hTest, RTPathAppend(szTempDir, sizeof(szTempDir), "tstClipboardHttpServer-XXXXXX"));
     RTTEST_CHECK_RC_OK(hTest, RTDirCreateTemp(szTempDir, 0700));
+
+    tstDuplicateTransferRegistration(hTest, &TxCtx, &HttpSrv, szTempDir, &Provider);
 
     if (!g_fManual)
     {
@@ -427,7 +591,7 @@ int main(int argc, char *argv[])
             }
 
             if (RT_SUCCESS(rc))
-                tstCreateTransferSingle(hTest, &TxCtx, &HttpSrv, szPath, &Provider);
+                RTTEST_CHECK_RC_OK(hTest, tstCreateTransferSingle(hTest, &TxCtx, &HttpSrv, szPath, &Provider));
         }
     }
 
@@ -453,6 +617,16 @@ int main(int argc, char *argv[])
                                                          NULL /*pszProxyUser*/, NULL /*pszProxyPwd*/));
 
                 char szURL[RTPATH_MAX];
+                if (ShClTransferCtxGetTotalTransfers(&TxCtx) > 0)
+                {
+                    PSHCLTRANSFER pTx = ShClTransferCtxGetTransferByIndex(&TxCtx, 0);
+                    char *pszUrlBase = ShClTransferHttpServerGetUrlA(&HttpSrv, ShClTransferGetID(pTx), UINT64_MAX);
+                    if (pszUrlBase)
+                    {
+                        tstMalformedPaths(hTest, hClient, pszUrlBase);
+                        RTStrFree(pszUrlBase);
+                    }
+                }
                 for (size_t i = 0; i < RT_ELEMENTS(g_aTests); i++)
                 {
                     PSHCLTRANSFER pTx = ShClTransferCtxGetTransferByIndex(&TxCtx, i);
@@ -515,34 +689,37 @@ int main(int argc, char *argv[])
     /*
      * Cleanup
      */
-    char szPath[RTPATH_MAX];
-    for (size_t i = 0; i < RT_ELEMENTS(g_aTests); i++)
+    if (!g_fManual)
     {
-        RTTEST_CHECK      (hTest, RTStrPrintf(szPath, sizeof(szPath), szTempDir));
-        RTTEST_CHECK_RC_OK(hTest, RTPathAppend(szPath, sizeof(szPath), g_aTests[i].pszPath));
-
-        switch (g_aTests[i].fMode & RTFS_TYPE_MASK)
+        char szPath[RTPATH_MAX];
+        for (size_t i = 0; i < RT_ELEMENTS(g_aTests); i++)
         {
-            case RTFS_TYPE_FILE:
-            {
-                RTTEST_CHECK_RC_OK(hTest, RTFileDelete(szPath));
-                break;
-            }
+            RTTEST_CHECK      (hTest, RTStrPrintf(szPath, sizeof(szPath), szTempDir));
+            RTTEST_CHECK_RC_OK(hTest, RTPathAppend(szPath, sizeof(szPath), g_aTests[i].pszPath));
 
-            case RTFS_TYPE_DIRECTORY:
+            switch (g_aTests[i].fMode & RTFS_TYPE_MASK)
             {
-                RTTEST_CHECK_RC_OK(hTest, RTDirRemove(szPath)); /* ASSUMES empty dir. */
-                break;
-            }
+                case RTFS_TYPE_FILE:
+                {
+                    RTTEST_CHECK_RC_OK(hTest, RTFileDelete(szPath));
+                    break;
+                }
 
-            case RTFS_TYPE_SYMLINK:
-            {
-                RTTEST_CHECK_RC_OK(hTest, RTSymlinkDelete(szPath, 0 /* fDelete */));
-                break;
-            }
+                case RTFS_TYPE_DIRECTORY:
+                {
+                    RTTEST_CHECK_RC_OK(hTest, RTDirRemove(szPath)); /* ASSUMES empty dir. */
+                    break;
+                }
 
-            default:
-                break;
+                case RTFS_TYPE_SYMLINK:
+                {
+                    RTTEST_CHECK_RC_OK(hTest, RTSymlinkDelete(szPath, 0 /* fDelete */));
+                    break;
+                }
+
+                default:
+                    break;
+            }
         }
     }
     RTTEST_CHECK_RC_OK(hTest, RTDirRemove(szTempDir));

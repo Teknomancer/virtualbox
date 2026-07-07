@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferImpl.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferImpl.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer object.
  */
@@ -740,13 +740,16 @@ HRESULT ClipboardTransfer::getData(ComPtr<IClipboardTransferData> &aData)
     ComObjPtr<ClipboardTransferData> ptrData;
     HRESULT hrc = ptrData.createObject();
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Creating clipboard transfer data-plane object failed"));
 
     ComPtr<IClipboardTransfer> ptrSelf(this);
     hrc = ptrData->init(ptrSelf, pTransfer);
     if (FAILED(hrc))
-        return hrc;
-    return ptrData.queryInterfaceTo(aData.asOutParam());
+        return setError(hrc, tr("Initializing clipboard transfer data-plane object failed"));
+    hrc = ptrData.queryInterfaceTo(aData.asOutParam());
+    if (FAILED(hrc))
+        return setError(hrc, tr("Querying clipboard transfer data-plane interface failed"));
+    return S_OK;
 #endif
 }
 
@@ -809,13 +812,13 @@ HRESULT ClipboardTransfer::setSourcePaths(const std::vector<com::Utf8Str> &aSour
     }
     catch (std::bad_alloc &)
     {
-        return E_OUTOFMEMORY;
+        return setError(E_OUTOFMEMORY, tr("Copying clipboard transfer source paths failed"));
     }
 
     PSHCLTRANSFER pNewTransfer = NULL;
     HRESULT hrc = clipboardTransferCreateLocalProviderBackend(vecSourcePaths, &pNewTransfer);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Creating clipboard transfer source-path backend failed"));
 
     PSHCLTRANSFER pOldTransfer = NULL;
     bool fDestroyOldTransfer = false;
@@ -864,11 +867,11 @@ HRESULT ClipboardTransfer::roots(std::vector<ComPtr<IClipboardTransferFsObjInfo>
     {
         PCSHCLLISTENTRY pEntry = ShClTransferRootsEntryGet(pTransfer, i);
         if (!pEntry)
-            return VBOX_E_SHCL_NO_DATA;
+            return setError(VBOX_E_SHCL_NO_DATA, tr("No clipboard transfer root entry exists at index %RU64"), i);
         ComPtr<IClipboardTransferFsObjInfo> ptrInfo;
         HRESULT hrc = clipboardTransferCreateFsObjInfoFromEntry(com::Utf8Str(), pEntry, ptrInfo);
         if (FAILED(hrc))
-            return hrc;
+            return setError(hrc, tr("Creating clipboard transfer root entry information failed"));
         aNodes.push_back(ptrInfo);
     }
     return S_OK;
@@ -892,25 +895,25 @@ HRESULT ClipboardTransfer::query(const com::Utf8Str &aPath,
 #else
     HRESULT hrc = clipboardTransferValidatePath(aPath, false /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Invalid clipboard transfer query path"));
 
     std::vector<ComPtr<IClipboardTransferFsObjInfo> > vecNodes;
     hrc = list(com::Utf8Str(), ClipboardTransferListFlag_None, vecNodes);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Listing clipboard transfer roots for query failed"));
     for (std::vector<ComPtr<IClipboardTransferFsObjInfo> >::const_iterator it = vecNodes.begin(); it != vecNodes.end(); ++it)
     {
         Bstr bstrPath;
         hrc = (*it)->COMGETTER(Path)(bstrPath.asOutParam());
         if (FAILED(hrc))
-            return hrc;
+            return setError(hrc, tr("Querying clipboard transfer node path failed"));
         if (com::Utf8Str(bstrPath) == aPath)
         {
             aNode = *it;
             return S_OK;
         }
     }
-    return VBOX_E_SHCL_NO_DATA;
+    return setError(VBOX_E_SHCL_NO_DATA, tr("Clipboard transfer path '%s' was not found"), aPath.c_str());
 #endif
 }
 
@@ -932,10 +935,10 @@ HRESULT ClipboardTransfer::list(const com::Utf8Str &aPath,
     ReturnComNotImplemented();
 #else
     if (aFlags & ~(ClipboardTransferListFlag_NoRecursion | ClipboardTransferListFlag_IncludeRoot | ClipboardTransferListFlag_NoFollowSymlinks))
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer list flags %RU32"), aFlags);
     HRESULT hrc = clipboardTransferValidatePath(aPath, true /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Invalid clipboard transfer list path"));
 
     aNodes.clear();
     PSHCLTRANSFER pTransfer;
@@ -949,8 +952,10 @@ HRESULT ClipboardTransfer::list(const com::Utf8Str &aPath,
     if (aPath.isEmpty())
     {
         hrc = roots(aNodes);
-        if (FAILED(hrc) || (aFlags & ClipboardTransferListFlag_NoRecursion))
-            return hrc;
+        if (FAILED(hrc))
+            return setError(hrc, tr("Listing clipboard transfer roots failed"));
+        if (aFlags & ClipboardTransferListFlag_NoRecursion)
+            return S_OK;
 
         std::vector<ComPtr<IClipboardTransferFsObjInfo> > vecRoots = aNodes;
         for (std::vector<ComPtr<IClipboardTransferFsObjInfo> >::const_iterator it = vecRoots.begin(); it != vecRoots.end(); ++it)
@@ -958,16 +963,16 @@ HRESULT ClipboardTransfer::list(const com::Utf8Str &aPath,
             FsObjType_T enmType = FsObjType_Unknown;
             HRESULT hrc2 = (*it)->COMGETTER(Type)(&enmType);
             if (FAILED(hrc2))
-                return hrc2;
+                return setError(hrc2, tr("Querying clipboard transfer node type failed"));
             if (enmType == FsObjType_Directory)
             {
                 Bstr bstrPath;
                 hrc2 = (*it)->COMGETTER(Path)(bstrPath.asOutParam());
                 if (FAILED(hrc2))
-                    return hrc2;
+                    return setError(hrc2, tr("Querying clipboard transfer node path failed"));
                 hrc2 = clipboardTransferListRecursive(pTransfer, com::Utf8Str(bstrPath), aFlags, aNodes);
                 if (FAILED(hrc2))
-                    return hrc2;
+                    return setError(hrc2, tr("Recursively listing clipboard transfer directory failed"));
             }
         }
         return S_OK;
@@ -978,10 +983,13 @@ HRESULT ClipboardTransfer::list(const com::Utf8Str &aPath,
         ComPtr<IClipboardTransferFsObjInfo> ptrRoot;
         hrc = query(aPath, ptrRoot);
         if (FAILED(hrc))
-            return hrc;
+            return setError(hrc, tr("Querying clipboard transfer list root failed"));
         aNodes.push_back(ptrRoot);
     }
-    return clipboardTransferListRecursive(pTransfer, aPath, aFlags, aNodes);
+    hrc = clipboardTransferListRecursive(pTransfer, aPath, aFlags, aNodes);
+    if (FAILED(hrc))
+        return setError(hrc, tr("Listing clipboard transfer directory failed"));
+    return S_OK;
 #endif
 }
 
@@ -1003,10 +1011,10 @@ HRESULT ClipboardTransfer::openDirectory(const com::Utf8Str &aPath,
     ReturnComNotImplemented();
 #else
     if (aFlags & ~(ClipboardTransferListFlag_NoRecursion | ClipboardTransferListFlag_IncludeRoot | ClipboardTransferListFlag_NoFollowSymlinks))
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Invalid clipboard transfer directory-open flags %RU32"), aFlags);
     HRESULT hrc = clipboardTransferValidatePath(aPath, false /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Invalid clipboard transfer directory path"));
 
     PSHCLTRANSFER pTransfer;
     {
@@ -1019,7 +1027,7 @@ HRESULT ClipboardTransfer::openDirectory(const com::Utf8Str &aPath,
     SHCLLISTHANDLE hList = NIL_SHCLLISTHANDLE;
     hrc = clipboardTransferOpenList(pTransfer, aPath, &hList);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Opening clipboard transfer directory failed"));
 
     ComPtr<IClipboardTransfer> ptrSelf(this);
 
@@ -1028,15 +1036,18 @@ HRESULT ClipboardTransfer::openDirectory(const com::Utf8Str &aPath,
     if (FAILED(hrc))
     {
         ShClTransferListClose(pTransfer, hList);
-        return hrc;
+        return setError(hrc, tr("Creating clipboard transfer directory object failed"));
     }
     hrc = ptrDirectory->init(ptrSelf, pTransfer, aPath, hList);
     if (FAILED(hrc))
     {
         ShClTransferListClose(pTransfer, hList);
-        return hrc;
+        return setError(hrc, tr("Initializing clipboard transfer directory object failed"));
     }
-    return ptrDirectory.queryInterfaceTo(aDirectory.asOutParam());
+    hrc = ptrDirectory.queryInterfaceTo(aDirectory.asOutParam());
+    if (FAILED(hrc))
+        return setError(hrc, tr("Querying clipboard transfer directory interface failed"));
+    return S_OK;
 #endif
 }
 
@@ -1071,11 +1082,11 @@ HRESULT ClipboardTransfer::openFile(const com::Utf8Str &aPath,
         && aSharingMode != FileSharingMode_All)
         return setError(E_NOTIMPL, tr("Only read sharing is currently supported for clipboard transfer files"));
     if (aCreationMode)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer file creation mode must be zero for read-only opens"));
 
     HRESULT hrc = clipboardTransferValidatePath(aPath, false /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Invalid clipboard transfer file path"));
 
     PSHCLTRANSFER pTransfer;
     {
@@ -1088,7 +1099,8 @@ HRESULT ClipboardTransfer::openFile(const com::Utf8Str &aPath,
     SHCLOBJOPENCREATEPARMS OpenParms;
     int vrc = ShClTransferObjOpenParmsInit(&OpenParms);
     if (RT_FAILURE(vrc))
-        return clipboardTransferDataPlaneRcToHrc(vrc);
+        return setErrorBoth(clipboardTransferDataPlaneRcToHrc(vrc), vrc,
+                            tr("Initializing clipboard transfer file-open parameters failed with %Rrc"), vrc);
 
     OpenParms.fCreate = SHCL_OBJ_CF_ACCESS_READ | SHCL_OBJ_CF_ACCESS_DENYNONE | SHCL_OBJ_CF_ACCESS_ATTR_READ;
     vrc = RTStrCopy(OpenParms.pszPath, OpenParms.cbPath, aPath.c_str());
@@ -1098,7 +1110,8 @@ HRESULT ClipboardTransfer::openFile(const com::Utf8Str &aPath,
     SHCLFSOBJINFO Info = OpenParms.ObjInfo;
     ShClTransferObjOpenParmsDestroy(&OpenParms);
     if (RT_FAILURE(vrc))
-        return clipboardTransferDataPlaneRcToHrc(vrc);
+        return setErrorBoth(clipboardTransferDataPlaneRcToHrc(vrc), vrc,
+                            tr("Opening clipboard transfer file failed with %Rrc"), vrc);
 
     ComPtr<IClipboardTransfer> ptrSelf(this);
 
@@ -1107,15 +1120,18 @@ HRESULT ClipboardTransfer::openFile(const com::Utf8Str &aPath,
     if (FAILED(hrc))
     {
         ShClTransferObjClose(pTransfer, hObj);
-        return hrc;
+        return setError(hrc, tr("Creating clipboard transfer file object failed"));
     }
     hrc = ptrFile->init(ptrSelf, pTransfer, hObj, aPath, Info, aAccessMode, aOpenAction, aSharingMode, aCreationMode);
     if (FAILED(hrc))
     {
         ShClTransferObjClose(pTransfer, hObj);
-        return hrc;
+        return setError(hrc, tr("Initializing clipboard transfer file object failed"));
     }
-    return ptrFile.queryInterfaceTo(aFile.asOutParam());
+    hrc = ptrFile.queryInterfaceTo(aFile.asOutParam());
+    if (FAILED(hrc))
+        return setError(hrc, tr("Querying clipboard transfer file interface failed"));
+    return S_OK;
 #endif
 }
 
@@ -1134,7 +1150,7 @@ HRESULT ClipboardTransfer::createDirectory(const com::Utf8Str &aPath)
 #else
     HRESULT hrc = clipboardTransferValidatePath(aPath, false /* fAllowEmpty */);
     if (FAILED(hrc))
-        return hrc;
-    return E_NOTIMPL;
+        return setError(hrc, tr("Invalid clipboard transfer directory path"));
+    return setError(E_NOTIMPL, tr("Creating clipboard transfer directories is not implemented yet"));
 #endif
 }

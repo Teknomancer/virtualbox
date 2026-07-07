@@ -1,4 +1,4 @@
-/* $Id: ClipboardTransferFileImpl.cpp 114613 2026-07-03 15:57:50Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardTransferFileImpl.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Clipboard transfer file handle.
  */
@@ -37,6 +37,8 @@
 
 #include <iprt/mem.h>
 #include <iprt/path.h>
+
+#include <new>
 
 
 DEFINE_EMPTY_CTOR_DTOR(ClipboardTransferFile)
@@ -315,7 +317,11 @@ HRESULT ClipboardTransferFile::close()
     }
     if (!pTransfer || hObj == NIL_SHCLOBJHANDLE)
         return S_OK;
-    return clipboardTransferFileRcToHrc(ShClTransferObjClose(pTransfer, hObj));
+    int vrc = ShClTransferObjClose(pTransfer, hObj);
+    HRESULT hrc = clipboardTransferFileRcToHrc(vrc);
+    if (FAILED(hrc))
+        return setErrorBoth(hrc, vrc, tr("Closing clipboard transfer file failed with %Rrc"), vrc);
+    return S_OK;
 #endif
 }
 
@@ -337,11 +343,14 @@ HRESULT ClipboardTransferFile::queryInfo(ComPtr<IFsObjInfo> &aObjInfo)
     ComObjPtr<ClipboardTransferFsObjInfo> ptrInfo;
     HRESULT hrc = ptrInfo.createObject();
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Creating clipboard transfer file information object failed"));
     hrc = ptrInfo->init(strPath, RTPathFilename(strPath.c_str()), &Info);
     if (FAILED(hrc))
-        return hrc;
-    return ptrInfo.queryInterfaceTo(aObjInfo.asOutParam());
+        return setError(hrc, tr("Initializing clipboard transfer file information object failed"));
+    hrc = ptrInfo.queryInterfaceTo(aObjInfo.asOutParam());
+    if (FAILED(hrc))
+        return setError(hrc, tr("Querying clipboard transfer file information interface failed"));
+    return S_OK;
 #endif
 }
 
@@ -362,7 +371,7 @@ HRESULT ClipboardTransferFile::read(ULONG aToRead, ULONG aTimeoutMS, std::vector
 #else
     RT_NOREF(aTimeoutMS);
     if (!aToRead)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer file read size must be non-zero"));
 
     PSHCLTRANSFER pTransfer = NULL;
     SHCLOBJHANDLE hObj = NIL_SHCLOBJHANDLE;
@@ -372,15 +381,23 @@ HRESULT ClipboardTransferFile::read(ULONG aToRead, ULONG aTimeoutMS, std::vector
         hObj = mData.mHandle;
     }
     if (!pTransfer || hObj == NIL_SHCLOBJHANDLE)
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("Clipboard transfer file is closed"));
 
-    aData.resize(aToRead);
+    try
+    {
+        aData.resize(aToRead);
+    }
+    catch (std::bad_alloc &)
+    {
+        return setError(E_OUTOFMEMORY, tr("Allocating the clipboard transfer file read buffer failed"));
+    }
     uint32_t cbRead = 0;
     int vrc = ShClTransferObjRead(pTransfer, hObj, aData.empty() ? NULL : &aData[0], aToRead, 0, &cbRead);
     if (RT_FAILURE(vrc))
     {
         aData.clear();
-        return clipboardTransferFileRcToHrc(vrc);
+        HRESULT hrc = clipboardTransferFileRcToHrc(vrc);
+        return setErrorBoth(hrc, vrc, tr("Reading clipboard transfer file failed with %Rrc"), vrc);
     }
     aData.resize(cbRead);
     {
@@ -399,10 +416,10 @@ HRESULT ClipboardTransferFile::readAt(LONG64 aOffset, ULONG aToRead, ULONG aTime
     ReturnComNotImplemented();
 #else
     if (aOffset < 0)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer file read offset must not be negative"));
     HRESULT hrc = i_reopenAt((uint64_t)aOffset);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Seeking clipboard transfer file for readAt failed"));
     return read(aToRead, aTimeoutMS, aData);
 #endif
 }
@@ -415,7 +432,7 @@ HRESULT ClipboardTransferFile::seek(LONG64 aOffset, FileSeekOrigin_T aWhence, LO
     ReturnComNotImplemented();
 #else
     if (!aNewOffset)
-        return E_POINTER;
+        return setError(E_POINTER, tr("The clipboard transfer file seek output argument must not be NULL"));
 
     LONG64 offBase;
     {
@@ -427,15 +444,15 @@ HRESULT ClipboardTransferFile::seek(LONG64 aOffset, FileSeekOrigin_T aWhence, LO
         else if (aWhence == FileSeekOrigin_End)
             offBase = mData.mInfo.cbObject;
         else
-            return E_INVALIDARG;
+            return setError(E_INVALIDARG, tr("Invalid clipboard transfer file seek origin %RU32"), (uint32_t)aWhence);
     }
 
     LONG64 const offNew = offBase + aOffset;
     if (offNew < 0)
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer file seek would move before the start of the file"));
     HRESULT hrc = i_reopenAt((uint64_t)offNew);
     if (FAILED(hrc))
-        return hrc;
+        return setError(hrc, tr("Seeking clipboard transfer file failed"));
     *aNewOffset = offNew;
     return S_OK;
 #endif
@@ -461,7 +478,7 @@ HRESULT ClipboardTransferFile::i_reopenAt(uint64_t offNew)
         strPath = mData.mPath;
     }
     if (!pTransfer)
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("Clipboard transfer file is closed"));
 
     SHCLOBJHANDLE hNew = NIL_SHCLOBJHANDLE;
     SHCLFSOBJINFO Info;
@@ -473,7 +490,8 @@ HRESULT ClipboardTransferFile::i_reopenAt(uint64_t offNew)
     {
         if (hNew != NIL_SHCLOBJHANDLE)
             ShClTransferObjClose(pTransfer, hNew);
-        return clipboardTransferFileRcToHrc(vrc);
+        HRESULT hrc = clipboardTransferFileRcToHrc(vrc);
+        return setErrorBoth(hrc, vrc, tr("Seeking clipboard transfer file failed with %Rrc"), vrc);
     }
 
     if (hOld != NIL_SHCLOBJHANDLE)
@@ -493,14 +511,14 @@ HRESULT ClipboardTransferFile::i_reopenAt(uint64_t offNew)
 HRESULT ClipboardTransferFile::setACL(const com::Utf8Str &aAcl, ULONG aMode)
 {
     RT_NOREF(aAcl, aMode);
-    return E_NOTIMPL;
+    return setError(E_NOTIMPL, tr("Changing clipboard transfer file ACLs is not implemented"));
 }
 
 
 HRESULT ClipboardTransferFile::setSize(LONG64 aSize)
 {
     RT_NOREF(aSize);
-    return E_NOTIMPL;
+    return setError(E_NOTIMPL, tr("Changing clipboard transfer file size is not implemented"));
 }
 
 
@@ -511,10 +529,11 @@ HRESULT ClipboardTransferFile::write(const std::vector<BYTE> &aData, ULONG aTime
     ReturnComNotImplemented();
 #else
     RT_NOREF(aTimeoutMS);
-    AssertPtrReturn(aWritten, E_POINTER);
+    if (!aWritten)
+        return setError(E_POINTER, tr("The clipboard transfer file written-bytes output argument must not be NULL"));
     *aWritten = 0;
     if (aData.empty())
-        return E_INVALIDARG;
+        return setError(E_INVALIDARG, tr("Clipboard transfer file write data must not be empty"));
 
     PSHCLTRANSFER pTransfer = NULL;
     SHCLOBJHANDLE hObj = NIL_SHCLOBJHANDLE;
@@ -526,14 +545,17 @@ HRESULT ClipboardTransferFile::write(const std::vector<BYTE> &aData, ULONG aTime
         enmAccessMode = mData.mAccessMode;
     }
     if (enmAccessMode == FileAccessMode_ReadOnly)
-        return E_NOTIMPL;
+        return setError(E_NOTIMPL, tr("Writing to read-only clipboard transfer files is not implemented"));
     if (!pTransfer || hObj == NIL_SHCLOBJHANDLE)
-        return VBOX_E_OBJECT_NOT_FOUND;
+        return setError(VBOX_E_OBJECT_NOT_FOUND, tr("Clipboard transfer file is closed"));
 
     uint32_t cbWritten = 0;
     int vrc = ShClTransferObjWrite(pTransfer, hObj, (void *)&aData[0], (uint32_t)aData.size(), 0, &cbWritten);
     if (RT_FAILURE(vrc))
-        return clipboardTransferFileRcToHrc(vrc);
+    {
+        HRESULT hrc = clipboardTransferFileRcToHrc(vrc);
+        return setErrorBoth(hrc, vrc, tr("Writing clipboard transfer file failed with %Rrc"), vrc);
+    }
     {
         AutoWriteLock alock(this COMMA_LOCKVAL_SRC_POS);
         mData.mOffset += cbWritten;
@@ -556,7 +578,7 @@ HRESULT ClipboardTransferFile::writeAt(LONG64 aOffset, const std::vector<BYTE> &
         offCurrent = mData.mOffset;
     }
     if (aOffset != offCurrent)
-        return E_NOTIMPL;
+        return setError(E_NOTIMPL, tr("Writing clipboard transfer files at non-current offsets is not implemented"));
     return write(aData, aTimeoutMS, aWritten);
 #endif
 }

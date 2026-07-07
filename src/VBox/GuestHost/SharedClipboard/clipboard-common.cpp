@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114567 2026-06-30 11:49:04Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-common.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -1242,18 +1242,17 @@ SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFOR
         {
             static uint8_t s_uTransfersBitchedNotEnabled = 0;
             if (s_uTransfersBitchedNotEnabled++ < 32)
-            {
                 LogRel(("Shared Clipboard: File transfers are disabled on host, skipping reporting those to the guest\n"));
-                fSkipTransfers = true;
-            }
+            fSkipTransfers = true;
         }
 
-        if (!(pClient->State.fGuestFeatures0 & VBOX_SHCL_GF_0_TRANSFERS))
+        uint64_t const fRequired = VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS;
+        if ((pClient->State.fGuestFeatures0 & fRequired) != fRequired)
         {
             static bool s_fTransfersBitchedNotSupported = false;
             if (!s_fTransfersBitchedNotSupported)
             {
-                LogRel(("Shared Clipboard: File transfers not supported by installed Guest Addtions, skipping reporting those to the guest\n"));
+                LogRel(("Shared Clipboard: File transfers not supported by installed Guest Additions, skipping reporting those to the guest\n"));
                 s_fTransfersBitchedNotSupported = true;
             }
             fSkipTransfers = true;

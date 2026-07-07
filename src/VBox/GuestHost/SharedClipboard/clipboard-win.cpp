@@ -1,4 +1,4 @@
-/* $Id: clipboard-win.cpp 114157 2026-05-20 15:00:55Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-win.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Windows-specific functions for clipboard handling.
  */
@@ -426,16 +426,23 @@ SHCLFORMAT ShClWinClipboardFormatToVBox(UINT uFormat)
 #endif
                         vboxFormat = VBOX_SHCL_FMT_HTML;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-                    /* These types invoke our IDataObject / IStream implementations. */
+                    /*
+                     * CFSTR_FILEDESCRIPTOR[A/W] and CFSTR_FILECONTENTS describe Windows virtual-file clipboard
+                     * formats. Consuming them from another application requires OleGetClipboard()/IDataObject/IStream
+                     * handling. The current host read path only materializes local files from CF_HDROP, so do not
+                     * advertise these as VBOX_SHCL_FMT_URI_LIST until virtual IDataObject consumption is implemented.
+                     */
 # ifdef UNICODE
-                    else if (   (RTUtf16Cmp(szFormatName, CFSTR_FILEDESCRIPTORA) == 0)
-                             || (RTUtf16Cmp(szFormatName, CFSTR_FILECONTENTS)    == 0))
+                    else if (   (RTUtf16Cmp(szFormatName, RT_LSTR("FileGroupDescriptor"))  == 0)
+                             || (RTUtf16Cmp(szFormatName, RT_LSTR("FileGroupDescriptorW")) == 0)
+                             || (RTUtf16Cmp(szFormatName, RT_LSTR("FileContents"))         == 0))
 # else
                     else if (   (RTStrCmp(szFormatName, CFSTR_FILEDESCRIPTORA) == 0)
+                             || (RTStrCmp(szFormatName, "FileGroupDescriptorW") == 0)
                              || (RTStrCmp(szFormatName, CFSTR_FILECONTENTS)    == 0))
 # endif
-                        vboxFormat = VBOX_SHCL_FMT_URI_LIST;
-                    /** @todo Do we need to handle CFSTR_FILEDESCRIPTORW here as well? */
+                        LogRel2(("Shared Clipboard: Windows virtual-file clipboard format '%s' is not supported as a host file-transfer source yet\n",
+                                 szFormatName));
 #endif
                 }
             }
@@ -1315,7 +1322,7 @@ int ShClWinTransferGetRootsFromClipboard(PSHCLWINCTX pWinCtx, PSHCLTRANSFER pTra
     {
         /* The data data in CF_HDROP format, as the files are locally present and don't need to be
          * presented as a IDataObject or IStream. */
-        HANDLE hClip = hClip = GetClipboardData(CF_HDROP);
+        HANDLE hClip = GetClipboardData(CF_HDROP);
         if (hClip)
         {
             HDROP hDrop = (HDROP)GlobalLock(hClip);
@@ -1334,11 +1341,23 @@ int ShClWinTransferGetRootsFromClipboard(PSHCLWINCTX pWinCtx, PSHCLTRANSFER pTra
                 }
             }
             else
-                LogRel(("Shared Clipboard: Unable to lock clipboard data, last error: %ld\n", GetLastError()));
+            {
+                DWORD const dwLastErr = GetLastError();
+                rc = RTErrConvertFromWin32(dwLastErr);
+                if (RT_SUCCESS(rc))
+                    rc = VERR_INVALID_HANDLE;
+                LogRel(("Shared Clipboard: Unable to lock clipboard data, last error: %ld\n", dwLastErr));
+            }
         }
         else
+        {
+            DWORD const dwLastErr = GetLastError();
+            rc = RTErrConvertFromWin32(dwLastErr);
+            if (RT_SUCCESS(rc))
+                rc = VERR_NOT_FOUND;
             LogRel(("Shared Clipboard: Unable to retrieve clipboard data from clipboard (CF_HDROP), last error: %ld\n",
-                    GetLastError()));
+                    dwLastErr));
+        }
 
         ShClWinClose();
     }
