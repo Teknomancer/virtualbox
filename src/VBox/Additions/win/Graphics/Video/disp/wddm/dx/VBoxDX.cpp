@@ -1,4 +1,4 @@
-/* $Id: VBoxDX.cpp 114554 2026-06-26 12:16:27Z vitali.pelenjow@oracle.com $ */
+/* $Id: VBoxDX.cpp 114634 2026-07-07 15:34:54Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VirtualBox D3D user mode driver.
  */
@@ -1427,6 +1427,13 @@ void vboxDXDestroyResource(PVBOXDX_DEVICE pDevice, PVBOXDX_RESOURCE pResource)
 
     /* Remove from the list of active resources. */
     RTListNodeRemove(&pResource->pKMResource->nodeResource);
+
+    /* Remove from the list of resources to be offered. */
+    if (pResource->pKMResource->flags.fPendingOffered)
+    {
+        pResource->pKMResource->flags.fPendingOffered = 0;
+        RTListNodeRemove(&pResource->pKMResource->resource.nodeOffered);
+    }
 
     if (pResource->pKMResource->flags.fShared)
     {
