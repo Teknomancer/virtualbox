@@ -1,4 +1,4 @@
-/* $Id: MakeAlternativeSource.cpp 114640 2026-07-07 17:56:17Z klaus.espenlaub@oracle.com $ */
+/* $Id: MakeAlternativeSource.cpp 114641 2026-07-07 18:26:10Z klaus.espenlaub@oracle.com $ */
 /** @file
  * MakeAlternative - Generate an Alternative BIOS Source that requires less tools.
  */
@@ -208,7 +208,7 @@ static bool disError(const char *pszFormat, ...)
 static bool disFileHeader(void)
 {
     bool fRc;
-    fRc = outputPrintf("; $Id: MakeAlternativeSource.cpp 114640 2026-07-07 17:56:17Z klaus.espenlaub@oracle.com $ \n"
+    fRc = outputPrintf("; $Id: MakeAlternativeSource.cpp 114641 2026-07-07 18:26:10Z klaus.espenlaub@oracle.com $\n"
                        ";; @file\n"
                        "; Auto Generated source file. Do not edit.\n"
                        ";\n"
@@ -280,7 +280,7 @@ static bool disFileHeader(void)
                 if (strstr(psz, "LGPL"))
                     fNeedLgplDisclaimer = true;
 
-                fRc = outputPrintf(";  %s\n", psz) && fRc;
+                fRc = outputPrintf(*psz ? ";  %s\n": ";\n", psz) && fRc;
             }
 
             RTStrmClose(hStrm);
@@ -2170,7 +2170,7 @@ int main(int argc, char **argv)
             case 'V':
             {
                 /* The following is assuming that svn does it's job here. */
-                char szRev[] = "$Revision: 114640 $";
+                char szRev[] = "$Revision: 114641 $";
                 char *psz = szRev;
                 while (*psz && !RT_C_IS_DIGIT(*psz))
                     psz++;
