@@ -1,4 +1,4 @@
-# $Id: .scm-settings 114037 2026-04-27 21:54:59Z knut.osmundsen@oracle.com $
+# $Id: .scm-settings 114642 2026-07-07 18:33:04Z klaus.espenlaub@oracle.com $
 ## @file
 # Source code massager settings for PC devices/drivers.
 #
@@ -64,7 +64,6 @@
 
 /BIOS/makefile:     --treat-as make
 /BIOS/VBoxBiosAlternative*.asm: --external-copyright --no-update-license --allow-lgpl-without-disclaimer ## @todo the latter is a bug in the generator.
-/BIOS/VBoxBiosAlternative*.asm: --no-strip-trailing-blanks # why trailing blanks?
 /BIOS/VBoxBiosAlternative*.md5sum: --treat-as plaintext
 
 # iPXE
