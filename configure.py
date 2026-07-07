@@ -11,7 +11,7 @@
 # pylint: disable=invalid-name
 # pylint: disable=multiple-statements
 # pylint: disable=line-too-long
-# $Id: configure.py 113773 2026-04-08 19:41:52Z klaus.espenlaub@oracle.com $
+# $Id: configure.py 114640 2026-07-07 17:56:17Z klaus.espenlaub@oracle.com $
 #
 # The following checks for the right (i.e. most recent) Python binary available
 # and re-starts the script using that binary (like a shell wrapper).
@@ -90,7 +90,7 @@ SPDX-License-Identifier: GPL-3.0-only
 # External Python modules or other dependencies are not allowed!
 #
 
-__revision__ = "$Revision: 113773 $"
+__revision__ = "$Revision: 114640 $"
 
 import argparse
 import collections;
@@ -2650,6 +2650,10 @@ class ToolCheck(CheckBase):
         Checks for NASM.
         """
         self.sCmdPath, self.sVer = checkWhich('nasm', sCustomPath = self.sRootPath);
+        if self.sCmdPath:
+            g_oEnv.set('PATH_TOOL_NASM', os.path.dirname(self.sCmdPath));
+            # Disable YASM tool if NASM is found, prefer NASM.
+            g_oArgs.config_tools_disable_yasm = True;
 
         return True if self.sCmdPath else False;
 
@@ -3547,8 +3551,10 @@ g_aoTools = [
     ToolCheck("java", asCmd = [ ], fnCallback = ToolCheck.checkCallback_Java,
               dictArgsToSetIfFailed = { 'config_tools_disable_java' : True }),
     ToolCheck("makeself", asCmd = [ ], fnCallback = ToolCheck.checkCallback_makeself, aeTargets = [ BuildTarget.LINUX ]),
-    # On Solaris nasm is not officially supported.
-    ToolCheck("nasm", asCmd = [ "nasm" ], fnCallback = ToolCheck.checkCallback_NASM, aeTargetsExcluded = [ BuildTarget.DARWIN, BuildTarget.SOLARIS ]),
+    ToolCheck("nasm", asCmd = [ "nasm" ], fnCallback = ToolCheck.checkCallback_NASM,
+              dictArgsToSetIfFailed = { 'config_tools_disable_nasm' : True }),
+    ToolCheck("yasm", asCmd = [ 'yasm' ], fnCallback = ToolCheck.checkCallback_YASM,
+              dictArgsToSetIfFailed = { 'config_tools_disable_yasm' : True }),
     ToolCheck("openwatcom", asCmd = [ "wcl", "wcl386", "wlink" ], fnCallback = ToolCheck.checkCallback_OpenWatcom,
               dictArgsToSetIfFailed = { 'config_tools_disable_openwatcom' : True }),
     ToolCheck("python_c_api", asCmd = [ ], fnCallback = ToolCheck.checkCallback_PythonC_API,
@@ -3558,7 +3564,6 @@ g_aoTools = [
               aeTargets = [ BuildTarget.DARWIN, BuildTarget.LINUX, BuildTarget.SOLARIS ],
               dictArgsToSetIfFailed = { 'config_tools_disable_python' : True }),
     ToolCheck("xcode", asCmd = [], fnCallback = ToolCheck.checkCallback_XCode, aeTargets = [ BuildTarget.DARWIN ]),
-    ToolCheck("yasm", asCmd = [ 'yasm' ], fnCallback = ToolCheck.checkCallback_YASM),
     # Windows exclusive tools below (so that it can be invoked with --with-win-nsis-path, for instance).
     ToolCheck("win-sdk10", asCmd = [ ], fnCallback = ToolCheck.checkCallback_Win10SDK, aeTargets = [ BuildTarget.WINDOWS ] ),
     ToolCheck("win-ddk", asCmd = [ ], fnCallback = ToolCheck.checkCallback_WinDDK, aeTargets = [ BuildTarget.WINDOWS ] ),
@@ -4098,6 +4103,9 @@ def main():
             and not g_fContOnErr:
                 break;
 
+    if g_oArgs.config_tools_disable_nasm and g_oArgs.config_tools_disable_yasm:
+        printError('ASM tool not found, one of NASM or YASM is required (NASM preferred)');
+
     #
     # Perform library checks.
     #
@@ -4216,6 +4224,10 @@ def main():
         lambda env: { 'VBOX_WITH_PYTHON': '' } if g_oArgs.config_tools_disable_python else {},
         # Python is mandatory nowadays.
         lambda env: { 'VBOX_BLD_PYTHON': os.path.join(g_oArgs.config_python_path, 'python' + getExeSuff() ) } if g_oArgs.config_python_path else {},
+        # Assembler detection: configure what to avoid.
+        lambda env: { 'DONT_USE_YASM': '1' } if g_oArgs.config_tools_disable_yasm else {},
+        lambda env: { 'DONT_USE_NASM': '1' } if g_oArgs.config_tools_disable_nasm else {},
+
         # Disable DTrace stuff if specified.
         lambda env: { 'VBOX_WITH_EXTPACK_VBOXDTRACE': '',
                       'VBOX_WITH_DTRACE': ''  } if g_oArgs.config_disable_dtrace else {},

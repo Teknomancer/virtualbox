@@ -1,4 +1,4 @@
-; $Id: bootsector2-cpu-hidden-regs-1.asm 114145 2026-05-16 11:03:28Z knut.osmundsen@oracle.com $
+; $Id: bootsector2-cpu-hidden-regs-1.asm 114640 2026-07-07 17:56:17Z klaus.espenlaub@oracle.com $
 ;; @file
 ; Bootsector that shows/tests the content of hidden CPU registers.
 ;
@@ -188,7 +188,7 @@ BITS 16
         mov     ax, [cs:.s_dwDummy]      ; works on intel
         mov     dword [cs:.s_dwDummy], 3 ; ditto
 
-        jmp     far 0000:.load_rm_cs
+        jmp     0000:.load_rm_cs
 .load_rm_cs:
         ; Display CS to check that it remained unchanged.
         mov     ax, .s_szzRMEO2

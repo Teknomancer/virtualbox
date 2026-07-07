@@ -1,4 +1,4 @@
-/* $Id: MakeAlternativeSource.cpp 114590 2026-07-01 18:55:23Z knut.osmundsen@oracle.com $ */
+/* $Id: MakeAlternativeSource.cpp 114640 2026-07-07 17:56:17Z klaus.espenlaub@oracle.com $ */
 /** @file
  * MakeAlternative - Generate an Alternative BIOS Source that requires less tools.
  */
@@ -208,7 +208,7 @@ static bool disError(const char *pszFormat, ...)
 static bool disFileHeader(void)
 {
     bool fRc;
-    fRc = outputPrintf("; $Id: MakeAlternativeSource.cpp 114590 2026-07-01 18:55:23Z knut.osmundsen@oracle.com $ \n"
+    fRc = outputPrintf("; $Id: MakeAlternativeSource.cpp 114640 2026-07-07 17:56:17Z klaus.espenlaub@oracle.com $ \n"
                        ";; @file\n"
                        "; Auto Generated source file. Do not edit.\n"
                        ";\n"
@@ -949,6 +949,9 @@ static size_t disHandleYasmNasmDifferences(PDISSTATE pDis, uint32_t uFlatAddr, u
              && pb[1] == 0x66
              && pb[2] == 0x6d)
         fDifferent = true; /* rep insd      - prefix switched. */
+    else if (   pb[0] == 0x67
+             && pb[1] == 0x66)
+        fDifferent = true; /* 0x67 0x66     - prefix switched. */
     else if (   pb[0] == 0xc6
              && pb[1] == 0xc5
              && pb[2] == 0xba)
@@ -2167,7 +2170,7 @@ int main(int argc, char **argv)
             case 'V':
             {
                 /* The following is assuming that svn does it's job here. */
-                char szRev[] = "$Revision: 114590 $";
+                char szRev[] = "$Revision: 114640 $";
                 char *psz = szRev;
                 while (*psz && !RT_C_IS_DIGIT(*psz))
                     psz++;
