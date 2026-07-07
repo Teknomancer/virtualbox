@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114633 2026-07-07 15:32:53Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -3455,7 +3455,8 @@ int ShClTransferCtxRegister(PSHCLTRANSFERCTX pTransferCtx, PSHCLTRANSFER pTransf
 
     shClTransferCtxLock(pTransferCtx);
 
-    SHCLTRANSFERID idTransfer;
+    SHCLTRANSFERID idTransfer = NIL_SHCLTRANSFERID; /* Shut up MSVC. */
+
     int rc;
     if (shClTransferCtxIsValidTransferId(pTransfer->State.uID))
         rc = VERR_ALREADY_EXISTS;
