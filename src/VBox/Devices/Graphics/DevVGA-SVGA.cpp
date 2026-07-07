@@ -1,4 +1,4 @@
-/* $Id: DevVGA-SVGA.cpp 114527 2026-06-25 10:40:19Z vitali.pelenjow@oracle.com $ */
+/* $Id: DevVGA-SVGA.cpp 114638 2026-07-07 17:03:05Z vitali.pelenjow@oracle.com $ */
 /** @file
  * VMware SVGA device.
  *
@@ -1607,7 +1607,8 @@ static int vmsvgaReadPort(PPDMDEVINS pDevIns, PVGASTATE pThis, uint32_t idxReg, 
             break;
 
         case SVGA_REG_GBOBJECT_MEM_SIZE_KB:
-            *pu32 = (uint32_t)(VMSVGA_GBOBJECT_MEM_SIZE / _1K);
+            /* "The maximum amount of guest-backed objects that the device can have resident at a time" */
+            *pu32 = (uint32_t)(pThis->svga.cbGBObjectMemSize / _1K);
             break;
 
         case SVGA_REG_IRQ_STATUS:
