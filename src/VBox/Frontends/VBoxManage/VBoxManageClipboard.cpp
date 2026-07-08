@@ -1,4 +1,4 @@
-/* $Id: VBoxManageClipboard.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxManageClipboard.cpp 114646 2026-07-08 08:18:59Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBoxManage - Implementation of the clipboard command.
  */
@@ -970,6 +970,20 @@ static void shclHandleListenJsonString(const char *pszValue)
 
 
 /**
+ * Writes an escaped quoted string value to standard output.
+ *
+ * @param   pszValue        String value to write, optional.
+ */
+static void shclHandleListenQuotedString(const char *pszValue)
+{
+    RTStrmPutCh(g_pStdOut, '"');
+    if (pszValue)
+        ShClHlpPrintEscapedString(g_pStdOut, pszValue, strlen(pszValue));
+    RTStrmPutCh(g_pStdOut, '"');
+}
+
+
+/**
  * Converts a bounded UTF-8 or UTF-16 clipboard payload to UTF-8 for verbose event output.
  *
  * @returns true if UTF-8 text was returned, false if the format is unsupported or invalid.
@@ -1253,6 +1267,68 @@ static const char *shclActionToString(ClipboardAction_T enmAction)
 }
 
 
+/**
+ * Converts a clipboard transfer direction to a printable string.
+ *
+ * @returns Printable transfer direction name.
+ * @param   enmDirection    Transfer direction.
+ */
+static const char *shclTransferDirectionToString(ClipboardTransferDirection_T enmDirection)
+{
+    switch (enmDirection)
+    {
+        case ClipboardTransferDirection_Any:     return "any";
+        case ClipboardTransferDirection_ToGuest: return "to-guest";
+        case ClipboardTransferDirection_ToHost:  return "to-host";
+        default:                                 break;
+    }
+    return "unknown";
+}
+
+
+/**
+ * Converts a clipboard transfer interaction to a printable string.
+ *
+ * @returns Printable transfer interaction name.
+ * @param   enmInteraction  Transfer interaction.
+ */
+static const char *shclTransferInteractionToString(ClipboardTransferInteraction_T enmInteraction)
+{
+    switch (enmInteraction)
+    {
+        case ClipboardTransferInteraction_None:          return "none";
+        case ClipboardTransferInteraction_Approval:      return "approval";
+        case ClipboardTransferInteraction_Destination:   return "destination";
+        case ClipboardTransferInteraction_Overwrite:     return "overwrite";
+        case ClipboardTransferInteraction_Rename:        return "rename";
+        case ClipboardTransferInteraction_ErrorRecovery: return "error-recovery";
+        default:                                        break;
+    }
+    return "unknown";
+}
+
+
+/**
+ * Converts a clipboard error to a printable string.
+ *
+ * @returns Printable clipboard error name.
+ * @param   enmError        Clipboard error.
+ */
+static const char *shclClipboardErrorToString(ClipboardError_T enmError)
+{
+    switch (enmError)
+    {
+        case ClipboardError_None:               return "none";
+        case ClipboardError_NotSupported:       return "not-supported";
+        case ClipboardError_AccessDenied:       return "access-denied";
+        case ClipboardError_FormatNotSupported: return "format-not-supported";
+        case ClipboardError_OperationFailed:    return "operation-failed";
+        default:                                break;
+    }
+    return "unknown";
+}
+
+
 static const char *shclEventTypeToString(VBoxEventType_T enmType)
 {
     switch (enmType)
@@ -1518,6 +1594,110 @@ static void shclHandleListenPrintDataRequestedEvent(CLIPBOARDLISTENFMT enmFormat
 
 
 /**
+ * Prints a clipboard transfer event.
+ *
+ * @param   enmFormat          Output format.
+ * @param   ptrTransferEvent   Transfer event object to print.
+ * @param   pEventInfo         Optional event identity fields.
+ */
+static void shclHandleListenPrintTransferEvent(CLIPBOARDLISTENFMT enmFormat,
+                                               const ComPtr<IClipboardTransferEvent> &ptrTransferEvent,
+                                               const SHCLCLIPBOARDEVENTINFO *pEventInfo)
+{
+    ComPtr<IClipboardTransfer> ptrTransfer;
+    ClipboardTransferState_T enmState = ClipboardTransferState_Added;
+    ClipboardTransferInteraction_T enmInteraction = ClipboardTransferInteraction_None;
+    ClipboardError_T enmError = ClipboardError_None;
+    Bstr bstrPath;
+    Bstr bstrMessage;
+
+    HRESULT hrcEvent = ptrTransferEvent.isNotNull() ? ptrTransferEvent->COMGETTER(Transfer)(ptrTransfer.asOutParam()) : E_FAIL;
+    if (SUCCEEDED(hrcEvent)) hrcEvent = ptrTransferEvent->COMGETTER(State)(&enmState);
+    if (SUCCEEDED(hrcEvent)) hrcEvent = ptrTransferEvent->COMGETTER(Interaction)(&enmInteraction);
+    if (SUCCEEDED(hrcEvent)) hrcEvent = ptrTransferEvent->COMGETTER(Path)(bstrPath.asOutParam());
+    if (SUCCEEDED(hrcEvent)) hrcEvent = ptrTransferEvent->COMGETTER(Message)(bstrMessage.asOutParam());
+    if (SUCCEEDED(hrcEvent)) hrcEvent = ptrTransferEvent->COMGETTER(Error)(&enmError);
+
+    ULONG idTransfer = 0;
+    ClipboardTransferDirection_T enmDirection = ClipboardTransferDirection_Any;
+    ClipboardSource_T enmSource = ClipboardSource_Host;
+    ClipboardAction_T enmAction = ClipboardAction_Copy;
+    HRESULT hrcTransfer = ptrTransfer.isNotNull() ? ptrTransfer->COMGETTER(Id)(&idTransfer) : E_FAIL;
+    if (SUCCEEDED(hrcTransfer)) hrcTransfer = ptrTransfer->COMGETTER(Direction)(&enmDirection);
+    if (SUCCEEDED(hrcTransfer)) hrcTransfer = ptrTransfer->COMGETTER(Source)(&enmSource);
+    if (SUCCEEDED(hrcTransfer)) hrcTransfer = ptrTransfer->COMGETTER(Action)(&enmAction);
+
+    Utf8Str const strPath(bstrPath);
+    Utf8Str const strMessage(bstrMessage);
+
+    if (enmFormat == CLIPBOARDLISTENFMT_JSON)
+    {
+        RTStrmWrite(g_pStdOut, RT_STR_TUPLE("{\"event\":\"transfer\""));
+        shclPrintEventInfoJson(pEventInfo);
+        if (SUCCEEDED(hrcTransfer))
+        {
+            RTStrmPrintf(g_pStdOut, ",\"id\":%RU32,\"direction\":", (uint32_t)idTransfer);
+            shclHandleListenJsonString(shclTransferDirectionToString(enmDirection));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"source\":"));
+            shclHandleListenJsonString(ShClHlpSourceToString(enmSource));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"action\":"));
+            shclHandleListenJsonString(shclActionToString(enmAction));
+        }
+        if (SUCCEEDED(hrcEvent))
+        {
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"state\":"));
+            shclHandleListenJsonString(ShClHlpTransferStateToString(enmState));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"interaction\":"));
+            shclHandleListenJsonString(shclTransferInteractionToString(enmInteraction));
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"path\":"));
+            shclHandleListenJsonString(strPath.c_str());
+            RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"error\":"));
+            shclHandleListenJsonString(shclClipboardErrorToString(enmError));
+            RTStrmPrintf(g_pStdOut, ",\"error-code\":%u,\"message\":", (unsigned)enmError);
+            shclHandleListenJsonString(strMessage.c_str());
+        }
+        RTStrmWrite(g_pStdOut, RT_STR_TUPLE("}\n"));
+    }
+    else if (enmFormat == CLIPBOARDLISTENFMT_MACHINE_READABLE)
+    {
+        RTPrintf("event=\"transfer\"");
+        shclPrintEventInfoMachineReadable(pEventInfo);
+        if (SUCCEEDED(hrcTransfer))
+            RTPrintf(" id=\"%RU32\" direction=\"%s\" source=\"%s\" action=\"%s\"",
+                     (uint32_t)idTransfer, shclTransferDirectionToString(enmDirection),
+                     ShClHlpSourceToString(enmSource), shclActionToString(enmAction));
+        if (SUCCEEDED(hrcEvent))
+        {
+            RTPrintf(" state=\"%s\" interaction=\"%s\" path=",
+                     ShClHlpTransferStateToString(enmState), shclTransferInteractionToString(enmInteraction));
+            shclHandleListenQuotedString(strPath.c_str());
+            RTPrintf(" error=\"%s\" error-code=\"%u\" message=", shclClipboardErrorToString(enmError), (unsigned)enmError);
+            shclHandleListenQuotedString(strMessage.c_str());
+        }
+        RTPrintf("\n");
+    }
+    else
+    {
+        RTPrintf("clipboard: transfer");
+        shclPrintEventInfoHuman(pEventInfo);
+        if (SUCCEEDED(hrcTransfer))
+            RTPrintf(" id=%RU32 direction=%s source=%s action=%s",
+                     (uint32_t)idTransfer, shclTransferDirectionToString(enmDirection),
+                     ShClHlpSourceToString(enmSource), shclActionToString(enmAction));
+        if (SUCCEEDED(hrcEvent))
+        {
+            RTPrintf(" state=%s interaction=%s path=",
+                     ShClHlpTransferStateToString(enmState), shclTransferInteractionToString(enmInteraction));
+            shclHandleListenQuotedString(strPath.c_str());
+            RTPrintf(" error=%s error-code=%u message=", shclClipboardErrorToString(enmError), (unsigned)enmError);
+            shclHandleListenQuotedString(strMessage.c_str());
+        }
+        RTPrintf("\n");
+    }
+}
+
+
+/**
  * Prints a clipboard event without additional payload.
  *
  * @param   enmFormat       Output format.
@@ -1620,28 +1800,7 @@ static void shclHandleListenPrintEvent(CLIPBOARDLISTENFMT enmFormat, const ComPt
         case VBoxEventType_OnClipboardTransfer:
         {
             ComPtr<IClipboardTransferEvent> ptrTransferEvent = ptrEvent;
-            ClipboardTransferState_T enmState = ClipboardTransferState_Added;
-            ptrTransferEvent->COMGETTER(State)(&enmState);
-            if (enmFormat == CLIPBOARDLISTENFMT_JSON)
-            {
-                RTStrmWrite(g_pStdOut, RT_STR_TUPLE("{\"event\":\"transfer\""));
-                shclPrintEventInfoJson(&EventInfo);
-                RTStrmWrite(g_pStdOut, RT_STR_TUPLE(",\"state\":"));
-                shclHandleListenJsonString(ShClHlpTransferStateToString(enmState));
-                RTStrmWrite(g_pStdOut, RT_STR_TUPLE("}\n"));
-            }
-            else if (enmFormat == CLIPBOARDLISTENFMT_MACHINE_READABLE)
-            {
-                RTPrintf("event=\"transfer\"");
-                shclPrintEventInfoMachineReadable(&EventInfo);
-                RTPrintf(" state=\"%s\"\n", ShClHlpTransferStateToString(enmState));
-            }
-            else
-            {
-                RTPrintf("clipboard: transfer");
-                shclPrintEventInfoHuman(&EventInfo);
-                RTPrintf(" state=%s\n", ShClHlpTransferStateToString(enmState));
-            }
+            shclHandleListenPrintTransferEvent(enmFormat, ptrTransferEvent, &EventInfo);
             break;
         }
         case VBoxEventType_OnClipboardError:
@@ -2400,47 +2559,6 @@ static RTEXITCODE shclHandleSetFileTransfers(HandlerArg *pArg, int argc, char **
 
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
-/**
- * Converts a clipboard transfer direction to a printable string.
- *
- * @returns Printable transfer direction name.
- * @param   enmDirection    Transfer direction.
- */
-static const char *shclTransferDirectionToString(ClipboardTransferDirection_T enmDirection)
-{
-    switch (enmDirection)
-    {
-        case ClipboardTransferDirection_Any:     return "any";
-        case ClipboardTransferDirection_ToGuest: return "to-guest";
-        case ClipboardTransferDirection_ToHost:  return "to-host";
-        default:                                 break;
-    }
-    return "unknown";
-}
-
-
-/**
- * Converts a clipboard transfer interaction to a printable string.
- *
- * @returns Printable transfer interaction name.
- * @param   enmInteraction  Transfer interaction.
- */
-static const char *shclTransferInteractionToString(ClipboardTransferInteraction_T enmInteraction)
-{
-    switch (enmInteraction)
-    {
-        case ClipboardTransferInteraction_None:          return "none";
-        case ClipboardTransferInteraction_Approval:      return "approval";
-        case ClipboardTransferInteraction_Destination:   return "destination";
-        case ClipboardTransferInteraction_Overwrite:     return "overwrite";
-        case ClipboardTransferInteraction_Rename:        return "rename";
-        case ClipboardTransferInteraction_ErrorRecovery: return "error-recovery";
-        default:                                        break;
-    }
-    return "unknown";
-}
-
-
 /**
  * Converts a file-system object type to a printable string.
  *
