@@ -1,4 +1,4 @@
-/* $Id: ClipboardDataObjectImpl-win.cpp 114189 2026-05-27 12:24:10Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardDataObjectImpl-win.cpp 114651 2026-07-08 09:46:19Z andreas.loeffler@oracle.com $ */
 /** @file
  * ClipboardDataObjectImpl-win.cpp - Shared Clipboard IDataObject implementation.
  */
@@ -43,6 +43,7 @@
 #include <iprt/errcore.h>
 #include <iprt/path.h>
 #include <iprt/semaphore.h>
+#include <iprt/string.h>
 #include <iprt/uri.h>
 #include <iprt/utf16.h>
 
@@ -125,7 +126,7 @@ int ShClWinDataObject::Init(PSHCLCONTEXT pCtx, ShClWinDataObject::PCALLBACKS pCa
     /*
      * Set up / register handled formats.
      */
-    const ULONG cFixedFormats = 4; /* CFSTR_FILEDESCRIPTORA + CFSTR_FILEDESCRIPTORW + CFSTR_FILECONTENTS + CFSTR_PERFORMEDDROPEFFECT */
+    const ULONG cFixedFormats = 5; /* CF_UNICODETEXT + CFSTR_FILEDESCRIPTORA + CFSTR_FILEDESCRIPTORW + CFSTR_FILECONTENTS + CFSTR_PERFORMEDDROPEFFECT */
     const ULONG cAllFormats   = cFormats + cFixedFormats;
 
     m_pFormatEtc = new FORMATETC[cAllFormats];
@@ -141,6 +142,9 @@ int ShClWinDataObject::Init(PSHCLCONTEXT pCtx, ShClWinDataObject::PCALLBACKS pCa
      * Register fixed formats.
      */
     unsigned uIdx = 0;
+
+    LogFlowFunc(("Registering CF_UNICODETEXT ...\n"));
+    registerFormat(&m_pFormatEtc[uIdx++], CF_UNICODETEXT);
 
     LogFlowFunc(("Registering CFSTR_FILEDESCRIPTORA ...\n"));
     m_cfFileDescriptorA = RegisterClipboardFormat(CFSTR_FILEDESCRIPTORA);
@@ -786,6 +790,211 @@ int ShClWinDataObject::createFileGroupDescriptorFromTransfer(PSHCLTRANSFER pTran
 }
 
 /**
+ * Creates a CF_UNICODETEXT object from the transfer root entries.
+ *
+ * @returns VBox status code.
+ * @param   pTransfer           Shared Clipboard transfer to create text for.
+ * @param   phGlobal            Where to store the allocated HGLOBAL object on success.
+ */
+int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfer, HGLOBAL *phGlobal)
+{
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    AssertPtrReturn(phGlobal,  VERR_INVALID_POINTER);
+
+    *phGlobal = NULL;
+
+    uint64_t const cRoots = ShClTransferRootsCount(pTransfer);
+    if (!cRoots)
+        return VERR_NOT_FOUND;
+
+    size_t cwcText = 1; /* Terminator. */
+    int rc = VINF_SUCCESS;
+    for (uint64_t i = 0; i < cRoots; i++)
+    {
+        PCSHCLLISTENTRY pRootEntry = ShClTransferRootsEntryGet(pTransfer, i);
+        AssertPtrBreakStmt(pRootEntry, rc = VERR_INVALID_POINTER);
+        AssertPtrBreakStmt(pRootEntry->pszName, rc = VERR_INVALID_POINTER);
+
+        size_t cwcRoot = 0;
+        rc = RTStrCalcUtf16LenEx(pRootEntry->pszName, RTSTR_MAX, &cwcRoot);
+        if (RT_FAILURE(rc))
+            break;
+
+        size_t const cwcAdd = cwcRoot + (i + 1 < cRoots ? 2 : 0);
+        if (   cwcAdd < cwcRoot
+            || cwcText > SIZE_MAX - cwcAdd)
+        {
+            rc = VERR_TOO_MUCH_DATA;
+            break;
+        }
+
+        cwcText += cwcAdd;
+    }
+
+    if (RT_FAILURE(rc))
+        return rc;
+
+    if (cwcText > SIZE_MAX / sizeof(RTUTF16))
+        return VERR_TOO_MUCH_DATA;
+
+    HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, cwcText * sizeof(RTUTF16));
+    if (!hGlobal)
+        return VERR_NO_MEMORY;
+
+    PRTUTF16 pwszText = (PRTUTF16)GlobalLock(hGlobal);
+    if (!pwszText)
+    {
+        GlobalFree(hGlobal);
+        return VERR_ACCESS_DENIED;
+    }
+
+    PRTUTF16 pwszDst = pwszText;
+    size_t cwcLeft = cwcText;
+    for (uint64_t i = 0; i < cRoots; i++)
+    {
+        PCSHCLLISTENTRY pRootEntry = ShClTransferRootsEntryGet(pTransfer, i);
+        AssertPtrBreakStmt(pRootEntry, rc = VERR_INVALID_POINTER);
+        AssertPtrBreakStmt(pRootEntry->pszName, rc = VERR_INVALID_POINTER);
+
+        size_t cwcWritten = 0;
+        rc = RTStrToUtf16Ex(pRootEntry->pszName, RTSTR_MAX, &pwszDst, cwcLeft, &cwcWritten);
+        if (RT_FAILURE(rc))
+            break;
+
+        pwszDst += cwcWritten;
+        cwcLeft -= cwcWritten;
+
+        if (i + 1 < cRoots)
+        {
+            AssertBreakStmt(cwcLeft >= 3, rc = VERR_BUFFER_OVERFLOW);
+            *pwszDst++ = '\r';
+            *pwszDst++ = '\n';
+            cwcLeft -= 2;
+        }
+    }
+
+    if (RT_SUCCESS(rc))
+    {
+        Assert(cwcLeft >= 1);
+        *pwszDst = '\0';
+    }
+
+    GlobalUnlock(hGlobal);
+
+    if (RT_SUCCESS(rc))
+        *phGlobal = hGlobal;
+    else
+        GlobalFree(hGlobal);
+
+    LogFlowFuncLeaveRC(rc);
+    return rc;
+}
+
+/**
+ * Ensures that the transfer object has been started and its root listing has been read.
+ *
+ * @returns VBox status code.
+ * @note    Caller must have taken the critical section; returns with it held.
+ */
+int ShClWinDataObject::ensureTransferListReadyLocked(void)
+{
+    AssertReturn(RTCritSectIsOwned(&m_CritSect), VERR_WRONG_ORDER);
+
+    int rc = VINF_SUCCESS;
+
+    if (m_enmStatus == Initialized)
+    {
+        LogRel2(("Shared Clipboard: Requesting data for IDataObject ...\n"));
+
+        if (!m_Callbacks.pfnTransferBegin)
+            return VERR_INVALID_POINTER;
+
+        /* Leave lock while requesting + waiting. */
+        unlock();
+
+        rc = m_Callbacks.pfnTransferBegin(&m_CallbackCtx);
+        if (RT_SUCCESS(rc))
+        {
+            LogRel2(("Shared Clipboard: Waiting for IDataObject started status ...\n"));
+
+            /* Note: Keep the timeout low here (instead of using SHCL_TIMEOUT_DEFAULT_MS), as this will make
+             *       Windows Explorer unresponsive (i.e. "ghost window") when waiting for too long. */
+            rc = RTSemEventWait(m_EventStatusChanged, RT_MS_10SEC);
+        }
+
+        /* Re-acquire lock. */
+        lock();
+
+        LogFunc(("Wait resulted in %Rrc and status %#x\n", rc, m_enmStatus));
+
+        if (RT_FAILURE(rc))
+        {
+            LogRel(("Shared Clipboard: Waiting for IDataObject status failed, rc=%Rrc\n", rc));
+            return rc;
+        }
+
+        if (m_enmStatus != Running)
+        {
+            LogRel(("Shared Clipboard: Received wrong IDataObject status (%#x)\n", m_enmStatus));
+            return VERR_WRONG_ORDER;
+        }
+    }
+
+    if (m_enmStatus != Running)
+        return VERR_STATE_CHANGED;
+
+    /* There now must be a transfer assigned. */
+    AssertPtrReturn(m_pTransfer, VERR_WRONG_ORDER);
+
+    PSHCLTRANSFER pTransfer = m_pTransfer;
+    ShClTransferAcquire(pTransfer);
+
+    bool const fHaveEntries = !m_lstEntries.empty();
+
+    /* Leave lock while starting + waiting. */
+    unlock();
+
+    SHCLTRANSFERSTATUS const enmTransferStatus = ShClTransferGetStatus(pTransfer);
+
+    LogFlowFunc(("enmTransferStatus=%s\n", ShClTransferStatusToStr(enmTransferStatus)));
+
+    /* The caller can call GetData() several times, so make sure we don't do the same transfer multiple times. */
+    bool fNeedListWait = !fHaveEntries;
+    if (enmTransferStatus != SHCLTRANSFERSTATUS_STARTED)
+    {
+        /* Start the transfer + run it asynchronously in a separate thread. */
+        rc = ShClTransferStart(pTransfer);
+        if (RT_SUCCESS(rc))
+        {
+            rc = ShClTransferRun(pTransfer, &ShClWinDataObject::readThread, this /* pvUser */);
+            if (RT_SUCCESS(rc))
+                fNeedListWait = true;
+        }
+    }
+
+    if (   RT_SUCCESS(rc)
+        && fNeedListWait)
+    {
+        /* Don't block for too long here, as this also will screw other apps running on the OS. */
+        LogRel2(("Shared Clipboard: Waiting for IDataObject listing to arrive ...\n"));
+        rc = RTSemEventWait(m_EventListComplete, RT_MS_10SEC);
+    }
+
+    ShClTransferRelease(pTransfer);
+
+    /* Re-acquire lock. */
+    lock();
+
+    if (   RT_SUCCESS(rc)
+        && (   m_pTransfer == NULL
+            || m_enmStatus != Running
+            || m_lstEntries.empty())) /* Still in running state and with a listing? */
+        rc = VERR_SHCLPB_NO_DATA;
+
+    return rc;
+}
+
+/**
  * Retrieves the data stored in this object and store the result in pMedium.
  *
  * @return  HRESULT
@@ -820,119 +1029,31 @@ STDMETHODIMP ShClWinDataObject::GetData(LPFORMATETC pFormatEtc, LPSTGMEDIUM pMed
 
     int rc = VINF_SUCCESS;
 
-    if (    RT_SUCCESS(rc)
-        && (   pFormatEtc->cfFormat == m_cfFileDescriptorA
-            || pFormatEtc->cfFormat == m_cfFileDescriptorW
-           )
-       )
+    if (   pFormatEtc->cfFormat == CF_UNICODETEXT
+        || pFormatEtc->cfFormat == m_cfFileDescriptorA
+        || pFormatEtc->cfFormat == m_cfFileDescriptorW)
     {
-        switch (m_enmStatus)
+        rc = ensureTransferListReadyLocked();
+        if (RT_SUCCESS(rc))
         {
-            case Initialized:
+            HGLOBAL hGlobal = NULL;
+            if (pFormatEtc->cfFormat == CF_UNICODETEXT)
+                rc = createUnicodeTextFromTransferRoots(m_pTransfer, &hGlobal);
+            else
             {
-                LogRel2(("Shared Clipboard: Requesting data for IDataObject ...\n"));
-
-                /* Leave lock while requesting + waiting. */
-                unlock();
-
-                /* Start the transfer. */
-                AssertPtrBreak(m_Callbacks.pfnTransferBegin);
-                rc = m_Callbacks.pfnTransferBegin(&m_CallbackCtx);
-                AssertRCBreak(rc);
-
-                LogRel2(("Shared Clipboard: Waiting for IDataObject started status ...\n"));
-
-                /* Note: Keep the timeout low here (instead of using SHCL_TIMEOUT_DEFAULT_MS), as this will make
-                 *       Windows Explorer unresponsive (i.e. "ghost window") when waiting for too long. */
-                rc = RTSemEventWait(m_EventStatusChanged, RT_MS_10SEC);
-
-                /* Re-acquire lock. */
-                lock();
-
-                LogFunc(("Wait resulted in %Rrc and status %#x\n", rc, m_enmStatus));
-
-                if (RT_FAILURE(rc))
-                {
-                    LogRel(("Shared Clipboard: Waiting for IDataObject status failed, rc=%Rrc\n", rc));
-                    break;
-                }
-
-                if (m_enmStatus != Running)
-                {
-                    LogRel(("Shared Clipboard: Received wrong IDataObject status (%#x)\n", m_enmStatus));
-                    rc = VERR_WRONG_ORDER;
-                    break;
-                }
-
-                /* There now must be a transfer assigned. */
-                AssertPtrBreakStmt(m_pTransfer, rc = VERR_WRONG_ORDER);
-
-                RT_FALL_THROUGH();
+                bool const fUnicode = pFormatEtc->cfFormat == m_cfFileDescriptorW;
+                LogFlowFunc(("FormatIndex_FileDescriptor%s\n", fUnicode ? "W" : "A"));
+                rc = createFileGroupDescriptorFromTransfer(m_pTransfer, fUnicode, &hGlobal);
             }
 
-            case Running:
+            if (RT_SUCCESS(rc))
             {
-                const bool fUnicode = pFormatEtc->cfFormat == m_cfFileDescriptorW;
+                pMedium->tymed   = TYMED_HGLOBAL;
+                pMedium->hGlobal = hGlobal;
+                /* Note: hGlobal now is being owned by pMedium / the caller. */
 
-                /* Leave lock while waiting. */
-                unlock();
-
-                SHCLTRANSFERSTATUS const enmTransferStatus = ShClTransferGetStatus(m_pTransfer);
-
-                LogFlowFunc(("FormatIndex_FileDescriptor%s, enmTransferStatus=%s\n",
-                             fUnicode ? "W" : "A", ShClTransferStatusToStr(enmTransferStatus)));
-
-                /* The caller can call GetData() several times, so make sure we don't do the same transfer multiple times. */
-                if (enmTransferStatus != SHCLTRANSFERSTATUS_STARTED)
-                {
-                    /* Start the transfer + run it asynchronously in a separate thread. */
-                    rc = ShClTransferStart(m_pTransfer);
-                    if (RT_SUCCESS(rc))
-                    {
-                        rc = ShClTransferRun(m_pTransfer, &ShClWinDataObject::readThread, this /* pvUser */);
-                        if (RT_SUCCESS(rc))
-                        {
-                            /* Don't block for too long here, as this also will screw other apps running on the OS. */
-                            LogRel2(("Shared Clipboard: Waiting for IDataObject listing to arrive ...\n"));
-                            rc = RTSemEventWait(m_EventListComplete, RT_MS_10SEC);
-
-                            /* Re-acquire lock. */
-                            lock();
-
-                            if (   m_pTransfer == NULL
-                                || m_enmStatus != Running) /* Still in running state? */
-                            {
-                                rc = VERR_SHCLPB_NO_DATA;
-                                break;
-                            }
-
-                            unlock();
-                        }
-                    }
-                }
-
-                lock();
-
-                if (RT_SUCCESS(rc))
-                {
-                    HGLOBAL hGlobal;
-                    rc = createFileGroupDescriptorFromTransfer(m_pTransfer, fUnicode, &hGlobal);
-                    if (RT_SUCCESS(rc))
-                    {
-                        pMedium->tymed   = TYMED_HGLOBAL;
-                        pMedium->hGlobal = hGlobal;
-                        /* Note: hGlobal now is being owned by pMedium / the caller. */
-
-                        hr = S_OK;
-                    }
-                }
-
-                break;
+                hr = S_OK;
             }
-
-            default:
-                AssertFailedStmt(rc = VERR_STATE_CHANGED);
-                break;
         }
 
         if (RT_FAILURE(rc))

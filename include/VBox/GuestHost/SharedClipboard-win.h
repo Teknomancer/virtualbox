@@ -313,6 +313,8 @@ protected:
     int copyToHGlobal(const void *pvData, size_t cbData, UINT fFlags, HGLOBAL *phGlobal);
     int createFileGroupDescriptorFromTransfer(PSHCLTRANSFER pTransfer,
                                               bool fUnicode, HGLOBAL *phGlobal);
+    int createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfer, HGLOBAL *phGlobal);
+    int ensureTransferListReadyLocked(void);
 
     bool lookupFormatEtc(LPFORMATETC pFormatEtc, ULONG *puIndex);
     void registerFormat(LPFORMATETC pFormatEtc, CLIPFORMAT clipFormat, TYMED tyMed = TYMED_HGLOBAL,

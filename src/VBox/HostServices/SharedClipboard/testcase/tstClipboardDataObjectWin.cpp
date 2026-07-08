@@ -1,4 +1,4 @@
-/* $Id: tstClipboardDataObjectWin.cpp 114636 2026-07-07 15:43:21Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardDataObjectWin.cpp 114651 2026-07-08 09:46:19Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Windows IDataObject testcase.
  */
@@ -32,6 +32,7 @@
 #include <iprt/dir.h>
 #include <iprt/errcore.h>
 #include <iprt/file.h>
+#include <iprt/mem.h>
 #include <iprt/param.h>
 #include <iprt/path.h>
 #include <iprt/string.h>
@@ -678,6 +679,128 @@ static void testCheckFileGroupDescriptorA(HGLOBAL hGlobal)
 }
 
 
+/**
+ * Creates the expected CF_UNICODETEXT root-name list.
+ *
+ * @returns VBox status code.
+ * @param   ppwszText           Where to return the allocated UTF-16 text.
+ */
+static int testCreateExpectedUnicodeText(PRTUTF16 *ppwszText)
+{
+    AssertPtrReturn(ppwszText, VERR_INVALID_POINTER);
+
+    *ppwszText = NULL;
+
+    size_t cwcText = 1; /* Terminator. */
+    for (unsigned i = 0; i < RT_ELEMENTS(g_aFiles); i++)
+    {
+        cwcText += RTUtf16Len((PCRTUTF16)g_aFiles[i].pwszName);
+        if (i + 1 < RT_ELEMENTS(g_aFiles))
+            cwcText += 2; /* CRLF separator. */
+    }
+
+    PRTUTF16 pwszText = (PRTUTF16)RTMemAllocZ(cwcText * sizeof(RTUTF16));
+    if (!pwszText)
+        return VERR_NO_MEMORY;
+
+    PRTUTF16 pwszDst = pwszText;
+    for (unsigned i = 0; i < RT_ELEMENTS(g_aFiles); i++)
+    {
+        size_t const cwcName = RTUtf16Len((PCRTUTF16)g_aFiles[i].pwszName);
+        memcpy(pwszDst, g_aFiles[i].pwszName, cwcName * sizeof(RTUTF16));
+        pwszDst += cwcName;
+
+        if (i + 1 < RT_ELEMENTS(g_aFiles))
+        {
+            *pwszDst++ = '\r';
+            *pwszDst++ = '\n';
+        }
+    }
+
+    *pwszDst = '\0';
+    *ppwszText = pwszText;
+    return VINF_SUCCESS;
+}
+
+
+/**
+ * Checks the CF_UNICODETEXT text representation of the transfer roots.
+ *
+ * @param   pDataObj            Data object to check.
+ */
+static void testCheckUnicodeText(ShClWinDataObject *pDataObj)
+{
+    AssertPtrReturnVoid(pDataObj);
+
+    RTTestISub("IDataObject / CF_UNICODETEXT");
+
+    FORMATETC FormatEtc;
+    RT_ZERO(FormatEtc);
+    FormatEtc.cfFormat = CF_UNICODETEXT;
+    FormatEtc.dwAspect = DVASPECT_CONTENT;
+    FormatEtc.lindex   = -1;
+    FormatEtc.tymed    = TYMED_HGLOBAL;
+
+    HRESULT hrc = pDataObj->QueryGetData(&FormatEtc);
+    if (hrc != S_OK)
+    {
+        RTTestIFailed("QueryGetData(CF_UNICODETEXT) returned %Rhrc, expected S_OK", hrc);
+        return;
+    }
+
+    STGMEDIUM Medium;
+    RT_ZERO(Medium);
+
+    hrc = pDataObj->GetData(&FormatEtc, &Medium);
+    if (hrc != S_OK)
+    {
+        RTTestIFailed("GetData(CF_UNICODETEXT) returned %Rhrc, expected S_OK", hrc);
+        testReleaseStgMedium(&Medium);
+        return;
+    }
+
+    if (Medium.tymed != TYMED_HGLOBAL)
+        RTTestIFailed("CF_UNICODETEXT tymed %#x, expected TYMED_HGLOBAL", Medium.tymed);
+
+    if (!Medium.hGlobal)
+        RTTestIFailed("CF_UNICODETEXT returned NULL HGLOBAL");
+    else
+    {
+        PRTUTF16 pwszExpected = NULL;
+        int rc = testCreateExpectedUnicodeText(&pwszExpected);
+        if (RT_FAILURE(rc))
+            RTTESTI_CHECK_RC_OK(rc);
+        else
+        {
+            PCRTUTF16 pcwszActual = (PCRTUTF16)GlobalLock(Medium.hGlobal);
+            if (!pcwszActual)
+                RTTestIFailed("GlobalLock(CF_UNICODETEXT) failed, lasterr=%u", GetLastError());
+            else
+            {
+                if (RTUtf16Cmp(pcwszActual, pwszExpected) != 0)
+                {
+                    char *pszActual = NULL;
+                    char *pszExpected = NULL;
+                    RTUtf16ToUtf8(pcwszActual, &pszActual);
+                    RTUtf16ToUtf8(pwszExpected, &pszExpected);
+                    RTTestIFailed("CF_UNICODETEXT mismatch: got \"%s\", expected \"%s\"",
+                                  pszActual ? pszActual : "<conversion failed>",
+                                  pszExpected ? pszExpected : "<conversion failed>");
+                    RTStrFree(pszActual);
+                    RTStrFree(pszExpected);
+                }
+
+                GlobalUnlock(Medium.hGlobal);
+            }
+
+            RTMemFree(pwszExpected);
+        }
+    }
+
+    testReleaseStgMedium(&Medium);
+}
+
+
 static void testCheckFileDescriptorA(ShClWinDataObject *pDataObj)
 {
     AssertPtrReturnVoid(pDataObj);
@@ -996,6 +1119,8 @@ static void testFileDescriptorW(void)
             RTTESTI_CHECK_RC_OK(rc);
             break;
         }
+
+        testCheckUnicodeText(pDataObj);
 
         CLIPFORMAT const cfFileDescriptorW = (CLIPFORMAT)RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW);
         if (!cfFileDescriptorW)
