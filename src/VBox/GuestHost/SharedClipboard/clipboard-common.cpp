@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114661 2026-07-08 10:39:13Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -1242,27 +1242,23 @@ VBGH_DECL(int) ShClCacheTransferAll(PSHCLCACHE pCache, PSHCLCACHE pOtherCache)
  */
 SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFORMATS fFormats)
 {
+    SHCLFORMATS const fFormatsOrg = fFormats;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     bool fSkipTransfers = false;
     if (fFormats & VBOX_SHCL_FMT_URI_LIST)
     {
         if (!(pClient->State.Transfers.uTransferMode & VBOX_SHCL_TRANSFER_MODE_F_ENABLED))
         {
-            static uint8_t s_uTransfersBitchedNotEnabled = 0;
-            if (s_uTransfersBitchedNotEnabled++ < 32)
-                LogRel(("Shared Clipboard: File transfers are disabled on host, skipping reporting those to the guest\n"));
+            LogRelMax(16, ("Shared Clipboard: File transfer format %#x was reported by %s, but file transfers are disabled (mode=%#x), masking it\n",
+                           VBOX_SHCL_FMT_URI_LIST, fHostToGuest ? "host" : "guest", pClient->State.Transfers.uTransferMode));
             fSkipTransfers = true;
         }
 
         uint64_t const fRequired = VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS;
         if ((pClient->State.fGuestFeatures0 & fRequired) != fRequired)
         {
-            static bool s_fTransfersBitchedNotSupported = false;
-            if (!s_fTransfersBitchedNotSupported)
-            {
-                LogRel(("Shared Clipboard: File transfers not supported by installed Guest Additions, skipping reporting those to the guest\n"));
-                s_fTransfersBitchedNotSupported = true;
-            }
+            LogRelMax(16, ("Shared Clipboard: File transfer format %#x was reported by %s, but Guest Additions did not negotiate required features (features0=%#RX64, required=%#RX64), masking it\n",
+                           VBOX_SHCL_FMT_URI_LIST, fHostToGuest ? "host" : "guest", pClient->State.fGuestFeatures0, fRequired));
             fSkipTransfers = true;
         }
 
@@ -1271,8 +1267,8 @@ SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFOR
         else if (fHostToGuest)
         {
             if (fFormats != VBOX_SHCL_FMT_URI_LIST)
-                LogRel2(("Shared Clipboard: Reporting host file transfer format separately "
-                         "from regular clipboard formats\n"));
+                LogRelMax2(16, ("Shared Clipboard: Host reported file transfer together with regular formats %#x; announcing URI-list alone for Guest Additions compatibility\n",
+                               fFormats & ~VBOX_SHCL_FMT_URI_LIST));
             fFormats = VBOX_SHCL_FMT_URI_LIST;
         }
     }
@@ -1289,6 +1285,10 @@ SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFOR
                  fHostToGuest ? "guest" : "host"));
         RTStrFree(pszFmts);
     }
+
+    if (fFormats != fFormatsOrg)
+        LogRelMax2(16, ("Shared Clipboard: Adjusted %s clipboard formats from %#x to %#x before reporting to %s\n",
+                       fHostToGuest ? "host" : "guest", fFormatsOrg, fFormats, fHostToGuest ? "guest" : "host"));
 
     return fFormats;
 }

@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114661 2026-07-08 10:39:13Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -719,7 +719,8 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
             {
                 if (!pTransfer)
                 {
-                    LogRel2(("Shared Clipboard: Guest didn't specify a (valid) transfer\n"));
+                    LogRelMax2(16, ("Shared Clipboard: Guest reply did not specify a valid transfer context (reply type=%RU32)\n",
+                                                        pReply->uType));
                     rc = VERR_SHCLPB_TRANSFER_ID_NOT_FOUND;
                 }
             }
@@ -751,7 +752,7 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                         /* SHCLTRANSFERSTATUS_REQUESTED is special, as it doesn't provide a transfer ID. */
                         if (SHCLTRANSFERSTATUS_REQUESTED == pReply->u.TransferStatus.uStatus)
                         {
-                            LogRel2(("Shared Clipboard: Guest requested a new host -> guest transfer\n"));
+                            LogRelMax2(16, ("Shared Clipboard: Guest requested a new host -> guest transfer\n"));
                         }
 
                         switch (pReply->u.TransferStatus.uStatus)
@@ -783,7 +784,11 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                                         rc = VERR_WRONG_ORDER;
                                 }
                                 else
+                                {
+                                    LogRelMax2(16, ("Shared Clipboard: Guest requested host -> guest transfer, but clipboard mode %RU32 does not allow it\n",
+                                                    uMode));
                                     rc = VERR_INVALID_PARAMETER;
+                                }
 
                                 break;
                             }
@@ -857,7 +862,7 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
 
                             case SHCLTRANSFERSTATUS_ERROR:
                             {
-                                LogRelMax(64, ("Shared Clipboard: Guest reported error %Rrc for transfer %RU16\n",
+                                LogRelMax(16, ("Shared Clipboard: Guest reported error %Rrc for transfer %RU16\n",
                                                pReply->rc, pTransfer->State.uID));
 
                                 if (g_ExtState.pfnExtension)
@@ -882,7 +887,7 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
 
                             default:
                             {
-                                LogRelMax(64, ("Shared Clipboard: Unknown transfer status %#x from guest received\n",
+                                LogRelMax(16, ("Shared Clipboard: Unknown transfer status %#x from guest received\n",
                                                pReply->u.TransferStatus.uStatus));
                                 rc = VERR_INVALID_PARAMETER;
                                 break;
@@ -941,7 +946,7 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                     }
 
                     default:
-                        LogRelMax(64, ("Shared Clipboard: Unknown reply type %#x from guest received\n", pReply->uType));
+                        LogRelMax(16, ("Shared Clipboard: Unknown reply type %#x from guest received\n", pReply->uType));
                         ShClTransferCancel(pTransfer); /* Avoid clogging up the transfer list. */
                         rc = VERR_INVALID_PARAMETER;
                         break;
@@ -1011,20 +1016,24 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
 
     if (!(pClient->State.fGuestFeatures0 & VBOX_SHCL_GF_0_TRANSFERS))
     {
-        LogRel2(("Shared Clipboard: Guest attempted file transfer message without negotiated transfer support\n"));
+        LogRelMax2(16, ("Shared Clipboard: Guest attempted file transfer message %s without negotiated transfer support (features0=%#RX64)\n",
+                        ShClGuestMsgToStr(u32Function), pClient->State.fGuestFeatures0));
         return VERR_ACCESS_DENIED;
     }
 
     if (!(g_fTransferMode & VBOX_SHCL_TRANSFER_MODE_F_ENABLED))
     {
-        LogRel2(("Shared Clipboard: File transfers are disabled for this VM\n"));
+        LogRelMax2(16, ("Shared Clipboard: Guest attempted file transfer message %s, but file transfers are disabled for this VM (transfer mode=%#x)\n",
+                        ShClGuestMsgToStr(u32Function), g_fTransferMode));
         return VERR_ACCESS_DENIED;
     }
 
     /* Check if we've the right mode set. */
-    if (!shClSvcTransferMsgIsAllowed(ShClSvcGetMode(), u32Function))
+    uint32_t const uMode = ShClSvcGetMode();
+    if (!shClSvcTransferMsgIsAllowed(uMode, u32Function))
     {
-        LogFunc(("Wrong clipboard mode, denying access\n"));
+        LogRelMax2(16, ("Shared Clipboard: Guest file transfer message %s is not allowed in clipboard mode %RU32\n",
+                        ShClGuestMsgToStr(u32Function), uMode));
         return VERR_ACCESS_DENIED;
     }
 
@@ -1045,10 +1054,18 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
         /* A guest requests a new host -> guest transfer by sending
          * SHCLTRANSFERSTATUS_REQUESTED without an existing transfer context. */
         if (u32Function != VBOX_SHCL_GUEST_FN_REPLY)
+        {
+            LogRelMax2(16, ("Shared Clipboard: Guest file transfer message %s used zero context ID; only transfer status replies may do this\n",
+                            ShClGuestMsgToStr(u32Function)));
             return VERR_INVALID_CONTEXT;
+        }
     }
     else if (VBOX_SHCL_CONTEXTID_GET_SESSION(uCID) != pClient->State.uSessionID)
+    {
+        LogRelMax2(16, ("Shared Clipboard: Guest file transfer message %s used context %#RX64 for session %RU32, expected session %RU32\n",
+                        ShClGuestMsgToStr(u32Function), uCID, VBOX_SHCL_CONTEXTID_GET_SESSION(uCID), pClient->State.uSessionID));
         return VERR_INVALID_CONTEXT;
+    }
 
     /*
      * Pre-check: For certain messages we need to make sure that a (right) transfer is present.
@@ -1058,7 +1075,11 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
 
     if (   u32Function != VBOX_SHCL_GUEST_FN_REPLY
         && !pTransfer)
+    {
+        LogRelMax2(16, ("Shared Clipboard: Guest file transfer message %s references unknown transfer %RU16 (context=%#RX64)\n",
+                        ShClGuestMsgToStr(u32Function), idTransfer, uCID));
         return VERR_SHCLPB_TRANSFER_ID_NOT_FOUND;
+    }
 
     rc = VERR_INVALID_PARAMETER; /* Play safe. */
 
@@ -1661,7 +1682,7 @@ int ShClSvcTransferStop(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, bool fWait
     }
 
     if (RT_FAILURE(rc))
-        LogRelMax(64, ("Shared Clipboard: Unable to stop transfer %RU16 on guest, rc=%Rrc\n",
+        LogRelMax(16, ("Shared Clipboard: Unable to stop transfer %RU16 on guest, rc=%Rrc\n",
                        pTransfer->State.uID, rc));
 
     ShClSvcClientUnlock(pClient);

@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers-provider-local.cpp 114645 2026-07-08 07:09:21Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers-provider-local.cpp 114661 2026-07-08 10:39:13Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Transfers interface implementation for local file systems.
  */
@@ -203,7 +203,7 @@ static int shClTransferLocalPathEnsureNoSymlinks(const char *pszPathAbs)
             break;
         if (RTFS_IS_SYMLINK(ObjInfo.Attr.fMode))
         {
-            LogRelMax(64, ("Shared Clipboard: Path component '%s' is a symbolic link\n", szPath));
+            LogRelMax2(16, ("Shared Clipboard: Path component '%s' is a symbolic link\n", szPath));
             rc = VERR_IS_A_SYMLINK;
             break;
         }

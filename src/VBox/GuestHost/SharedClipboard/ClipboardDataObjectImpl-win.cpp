@@ -1,4 +1,4 @@
-/* $Id: ClipboardDataObjectImpl-win.cpp 114651 2026-07-08 09:46:19Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardDataObjectImpl-win.cpp 114661 2026-07-08 10:39:13Z andreas.loeffler@oracle.com $ */
 /** @file
  * ClipboardDataObjectImpl-win.cpp - Shared Clipboard IDataObject implementation.
  */
@@ -805,7 +805,10 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
 
     uint64_t const cRoots = ShClTransferRootsCount(pTransfer);
     if (!cRoots)
+    {
+        LogRelMax2(16, ("Shared Clipboard: Cannot provide CF_UNICODETEXT for file transfer because the transfer has no root entries\n"));
         return VERR_NOT_FOUND;
+    }
 
     size_t cwcText = 1; /* Terminator. */
     int rc = VINF_SUCCESS;
@@ -818,12 +821,17 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
         size_t cwcRoot = 0;
         rc = RTStrCalcUtf16LenEx(pRootEntry->pszName, RTSTR_MAX, &cwcRoot);
         if (RT_FAILURE(rc))
+        {
+            LogRelMax2(16, ("Shared Clipboard: Cannot convert transfer root '%s' to UTF-16 length for CF_UNICODETEXT, rc=%Rrc\n",
+                            pRootEntry->pszName, rc));
             break;
+        }
 
         size_t const cwcAdd = cwcRoot + (i + 1 < cRoots ? 2 : 0);
         if (   cwcAdd < cwcRoot
             || cwcText > SIZE_MAX - cwcAdd)
         {
+            LogRelMax(16, ("Shared Clipboard: Transfer root text is too large to expose as CF_UNICODETEXT\n"));
             rc = VERR_TOO_MUCH_DATA;
             break;
         }
@@ -835,11 +843,18 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
         return rc;
 
     if (cwcText > SIZE_MAX / sizeof(RTUTF16))
+    {
+        LogRelMax(16, ("Shared Clipboard: Transfer root text is too large to allocate as CF_UNICODETEXT (%zu UTF-16 code units)\n",
+                       cwcText));
         return VERR_TOO_MUCH_DATA;
+    }
 
     HGLOBAL hGlobal = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, cwcText * sizeof(RTUTF16));
     if (!hGlobal)
+    {
+        LogRelMax(16, ("Shared Clipboard: Allocating %zu bytes for CF_UNICODETEXT failed\n", cwcText * sizeof(RTUTF16)));
         return VERR_NO_MEMORY;
+    }
 
     PRTUTF16 pwszText = (PRTUTF16)GlobalLock(hGlobal);
     if (!pwszText)
@@ -859,7 +874,11 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
         size_t cwcWritten = 0;
         rc = RTStrToUtf16Ex(pRootEntry->pszName, RTSTR_MAX, &pwszDst, cwcLeft, &cwcWritten);
         if (RT_FAILURE(rc))
+        {
+            LogRelMax(16, ("Shared Clipboard: Converting transfer root '%s' to CF_UNICODETEXT failed with %Rrc\n",
+                           pRootEntry->pszName, rc));
             break;
+        }
 
         pwszDst += cwcWritten;
         cwcLeft -= cwcWritten;
@@ -882,7 +901,11 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
     GlobalUnlock(hGlobal);
 
     if (RT_SUCCESS(rc))
+    {
+        LogRelMax2(16, ("Shared Clipboard: Providing CF_UNICODETEXT with %RU64 transfer root entries (%zu bytes)\n",
+                        cRoots, cwcText * sizeof(RTUTF16)));
         *phGlobal = hGlobal;
+    }
     else
         GlobalFree(hGlobal);
 
@@ -907,7 +930,10 @@ int ShClWinDataObject::ensureTransferListReadyLocked(void)
         LogRel2(("Shared Clipboard: Requesting data for IDataObject ...\n"));
 
         if (!m_Callbacks.pfnTransferBegin)
+        {
+            LogRelMax2(16, ("Shared Clipboard: Cannot start IDataObject transfer because no transfer-begin callback is installed\n"));
             return VERR_INVALID_POINTER;
+        }
 
         /* Leave lock while requesting + waiting. */
         unlock();
@@ -929,13 +955,13 @@ int ShClWinDataObject::ensureTransferListReadyLocked(void)
 
         if (RT_FAILURE(rc))
         {
-            LogRel(("Shared Clipboard: Waiting for IDataObject status failed, rc=%Rrc\n", rc));
+            LogRelMax2(16, ("Shared Clipboard: Waiting for IDataObject transfer to start failed, rc=%Rrc\n", rc));
             return rc;
         }
 
         if (m_enmStatus != Running)
         {
-            LogRel(("Shared Clipboard: Received wrong IDataObject status (%#x)\n", m_enmStatus));
+            LogRelMax2(16, ("Shared Clipboard: IDataObject transfer did not enter running state (status=%#x)\n", m_enmStatus));
             return VERR_WRONG_ORDER;
         }
     }
@@ -969,7 +995,11 @@ int ShClWinDataObject::ensureTransferListReadyLocked(void)
             rc = ShClTransferRun(pTransfer, &ShClWinDataObject::readThread, this /* pvUser */);
             if (RT_SUCCESS(rc))
                 fNeedListWait = true;
+            else
+                LogRelMax2(16, ("Shared Clipboard: Starting IDataObject transfer read thread failed with %Rrc\n", rc));
         }
+        else
+            LogRelMax2(16, ("Shared Clipboard: Starting IDataObject transfer failed with %Rrc\n", rc));
     }
 
     if (   RT_SUCCESS(rc)
@@ -978,6 +1008,8 @@ int ShClWinDataObject::ensureTransferListReadyLocked(void)
         /* Don't block for too long here, as this also will screw other apps running on the OS. */
         LogRel2(("Shared Clipboard: Waiting for IDataObject listing to arrive ...\n"));
         rc = RTSemEventWait(m_EventListComplete, RT_MS_10SEC);
+        if (RT_FAILURE(rc))
+            LogRelMax2(16, ("Shared Clipboard: Timed out or failed waiting for IDataObject transfer listing, rc=%Rrc\n", rc));
     }
 
     ShClTransferRelease(pTransfer);
@@ -989,7 +1021,11 @@ int ShClWinDataObject::ensureTransferListReadyLocked(void)
         && (   m_pTransfer == NULL
             || m_enmStatus != Running
             || m_lstEntries.empty())) /* Still in running state and with a listing? */
+    {
+        LogRelMax2(16, ("Shared Clipboard: IDataObject transfer listing is unavailable after wait (transfer=%p, status=%#x, entries=%zu)\n",
+                       m_pTransfer, m_enmStatus, m_lstEntries.size()));
         rc = VERR_SHCLPB_NO_DATA;
+    }
 
     return rc;
 }
@@ -1058,7 +1094,8 @@ STDMETHODIMP ShClWinDataObject::GetData(LPFORMATETC pFormatEtc, LPSTGMEDIUM pMed
 
         if (RT_FAILURE(rc))
         {
-            LogRel(("Shared Clipboard: Error getting data for IDataObject, rc=%Rrc\n", rc));
+            LogRelMax(16, ("Shared Clipboard: Error getting data format %#x from IDataObject, rc=%Rrc\n",
+                           pFormatEtc->cfFormat, rc));
             hr = E_UNEXPECTED; /* We can't tell any better to the caller, unfortunately. */
         }
     }

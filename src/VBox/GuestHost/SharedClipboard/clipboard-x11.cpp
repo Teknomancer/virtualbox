@@ -434,6 +434,9 @@ static void clipReportFormatsToVBox(PSHCLX11CTX pCtx)
     vboxFmt            |= clipVBoxFormatForX11Format(pCtx->idxFmtHTML);
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     vboxFmt            |= clipVBoxFormatForX11Format(pCtx->idxFmtURI);
+    if (vboxFmt & VBOX_SHCL_FMT_URI_LIST)
+        LogRelMax2(16, ("Shared Clipboard: X11 reports host file transfer via target '%s' (VBox formats %#x)\n",
+                       g_aFormats[pCtx->idxFmtURI].pcszAtom, vboxFmt));
 #endif
 
     LogFlowFunc(("idxFmtText=%u ('%s'), idxFmtBmp=%u ('%s'), idxFmtHTML=%u ('%s')",
@@ -608,19 +611,36 @@ SHCL_X11_DECL(SHCLX11FMTIDX) clipGetURIListFormatFromTargets(PSHCLX11CTX pCtx,
 
     SHCLX11FMTIDX idxFmtURI = NIL_CLIPX11FORMAT;
     SHCLX11FMT    fmtURIX11 = SHCLX11FMT_INVALID;
+    bool          fSawUnsupportedTransferMetadata = false;
     for (unsigned i = 0; i < cTargets; ++i)
     {
         SHCLX11FMTIDX idxFmt = paIdxFmtTargets[i];
         if (idxFmt != NIL_CLIPX11FORMAT)
         {
-            if (   (clipVBoxFormatForX11Format(idxFmt) == VBOX_SHCL_FMT_URI_LIST)
-                && fmtURIX11 < clipRealFormatForX11Format(idxFmt))
+            SHCLX11FMT const fmtReal = clipRealFormatForX11Format(idxFmt);
+            if (   fmtReal == SHCLX11FMT_URI_LIST_KDE_CUTSELECTION
+                && clipVBoxFormatForX11Format(idxFmt) != VBOX_SHCL_FMT_URI_LIST)
             {
-                fmtURIX11 = clipRealFormatForX11Format(idxFmt);
+                fSawUnsupportedTransferMetadata = true;
+                LogRelMax2(16, ("Shared Clipboard: Ignoring X11 clipboard target '%s'; it only describes cut/copy state, not file names\n",
+                               g_aFormats[idxFmt].pcszAtom));
+            }
+
+            if (   (clipVBoxFormatForX11Format(idxFmt) == VBOX_SHCL_FMT_URI_LIST)
+                && fmtURIX11 < fmtReal)
+            {
+                fmtURIX11 = fmtReal;
                 idxFmtURI = idxFmt;
             }
         }
     }
+
+    if (idxFmtURI != NIL_CLIPX11FORMAT)
+        LogRelMax2(16, ("Shared Clipboard: Selected X11 URI-list target '%s' for host file transfer\n",
+                       g_aFormats[idxFmtURI].pcszAtom));
+    else if (fSawUnsupportedTransferMetadata)
+        LogRelMax2(16, ("Shared Clipboard: X11 clipboard had file-transfer metadata but no supported file list target (for example text/uri-list); host file transfer will not be announced\n"));
+
     return idxFmtURI;
 }
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
@@ -2212,7 +2232,11 @@ int ShClX11TransferConvertFromX11(const char *pvData, size_t cbData, char **ppsz
     /* For URI lists we only accept valid UTF-8 encodings. */
     int rc = RTStrValidateEncodingEx((char *)pvData, cbData, 0 /* fFlags */);
     if (RT_FAILURE(rc))
+    {
+        LogRelMax2(16, ("Shared Clipboard: X11 URI-list clipboard data is not valid UTF-8 (%zu bytes), rc=%Rrc\n",
+                       cbData, rc));
         return rc;
+    }
 
     *ppszList = NULL;
     *pcbList  = 0;
@@ -2241,6 +2265,7 @@ int ShClX11TransferConvertFromX11(const char *pvData, size_t cbData, char **ppsz
         if (   pchCur < pchEnd
             && *pchCur == '\0')
         {
+            LogRelMax2(16, ("Shared Clipboard: X11 URI-list clipboard data contains an embedded NUL byte; refusing file transfer\n"));
             rc = VERR_INVALID_PARAMETER;
             break;
         }
@@ -2270,13 +2295,15 @@ int ShClX11TransferConvertFromX11(const char *pvData, size_t cbData, char **ppsz
         if (   fFirstContentLine
             && shClX11TransferIsActionLine(pchLine, cchLine))
         {
+            LogRelMax2(16, ("Shared Clipboard: Skipping X11 file-copy action marker '%.*s'\n",
+                           (int)RT_MIN(cchLine, (size_t)32), pchLine));
             fFirstContentLine = false;
             continue;
         }
         fFirstContentLine = false;
 
-        LogRel2(("Shared Clipboard: Received entry #%RU32 from X11: '%.*s'\n",
-                 cEntries, (int)RT_MIN(cchLine, (size_t)4096), pchLine));
+        LogRelMax2(16, ("Shared Clipboard: X11 URI-list entry #%RU32: '%.*s'\n",
+                       cEntries, (int)RT_MIN(cchLine, (size_t)4096), pchLine));
 
         rc = shClX11TransferAppendListEntry(ppszList, pcbList, pchLine, cchLine);
         if (RT_FAILURE(rc))
@@ -2294,7 +2321,12 @@ int ShClX11TransferConvertFromX11(const char *pvData, size_t cbData, char **ppsz
     }
 
     if (!cEntries)
+    {
+        LogRelMax2(16, ("Shared Clipboard: X11 URI-list clipboard data contained no file entries; refusing file transfer\n"));
         return VERR_SHCLPB_NO_DATA;
+    }
+
+    LogRelMax2(16, ("Shared Clipboard: Converted %RU32 X11 URI-list entries for host file transfer\n", cEntries));
 
     *pcbList += 1; /* Include terminator. */
     return VINF_SUCCESS;

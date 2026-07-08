@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114645 2026-07-08 07:09:21Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114661 2026-07-08 10:39:13Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -2181,7 +2181,8 @@ int ShClTransferRootsSetFromStringListEx(PSHCLTRANSFER pTransfer, const char *ps
                         if (   !RTFS_IS_DIRECTORY(pFsObjInfo->Attr.fMode)
                             && !RTFS_IS_FILE(pFsObjInfo->Attr.fMode))
                         {
-                            LogRelMax(64, ("Shared Clipboard: Root path '%s' is not a regular file or directory\n", pszPathCur));
+                            LogRelMax(16, ("Shared Clipboard: Root path '%s' is not a regular file or directory (%#x)\n",
+                                           pszPathCur, pFsObjInfo->Attr.fMode));
                             rc = VERR_NOT_SUPPORTED;
                         }
                     }
@@ -3928,8 +3929,8 @@ int ShClTransferValidatePath(const char *pcszPath, bool fMustExist)
                     if (   !RTFS_IS_DIRECTORY(objInfo.Attr.fMode)
                         && !RTFS_IS_FILE(objInfo.Attr.fMode))
                     {
-                        LogRelMax(64, ("Shared Clipboard: Path '%s' contains a symbolic link, junction or unsupported object type\n",
-                                       pcszPath));
+                        LogRelMax(16, ("Shared Clipboard: Path '%s' contains a symbolic link, junction or unsupported object type (%#x)\n",
+                                       pcszPath, objInfo.Attr.fMode));
                         rc = VERR_NOT_SUPPORTED;
                     }
                 }
@@ -3938,7 +3939,7 @@ int ShClTransferValidatePath(const char *pcszPath, bool fMustExist)
     }
 
     if (RT_FAILURE(rc))
-        LogRelMax(64, ("Shared Clipboard: Validating path '%s' failed: %Rrc\n", pcszPath, rc));
+        LogRelMax(16, ("Shared Clipboard: Validating path '%s' failed: %Rrc\n", pcszPath, rc));
 
     LogFlowFuncLeaveRC(rc);
     return rc;
@@ -4925,7 +4926,7 @@ static int shClSvcTransferSendStatusExAsync(PSHCLCLIENT pClient, SHCLTRANSFERID 
         rc = VERR_SHCLPB_MAX_EVENTS_REACHED;
 
     if (RT_FAILURE(rc))
-        LogRelMax(64, ("Shared Clipboard: Reporting status %s (%Rrc) for transfer %RU16 to guest failed with %Rrc\n",
+        LogRelMax(16, ("Shared Clipboard: Reporting status %s (%Rrc) for transfer %RU16 to guest failed with %Rrc\n",
                        ShClTransferStatusToStr(enmSts), rcTransfer, idTransfer, rc));
 
     LogFlowFuncLeaveRC(rc);
