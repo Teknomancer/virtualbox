@@ -1,4 +1,4 @@
-/* $Id: VUSBUrbTrace.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: VUSBUrbTrace.cpp 114652 2026-07-08 10:11:20Z michal.necasek@oracle.com $ */
 /** @file
  * Virtual USB - URBs.
  */
@@ -156,7 +156,8 @@ DECLHIDDEN(const char *) vusbUrbTypeName(VUSBXFERTYPE enmType)
 DECLHIDDEN(void) vusbUrbTrace(PVUSBURB pUrb, const char *pszMsg, bool fComplete)
 {
     PVUSBDEV        pDev   = pUrb->pVUsb ? pUrb->pVUsb->pDev : NULL; /* Can be NULL when called from usbProxyConstruct and friends. */
-    PVUSBPIPE       pPipe  = pDev ? &pDev->aPipes[pUrb->EndPt] : NULL;
+    Assert((pUrb->EndPt < VUSB_PIPE_MAX) || (pUrb->EndPt == UINT8_MAX)); /* EndPt is not yet set when called from vusbRhNewUrb. */
+    PVUSBPIPE       pPipe  = pDev && pUrb->EndPt < RT_ELEMENTS(pDev->aPipes) ? &pDev->aPipes[pUrb->EndPt] : NULL;
     const uint8_t  *pbData = pUrb->pbData;
     uint32_t        cbData = pUrb->cbData;
     PCVUSBSETUP     pSetup = NULL;
@@ -223,6 +224,7 @@ DECLHIDDEN(void) vusbUrbTrace(PVUSBURB pUrb, const char *pszMsg, bool fComplete)
              && pUrb->enmDir == VUSBDIRECTION_IN
              && pUrb->enmType == VUSBXFERTYPE_CTRL
              && pUrb->enmStatus == VUSBSTATUS_OK
+             && pPipe
              && pPipe->pCtrl
              && pPipe->pCtrl->enmStage == CTLSTAGE_DATA
              && cbData > 0)
