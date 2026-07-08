@@ -1,4 +1,4 @@
-/* $Id: UISharedClipboardProvider.cpp 114637 2026-07-07 16:21:39Z andreas.loeffler@oracle.com $ */
+/* $Id: UISharedClipboardProvider.cpp 114644 2026-07-08 06:48:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * VBox Qt GUI - UISharedClipboardProvider class implementation.
  */
@@ -249,8 +249,7 @@ protected:
             if (FAILED(hrc))
             {
                 LogRel(("GUI: UISharedClipboardProvider: waiting for clipboard events failed: %Rhrc\n", hrc));
-                emit sigClipboardError(tr("Waiting for GUI shared clipboard events failed."));
-                break;
+                continue;
             }
             if (comEvent.isNull())
                 continue;
@@ -320,7 +319,7 @@ private:
 #endif
             case KVBoxEventType_OnClipboardError:
                 handleClipboardError(comEvent);
-                return false;
+                return true;
             default:
                 LogRel3(("GUI: UISharedClipboardProvider: diagnostic clipboard event %d ignored\n", enmType));
                 return true;
@@ -341,7 +340,7 @@ private:
         LogRel(("GUI: UISharedClipboardProvider: publishing guest clipboard data to host failed: %Rhrc\n",
                 comHostClipboard.lastRC()));
         emit sigClipboardError(tr("Publishing guest clipboard data to the host failed."));
-        return false;
+        return true;
     }
 
     /** Reads preferred guest-owned data and publishes it eagerly to the native host clipboard.
@@ -389,7 +388,7 @@ private:
             LogRel(("GUI: UISharedClipboardProvider: failed to inspect clipboard format event: %Rhrc\n",
                     comFormatEvent.lastRC()));
             emit sigClipboardError(tr("Inspecting a shared clipboard format event failed."));
-            return false;
+            return true;
         }
         if (enmSource != KClipboardSource_Guest)
             return true;
@@ -424,7 +423,7 @@ private:
             LogRel(("GUI: UISharedClipboardProvider: failed to inspect clipboard source event: %Rhrc\n",
                     comSourceEvent.lastRC()));
             emit sigClipboardError(tr("Inspecting a shared clipboard source event failed."));
-            return false;
+            return true;
         }
         if (enmSource != KClipboardSource_Guest)
             return true;
@@ -435,7 +434,7 @@ private:
             LogRel(("GUI: UISharedClipboardProvider: reading guest clipboard formats failed: %Rhrc\n",
                     comClipboardSession.lastRC()));
             emit sigClipboardError(tr("Reading guest clipboard formats failed."));
-            return false;
+            return true;
         }
 
         QVector<CClipboardFormat> filteredFormats;
@@ -467,7 +466,7 @@ private:
         {
             LogRel(("GUI: UISharedClipboardProvider: clipboard data event has no item: %Rhrc\n", comDataEvent.lastRC()));
             emit sigClipboardError(tr("Inspecting a shared clipboard data event failed."));
-            return false;
+            return true;
         }
 
         const KClipboardSource enmSource = comItem.GetSource();
@@ -479,7 +478,7 @@ private:
             LogRel(("GUI: UISharedClipboardProvider: reading clipboard data event payload failed: %Rhrc\n",
                     !comItem.isOk() ? comItem.lastRC() : comFormat.lastRC()));
             emit sigClipboardError(tr("Reading a shared clipboard data event failed."));
-            return false;
+            return true;
         }
         if (shclGuiMimePriority(strMimeType) == UINT32_MAX || buffer.isEmpty())
             return true;
@@ -499,7 +498,7 @@ private:
             LogRel(("GUI: UISharedClipboardProvider: forwarding host clipboard data to guest failed: %Rhrc\n",
                     comClipboardSession.lastRC()));
             emit sigClipboardError(tr("Forwarding host clipboard data to the guest failed."));
-            return false;
+            return true;
         }
 
         return true;
@@ -512,13 +511,16 @@ private:
         CClipboardErrorEvent comErrorEvent(comEvent);
         if (comErrorEvent.isNull())
         {
-            emit sigClipboardError(tr("An unspecified shared clipboard error occurred."));
+            const QString strMsg = tr("An unspecified shared clipboard error occurred.");
+            LogRel(("GUI: UISharedClipboardProvider: %s\n", strMsg.toUtf8().constData()));
+            emit sigClipboardError(strMsg);
             return;
         }
 
         QString strMsg = comErrorEvent.GetMsg();
         if (!comErrorEvent.isOk() || strMsg.isEmpty())
             strMsg = tr("An unspecified shared clipboard error occurred.");
+        LogRel(("GUI: UISharedClipboardProvider: %s\n", strMsg.toUtf8().constData()));
         emit sigClipboardError(strMsg);
     }
 
