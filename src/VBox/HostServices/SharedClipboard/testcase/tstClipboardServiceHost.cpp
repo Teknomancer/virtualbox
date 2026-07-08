@@ -1,4 +1,4 @@
-/* $Id: tstClipboardServiceHost.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardServiceHost.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard host service test case.
  */
@@ -354,15 +354,25 @@ static void testTransferFormatFiltering(void)
         const char *pszName;
         uint32_t    fTransferMode;
         uint64_t    fGuestFeatures0;
-        SHCLFORMATS fExpected;
+        SHCLFORMATS fExpectedHostToGuest;
+        SHCLFORMATS fExpectedGuestToHost;
     } s_aTests[] =
     {
-        { "disabled",      VBOX_SHCL_TRANSFER_MODE_F_NONE,    VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS, VBOX_SHCL_FMT_UNICODETEXT },
-        { "no features",   VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_NONE,                                VBOX_SHCL_FMT_UNICODETEXT },
-        { "transfers",     VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_TRANSFERS,                         VBOX_SHCL_FMT_UNICODETEXT },
-        { "context-id",    VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_CONTEXT_ID,                        VBOX_SHCL_FMT_UNICODETEXT },
-        { "both features", VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS,
-                                                                                                                    VBOX_SHCL_FMT_URI_LIST | VBOX_SHCL_FMT_UNICODETEXT }
+        { "disabled",      VBOX_SHCL_TRANSFER_MODE_F_NONE,
+          VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS,
+          VBOX_SHCL_FMT_UNICODETEXT, VBOX_SHCL_FMT_UNICODETEXT },
+        { "no features",   VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_NONE,
+          VBOX_SHCL_FMT_UNICODETEXT, VBOX_SHCL_FMT_UNICODETEXT },
+        { "transfers",     VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_TRANSFERS,
+          VBOX_SHCL_FMT_UNICODETEXT, VBOX_SHCL_FMT_UNICODETEXT },
+        { "context-id",    VBOX_SHCL_TRANSFER_MODE_F_ENABLED, VBOX_SHCL_GF_0_CONTEXT_ID,
+          VBOX_SHCL_FMT_UNICODETEXT, VBOX_SHCL_FMT_UNICODETEXT },
+        { "7.2 transfer", VBOX_SHCL_TRANSFER_MODE_F_ENABLED,
+          VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS,
+          VBOX_SHCL_FMT_URI_LIST, VBOX_SHCL_FMT_URI_LIST | VBOX_SHCL_FMT_UNICODETEXT },
+        { "frontend",     VBOX_SHCL_TRANSFER_MODE_F_ENABLED,
+          VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS | VBOX_SHCL_GF_0_TRANSFERS_FRONTEND,
+          VBOX_SHCL_FMT_URI_LIST, VBOX_SHCL_FMT_URI_LIST | VBOX_SHCL_FMT_UNICODETEXT }
     };
 
     SHCLFORMATS const fInput = VBOX_SHCL_FMT_URI_LIST | VBOX_SHCL_FMT_UNICODETEXT;
@@ -374,10 +384,12 @@ static void testTransferFormatFiltering(void)
         for (unsigned iDirection = 0; iDirection < 2; iDirection++)
         {
             bool const fHostToGuest = iDirection == 0;
+            SHCLFORMATS const fExpected = fHostToGuest ? s_aTests[i].fExpectedHostToGuest
+                                                       : s_aTests[i].fExpectedGuestToHost;
             SHCLFORMATS const fFiltered = shClSvcHandleFormats(fHostToGuest, &g_Client, fInput);
-            RTTESTI_CHECK_MSG(fFiltered == s_aTests[i].fExpected,
+            RTTESTI_CHECK_MSG(fFiltered == fExpected,
                               ("%s/%s fFiltered=%#x expected=%#x\n", s_aTests[i].pszName,
-                               fHostToGuest ? "H2G" : "G2H", fFiltered, s_aTests[i].fExpected));
+                               fHostToGuest ? "H2G" : "G2H", fFiltered, fExpected));
         }
     }
 }
@@ -464,6 +476,22 @@ static void testTransferHostCancelError(void)
     RTTESTI_CHECK(g_Client.State.uSessionID != 0);
     RTTESTI_CHECK(g_Client.State.uSessionID != NIL_SHCLSESSIONID);
     g_Client.State.fGuestFeatures0 |= VBOX_SHCL_GF_0_CONTEXT_ID | VBOX_SHCL_GF_0_TRANSFERS;
+
+    struct VBOXHGCMSVCPARM aReplyParms[VBOX_SHCL_CPARMS_REPLY_MIN + 1];
+    HGCMSvcSetU64(&aReplyParms[0], 0 /* no transfer context for SHCLTRANSFERSTATUS_REQUESTED */);
+    HGCMSvcSetU32(&aReplyParms[1], VBOX_SHCL_TX_REPLYMSGTYPE_TRANSFER_STATUS);
+    HGCMSvcSetU32(&aReplyParms[2], VINF_SUCCESS);
+    HGCMSvcSetPv(&aReplyParms[3], NULL, 0);
+    HGCMSvcSetU32(&aReplyParms[4], SHCLTRANSFERSTATUS_REQUESTED);
+    call.rc = VERR_IPE_UNINITIALIZED_STATUS;
+    table.pfnCall(NULL, &call, 1 /* clientId */, &g_Client,
+                  VBOX_SHCL_GUEST_FN_REPLY, RT_ELEMENTS(aReplyParms), aReplyParms, 0);
+    RTTESTI_CHECK_RC_OK(call.rc);
+    PSHCLTRANSFER pTransferRequested = ShClTransferCtxGetTransferByIndex(&g_Client.Transfers.Ctx, 0);
+    RTTESTI_CHECK(pTransferRequested != NULL);
+    SHCLTRANSFERID const idTransferRequested = ShClTransferGetID(pTransferRequested);
+    testGetTransferStatusMessage(&table, g_Client.State.uSessionID, idTransferRequested, SHCLTRANSFERSTATUS_REQUESTED, VINF_SUCCESS);
+    ShClSvcTransferDestroy(&g_Client, pTransferRequested);
 
     SHCLSESSIONID const idSessionBeforeReset = g_Client.State.uSessionID;
     rc = table.pfnHostCall(NULL, VBOX_SHCL_HOST_FN_CANCEL, 0, parms);

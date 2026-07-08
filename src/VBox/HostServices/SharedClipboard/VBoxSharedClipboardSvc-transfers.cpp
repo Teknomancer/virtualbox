@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -930,6 +930,11 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                                 LogFlowFunc(("uCID=%RU64 -> idEvent=%RU32, rcReply=%Rrc\n", uCID, pEvent->idEvent, pReply->rc));
 
                                 rc = ShClEventSignalEx(pEvent, pReply->rc, pPayload);
+                                if (RT_SUCCESS(rc))
+                                {
+                                    pPayload = NULL; /* The event owns the payload now. */
+                                    pReply   = NULL; /* The payload owns the reply now. */
+                                }
                             }
                         }
                         break;
@@ -949,10 +954,15 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                     pTransfer = NULL;
                 }
 
-                if (RT_FAILURE(rc))
+                if (pPayload)
                 {
-                    if (pPayload)
-                        RTMemFree(pPayload);
+                    RTMemFree(pPayload);
+                    pPayload = NULL;
+                }
+                if (pReply)
+                {
+                    RTMemFree(pReply);
+                    pReply = NULL;
                 }
             }
             else
@@ -1029,14 +1039,22 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
     if (RT_FAILURE(rc))
         return rc;
 
-    if (VBOX_SHCL_CONTEXTID_GET_SESSION(uCID) != pClient->State.uSessionID)
+    bool const fZeroContext = uCID == 0;
+    if (fZeroContext)
+    {
+        /* A guest requests a new host -> guest transfer by sending
+         * SHCLTRANSFERSTATUS_REQUESTED without an existing transfer context. */
+        if (u32Function != VBOX_SHCL_GUEST_FN_REPLY)
+            return VERR_INVALID_CONTEXT;
+    }
+    else if (VBOX_SHCL_CONTEXTID_GET_SESSION(uCID) != pClient->State.uSessionID)
         return VERR_INVALID_CONTEXT;
 
     /*
      * Pre-check: For certain messages we need to make sure that a (right) transfer is present.
      */
-    const SHCLTRANSFERID idTransfer = VBOX_SHCL_CONTEXTID_GET_TRANSFER(uCID);
-    PSHCLTRANSFER        pTransfer  = ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
+    const SHCLTRANSFERID idTransfer = fZeroContext ? NIL_SHCLTRANSFERID : VBOX_SHCL_CONTEXTID_GET_TRANSFER(uCID);
+    PSHCLTRANSFER        pTransfer  = fZeroContext ? NULL : ShClTransferCtxGetTransferById(&pClient->Transfers.Ctx, idTransfer);
 
     if (   u32Function != VBOX_SHCL_GUEST_FN_REPLY
         && !pTransfer)

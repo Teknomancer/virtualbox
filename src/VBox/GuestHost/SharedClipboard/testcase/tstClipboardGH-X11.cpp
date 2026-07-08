@@ -1,4 +1,4 @@
-/* $Id: tstClipboardGH-X11.cpp 114412 2026-06-17 21:20:59Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardGH-X11.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard guest/host X11 code test cases.
  */
@@ -52,6 +52,9 @@ extern SHCLX11FMT clipRealFormatForX11Format(SHCLX11FMTIDX uFmtIdx);
 extern Atom clipGetAtom(PSHCLX11CTX pCtx, const char *pcszName);
 extern void clipQueryX11Targets(PSHCLX11CTX pCtx);
 extern size_t clipReportMaxX11Formats(void);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+extern SHCLX11FMTIDX clipGetURIListFormatFromTargets(PSHCLX11CTX pCtx, SHCLX11FMTIDX *paIdxFmtTargets, size_t cTargets);
+#endif
 
 
 /*********************************************************************************************************************************
@@ -468,6 +471,35 @@ static bool tstClipTextFormatConversion(PSHCLX11CTX pCtx)
     return fSuccess;
 }
 
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+/**
+ * Tests X11 URI-list target selection.
+ *
+ * @returns true on success, false on failure.
+ * @param   pCtx                X11 clipboard context to use.
+ */
+static bool tstClipURIListFormatConversion(PSHCLX11CTX pCtx)
+{
+    bool fSuccess = true;
+    SHCLX11FMTIDX aTargets[2];
+    SHCLX11FMTIDX idxFmtX11;
+
+    aTargets[0] = tstClipFindX11FormatByAtomText("application/x-kde-cutselection");
+    aTargets[1] = tstClipFindX11FormatByAtomText("text/uri-list");
+    idxFmtX11 = clipGetURIListFormatFromTargets(pCtx, aTargets, 2);
+    if (clipRealFormatForX11Format(idxFmtX11) != SHCLX11FMT_URI_LIST)
+        fSuccess = false;
+
+    aTargets[0] = tstClipFindX11FormatByAtomText("application/x-kde-cutselection");
+    idxFmtX11 = clipGetURIListFormatFromTargets(pCtx, aTargets, 1);
+    if (idxFmtX11 != NIL_CLIPX11FORMAT)
+        fSuccess = false;
+
+    return fSuccess;
+}
+#endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
+
 static void tstStringFromX11(RTTEST hTest, PSHCLX11CTX pCtx,
                              const char *pcszExp, int rcExp)
 {
@@ -637,6 +669,41 @@ static void tstBadFormatRequestFromHost(RTTEST hTest, PSHCLX11CTX pCtx)
     }
 }
 
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+/**
+ * Tests conversion of X11 URI-list clipboard data to transfer root lists.
+ *
+ * @param   hTest               The test handle.
+ * @param   pcszDesc            Test description.
+ * @param   pchSrc              Source data to convert.
+ * @param   cbSrc               Size (in bytes) of \a pchSrc.
+ * @param   pcszExpected        Expected converted string list on success.
+ * @param   rcExpected          Expected VBox status code.
+ */
+static void tstTransferConvertFromX11(RTTEST hTest, const char *pcszDesc, const char *pchSrc, size_t cbSrc,
+                                      const char *pcszExpected, int rcExpected)
+{
+    char  *pszActual = NULL;
+    size_t cbActual  = ~(size_t)0;
+    int rc = ShClX11TransferConvertFromX11(pchSrc, cbSrc, &pszActual, &cbActual);
+    if (rc != rcExpected)
+        RTTestFailed(hTest, "%s: wrong return code, expected %Rrc, got %Rrc\n", pcszDesc, rcExpected, rc);
+    else if (RT_SUCCESS(rcExpected))
+    {
+        size_t const cbExpected = strlen(pcszExpected) + 1;
+        if (cbActual != cbExpected)
+            RTTestFailed(hTest, "%s: wrong size, expected %zu, got %zu\n", pcszDesc, cbExpected, cbActual);
+        else if (memcmp(pszActual, pcszExpected, cbExpected))
+            RTTestFailed(hTest, "%s: wrong result, expected '%s', got '%s'\n", pcszDesc, pcszExpected, pszActual);
+    }
+    else if (pszActual != NULL)
+        RTTestFailed(hTest, "%s: returned data on failure\n", pcszDesc);
+
+    RTStrFree(pszActual);
+}
+#endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
+
 int main()
 {
     /*
@@ -791,6 +858,10 @@ int main()
     RTTestSub(hTest, "handling of X11 selection targets");
     RTTEST_CHECK_MSG(hTest, tstClipTextFormatConversion(&X11Ctx),
                      (hTest, "failed to select the right X11 text formats\n"));
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    RTTEST_CHECK_MSG(hTest, tstClipURIListFormatConversion(&X11Ctx),
+                     (hTest, "failed to select the right X11 URI-list formats\n"));
+#endif
     /*
      * UTF-8 from VBox
      */
@@ -866,6 +937,30 @@ int main()
      */
     RTTestSub(hTest, "recovery from a bad format request");
     tstBadFormatRequestFromHost(hTest, &X11Ctx);
+
+#ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+    RTTestSub(hTest, "X11 URI-list transfer conversion");
+    tstTransferConvertFromX11(hTest, "LF-separated URI list",
+                              "file:///tmp/a\n", sizeof("file:///tmp/a\n") - 1,
+                              "file:///tmp/a" SHCL_TRANSFER_URI_LIST_SEP_STR, VINF_SUCCESS);
+    tstTransferConvertFromX11(hTest, "GNOME copied files marker",
+                              "copy\nfile:///tmp/a\n", sizeof("copy\nfile:///tmp/a\n") - 1,
+                              "file:///tmp/a" SHCL_TRANSFER_URI_LIST_SEP_STR, VINF_SUCCESS);
+    tstTransferConvertFromX11(hTest, "CRLF-separated URI list",
+                              "file:///tmp/a\r\nfile:///tmp/b\r\n", sizeof("file:///tmp/a\r\nfile:///tmp/b\r\n") - 1,
+                              "file:///tmp/a" SHCL_TRANSFER_URI_LIST_SEP_STR
+                              "file:///tmp/b" SHCL_TRANSFER_URI_LIST_SEP_STR, VINF_SUCCESS);
+    tstTransferConvertFromX11(hTest, "CR-separated URI list",
+                              "file:///tmp/a\rfile:///tmp/b\r", sizeof("file:///tmp/a\rfile:///tmp/b\r") - 1,
+                              "file:///tmp/a" SHCL_TRANSFER_URI_LIST_SEP_STR
+                              "file:///tmp/b" SHCL_TRANSFER_URI_LIST_SEP_STR, VINF_SUCCESS);
+    tstTransferConvertFromX11(hTest, "URI list with comments and blanks",
+                              "# comment\n\nfile:///tmp/a\n", sizeof("# comment\n\nfile:///tmp/a\n") - 1,
+                              "file:///tmp/a" SHCL_TRANSFER_URI_LIST_SEP_STR, VINF_SUCCESS);
+    tstTransferConvertFromX11(hTest, "marker-only URI list",
+                              "copy\n", sizeof("copy\n") - 1,
+                              "", VERR_SHCLPB_NO_DATA);
+#endif
 
     ShClX11Term(&X11Ctx);
 

@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendX11.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendX11.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - X11 backend.
  */
@@ -777,9 +777,13 @@ static DECLCALLBACK(int) shClSvcX11TransferIfaceHGRootListRead(PSHCLTXPROVIDERCT
         if (RT_SUCCESS(vrc))
             LogRel2(("Shared Clipboard: Host reported %RU64 X11 root entries for transfer to guest\n",
                      ShClTransferRootsCount(pCtx->pTransfer)));
+        else
+            LogRel(("Shared Clipboard: Converting X11 URI-list clipboard data to transfer roots failed with %Rrc\n", vrc));
 
         RTMemFree(pvData);
     }
+    else
+        LogRel(("Shared Clipboard: Reading X11 URI-list clipboard data for transfer failed with %Rrc\n", vrc));
 
     LogFlowFuncLeaveRC(vrc);
     return vrc;

@@ -1,4 +1,4 @@
-/* $Id: clipboard-common.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-common.cpp 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common helper objects.
  */
@@ -1225,6 +1225,14 @@ VBGH_DECL(int) ShClCacheTransferAll(PSHCLCACHE pCache, PSHCLCACHE pOtherCache)
 /**
  * Handles clipboard formats.
  *
+ * This validates file transfer announcements against the negotiated transfer
+ * features and keeps host-to-guest transfer offers separate from ordinary
+ * clipboard formats.  Older Windows Guest Additions with transfer support
+ * (for example 7.2.6 and 7.2.10) expect URI-list offers to be reported on
+ * their own so they can replace the normal clipboard announcement with an OLE
+ * IDataObject.  Do not rely on VBOX_SHCL_GF_0_TRANSFERS_FRONTEND here, as not
+ * all transfer-capable Guest Additions reliably advertise that extra bit.
+ *
  * @returns The new Shared Clipboard formats.
  * @param   fHostToGuest        Reporting direction.
  *                              \c true from host -> guest.
@@ -1260,9 +1268,16 @@ SHCLFORMATS shClSvcHandleFormats(bool fHostToGuest, PSHCLCLIENT pClient, SHCLFOR
 
         if (fSkipTransfers)
             fFormats &= ~VBOX_SHCL_FMT_URI_LIST;
+        else if (fHostToGuest)
+        {
+            if (fFormats != VBOX_SHCL_FMT_URI_LIST)
+                LogRel2(("Shared Clipboard: Reporting host file transfer format separately "
+                         "from regular clipboard formats\n"));
+            fFormats = VBOX_SHCL_FMT_URI_LIST;
+        }
     }
 #else
-    RT_NOREF(pClient);
+    RT_NOREF(pClient, fHostToGuest);
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
     if (LogRelIs2Enabled())

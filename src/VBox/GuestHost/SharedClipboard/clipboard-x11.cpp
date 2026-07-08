@@ -142,7 +142,8 @@ SHCL_X11_DECL(SHCLX11FMTTABLE) g_aFormats[] =
     { "x-special/gnome-copied-files",       SHCLX11FMT_URI_LIST_GNOME_COPIED_FILES, VBOX_SHCL_FMT_URI_LIST },
     { "x-special/mate-copied-files",        SHCLX11FMT_URI_LIST_MATE_COPIED_FILES,  VBOX_SHCL_FMT_URI_LIST },
     { "x-special/nautilus-clipboard",       SHCLX11FMT_URI_LIST_NAUTILUS_CLIPBOARD, VBOX_SHCL_FMT_URI_LIST },
-    { "application/x-kde-cutselection",     SHCLX11FMT_URI_LIST_KDE_CUTSELECTION,   VBOX_SHCL_FMT_URI_LIST },
+    /* KDE uses this as cut/copy metadata; the actual file list is in text/uri-list. */
+    { "application/x-kde-cutselection",     SHCLX11FMT_URI_LIST_KDE_CUTSELECTION,   VBOX_SHCL_FMT_NONE },
     /** @todo Anything else we need to add here? */
     /** @todo Add Wayland / Weston support. */
 #endif
@@ -598,9 +599,9 @@ static SHCLX11FMTIDX clipGetHtmlFormatFromTargets(PSHCLX11CTX pCtx,
  * @param  paIdxFmtTargets      The list of targets.
  * @param  cTargets             The size of the list in @a pTargets.
  */
-static SHCLX11FMTIDX clipGetURIListFormatFromTargets(PSHCLX11CTX pCtx,
-                                                     SHCLX11FMTIDX *paIdxFmtTargets,
-                                                     size_t cTargets)
+SHCL_X11_DECL(SHCLX11FMTIDX) clipGetURIListFormatFromTargets(PSHCLX11CTX pCtx,
+                                                             SHCLX11FMTIDX *paIdxFmtTargets,
+                                                             size_t cTargets)
 {
     AssertPtrReturn(pCtx, NIL_CLIPX11FORMAT);
     AssertReturn(RT_VALID_PTR(paIdxFmtTargets) || cTargets == 0, NIL_CLIPX11FORMAT);
@@ -2136,21 +2137,76 @@ int ShClX11TransferConvertToX11(const char *pszSrc, size_t cbSrc,  SHCLX11FMT en
 }
 
 /**
+ * Checks whether a line is a file-manager action marker, rather than an URI.
+ *
+ * @returns true if the line is an action marker, false if not.
+ * @param   pchLine             Line to check.
+ * @param   cchLine             Length (in bytes) of \a pchLine.
+ */
+static bool shClX11TransferIsActionLine(const char *pchLine, size_t cchLine)
+{
+    AssertPtrReturn(pchLine, false);
+
+    static const char *s_apszActions[] =
+    {
+        "copy",
+        "cut",
+        "move"
+    };
+
+    for (size_t i = 0; i < RT_ELEMENTS(s_apszActions); i++)
+    {
+        size_t const cchAction = strlen(s_apszActions[i]);
+        if (   cchLine == cchAction
+            && !memcmp(pchLine, s_apszActions[i], cchAction))
+            return true;
+    }
+
+    return false;
+}
+
+
+/**
+ * Appends a single transfer list entry to a CRLF-separated string list.
+ *
+ * @returns VBox status code.
+ * @param   ppszList            String list to append to.
+ * @param   pcbList             Size (in bytes) of the string list without the terminator.
+ * @param   pchEntry            Entry to append.
+ * @param   cchEntry            Length (in bytes) of \a pchEntry.
+ */
+static int shClX11TransferAppendListEntry(char **ppszList, size_t *pcbList, const char *pchEntry, size_t cchEntry)
+{
+    AssertPtrReturn(ppszList, VERR_INVALID_POINTER);
+    AssertPtrReturn(pcbList,  VERR_INVALID_POINTER);
+    AssertPtrReturn(pchEntry, VERR_INVALID_POINTER);
+    AssertReturn(cchEntry, VERR_INVALID_PARAMETER);
+
+    size_t const cchSep = sizeof(SHCL_TRANSFER_URI_LIST_SEP_STR) - 1;
+    int rc = RTStrAAppendExN(ppszList, 2 /* cPairs */, pchEntry, cchEntry, SHCL_TRANSFER_URI_LIST_SEP_STR, cchSep);
+    if (RT_SUCCESS(rc))
+        *pcbList += cchEntry + cchSep;
+
+    return rc;
+}
+
+
+/**
  * Converts X11 data to a string list usable for transfers.
  *
  * @returns VBox status code.
- * @param   pvData              Data to conver to a string list.
+ * @param   pvData              Data to convert to a string list.
  * @param   cbData              Size (in bytes) of \a pvData.
  * @param   ppszList            Where to return the allocated string list on success.
  *                              Must be free'd with RTStrFree().
- * @param   pcbList             Size (in  bytes) of the returned string list on success.
+ * @param   pcbList             Size (in bytes) of the returned string list on success.
  *                              Includes terminator.
  */
 int ShClX11TransferConvertFromX11(const char *pvData, size_t cbData, char **ppszList, size_t *pcbList)
 {
     AssertPtrReturn(pvData, VERR_INVALID_POINTER);
     AssertReturn(cbData, VERR_INVALID_PARAMETER);
-    AssertPtrNullReturn(ppszList, VERR_INVALID_POINTER);
+    AssertPtrReturn(ppszList, VERR_INVALID_POINTER);
     AssertPtrReturn(pcbList, VERR_INVALID_POINTER);
 
     /* For URI lists we only accept valid UTF-8 encodings. */
@@ -2158,47 +2214,90 @@ int ShClX11TransferConvertFromX11(const char *pvData, size_t cbData, char **ppsz
     if (RT_FAILURE(rc))
         return rc;
 
-    /* We might need to skip some prefixes before actually reaching the file list. */
-    static const char *s_aszPrefixesToSkip[] =
-        { "copy\n" /* Nautilus / Nemo */ };
-    for (size_t i = 0; i < RT_ELEMENTS(s_aszPrefixesToSkip); i++)
-    {
-        const char *pszNeedle = RTStrStr(pvData, s_aszPrefixesToSkip[i]);
-        if (pszNeedle)
-        {
-            size_t const cbNeedle = strlen(s_aszPrefixesToSkip[i]);
-            pszNeedle += cbNeedle;
-            pvData     = pszNeedle;
-            Assert(cbData >= cbNeedle);
-            cbData    -= cbNeedle;
-        }
-    }
-
-    *pcbList = 0;
+    *ppszList = NULL;
+    *pcbList  = 0;
 
 # ifdef DEBUG_andy
     LogFlowFunc(("Data:\n%.*RhXd\n", cbData, pvData));
 # endif
 
-    char **papszStrings;
-    size_t cStrings;
-    rc = RTStrSplit(pvData, cbData, SHCL_TRANSFER_URI_LIST_SEP_STR, &papszStrings, &cStrings);
-    if (RT_SUCCESS(rc))
+    const char *pchCur = pvData;
+    const char *pchEnd = pvData + cbData;
+    while (   pchEnd > pchCur
+           && pchEnd[-1] == '\0')
+        pchEnd--;
+
+    uint32_t cEntries = 0;
+    bool     fFirstContentLine = true;
+    while (pchCur < pchEnd)
     {
-        for (size_t i = 0; i < cStrings; i++)
+        const char *pchLine = pchCur;
+        while (   pchCur < pchEnd
+               && *pchCur != '\r'
+               && *pchCur != '\n'
+               && *pchCur != '\0')
+            pchCur++;
+
+        if (   pchCur < pchEnd
+            && *pchCur == '\0')
         {
-            const char *pszString = papszStrings[i];
-            LogRel2(("Shared Clipboard: Received entry #%zu from X11: '%s'\n", i, pszString));
-            rc = RTStrAAppend(ppszList, pszString);
-            if (RT_FAILURE(rc))
-                break;
-            *pcbList += strlen(pszString);
+            rc = VERR_INVALID_PARAMETER;
+            break;
         }
 
-        *pcbList += 1; /* Include terminator. */
+        size_t const cchLine = (size_t)(pchCur - pchLine);
+
+        if (pchCur < pchEnd)
+        {
+            if (*pchCur == '\r')
+            {
+                pchCur++;
+                if (   pchCur < pchEnd
+                    && *pchCur == '\n')
+                    pchCur++;
+            }
+            else if (*pchCur == '\n')
+                pchCur++;
+        }
+
+        if (cchLine == 0)
+            continue;
+
+        /* text/uri-list comments are not transfer roots. */
+        if (*pchLine == '#')
+            continue;
+
+        if (   fFirstContentLine
+            && shClX11TransferIsActionLine(pchLine, cchLine))
+        {
+            fFirstContentLine = false;
+            continue;
+        }
+        fFirstContentLine = false;
+
+        LogRel2(("Shared Clipboard: Received entry #%RU32 from X11: '%.*s'\n",
+                 cEntries, (int)RT_MIN(cchLine, (size_t)4096), pchLine));
+
+        rc = shClX11TransferAppendListEntry(ppszList, pcbList, pchLine, cchLine);
+        if (RT_FAILURE(rc))
+            break;
+
+        cEntries++;
     }
 
-    return rc;
+    if (RT_FAILURE(rc))
+    {
+        RTStrFree(*ppszList);
+        *ppszList = NULL;
+        *pcbList  = 0;
+        return rc;
+    }
+
+    if (!cEntries)
+        return VERR_SHCLPB_NO_DATA;
+
+    *pcbList += 1; /* Include terminator. */
+    return VINF_SUCCESS;
 }
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 

@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $
+# $Id: Makefile.kmk 114650 2026-07-08 09:14:39Z andreas.loeffler@oracle.com $
 ## @file
 # Sub-Makefile for the Shared Clipboard Guest/Host testcases.
 #
@@ -37,7 +37,7 @@ if defined(VBOX_WITH_TESTCASES) && !defined(VBOX_ONLY_ADDITIONS) && !defined(VBO
   	$(tstClipboardGH-X11_0_OUTDIR)/tstClipboardGH-X11Smoke.run
 
   tstClipboardGH-X11_TEMPLATE  = VBoxR3TstExe
-  tstClipboardGH-X11_DEFS      = VBOX_WITH_HGCM UNIT_TEST TESTCASE
+  tstClipboardGH-X11_DEFS      = VBOX_WITH_HGCM UNIT_TEST TESTCASE VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
   tstClipboardGH-X11_SOURCES   = \
   	tstClipboardGH-X11.cpp \
   	../clipboard-x11.cpp \
