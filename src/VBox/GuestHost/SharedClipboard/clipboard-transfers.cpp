@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers.cpp 114633 2026-07-07 15:32:53Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers.cpp 114645 2026-07-08 07:09:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: Common clipboard transfer handling code.
  */
@@ -336,7 +336,7 @@ int ShClTransferListHandleInfoInit(PSHCLLISTHANDLEINFO pInfo)
     pInfo->pszPathLocalAbs = NULL;
 
     RT_ZERO(pInfo->u);
-    pInfo->u.Local.hDir = NIL_RTDIR;
+    pInfo->u.Local.hFile = NIL_RTFILE;
 
     return VINF_SUCCESS;
 }

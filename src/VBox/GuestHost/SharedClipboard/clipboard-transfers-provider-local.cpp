@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers-provider-local.cpp 114609 2026-07-03 15:22:37Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers-provider-local.cpp 114645 2026-07-08 07:09:21Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard - Transfers interface implementation for local file systems.
  */
@@ -334,19 +334,6 @@ static DECLCALLBACK(int) shclTransferIfaceLocalListOpen(PSHCLTXPROVIDERCTX pCtx,
 
                             LogFlowFunc(("pszPathLocalAbs=%s, hList=%RU64, cListHandles=%RU32\n",
                                          pInfo->pszPathLocalAbs, pInfo->hList, pTransfer->cListHandles));
-                        }
-                        else
-                        {
-                            if (RTFS_IS_DIRECTORY(objInfo.Attr.fMode))
-                            {
-                                if (RTDirIsValid(pInfo->u.Local.hDir))
-                                    RTDirClose(pInfo->u.Local.hDir);
-                            }
-                            else if (RTFS_IS_FILE(objInfo.Attr.fMode))
-                            {
-                                if (RTFileIsValid(pInfo->u.Local.hFile))
-                                    RTFileClose(pInfo->u.Local.hFile);
-                            }
                         }
                     }
                 }
