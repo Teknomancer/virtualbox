@@ -1,4 +1,4 @@
-/* $Id: Settings.cpp 114692 2026-07-14 10:57:00Z serkan.bayraktar@oracle.com $ */
+/* $Id: Settings.cpp 114695 2026-07-14 11:41:05Z serkan.bayraktar@oracle.com $ */
 /** @file
  * Settings File Manipulation API.
  *
@@ -9706,7 +9706,6 @@ void MachineConfigFile::sanitizeImportedSerialPorts()
         if (port.portMode == PortMode_RawFile)
         {
             port.portMode = PortMode_Disconnected;
-            port.fEnabled = false;
             port.strPath.setNull();
         }
     }

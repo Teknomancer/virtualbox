@@ -1,4 +1,4 @@
-/* $Id: ApplianceImplImport.cpp 114692 2026-07-14 10:57:00Z serkan.bayraktar@oracle.com $ */
+/* $Id: ApplianceImplImport.cpp 114695 2026-07-14 11:41:05Z serkan.bayraktar@oracle.com $ */
 /** @file
  * IAppliance and IVirtualSystem COM class implementations.
  */
@@ -393,7 +393,7 @@ HRESULT Appliance::interpret()
                     if (port_it->portMode == PortMode_RawFile)
                     {
                         i_addWarning(tr("Virtual appliance \"%s\" was configured with serial port(s) "
-                                        "with \"raw file\" mode. These setting will not be imported"), vsysThis.strName.c_str());
+                                        "with \"raw file\" mode. This setting will not be imported."), vsysThis.strName.c_str());
                         break;
                     }
                 }
