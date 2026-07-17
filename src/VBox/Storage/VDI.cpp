@@ -1,4 +1,4 @@
-/* $Id: VDI.cpp 114715 2026-07-15 18:04:01Z klaus.espenlaub@oracle.com $ */
+/* $Id: VDI.cpp 114721 2026-07-17 10:29:34Z alexander.eichner@oracle.com $ */
 /** @file
  * Virtual Disk Image (VDI), Core Code.
  */
@@ -575,7 +575,7 @@ static int vdiSetupImageState(PVDIIMAGEDESC pImage, unsigned uImageFlags, const 
 
     if (   cbAllocationBlock < VDI_IMAGE_DEFAULT_BLOCK_SIZE / 2
         || cbAllocationBlock > VDI_IMAGE_DEFAULT_BLOCK_SIZE * 8
-        || !(cbAllocationBlock & (cbAllocationBlock - 1)))
+        || !RT_IS_POWER_OF_TWO(cbAllocationBlock))
         return vdIfError(pImage->pIfError, VERR_VD_VDI_COMMENT_TOO_LONG, RT_SRC_POS,
                          N_("VDI: Image with invalid allocation block size in '%s'"), pImage->pszFilename);
 
