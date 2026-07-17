@@ -2054,7 +2054,7 @@ ASTOOL := $(VBOX_ASTOOL)
 #
 INCS += $(PATH_ROOT)/include $(PATH_OUT)
 DEFS += VBOX
-DEFS.debug      := DEBUG DEBUG_$(subst $(subst _, ,_),_,$(USERNAME)) DEBUG_USERNAME=$(subst $(subst _, ,_),_,$(USERNAME))
+DEFS.debug      := DEBUG DEBUG_$(subst -,_,$(subst  ,_,$(USERNAME))) DEBUG_USERNAME=$(subst -,_,$(subst  ,_,$(USERNAME)))
 DEFS.dbgopt      = $(DEFS.debug)
 DEFS.profile     = VBOX_WITH_STATISTICS
 DEFS.strict      = RT_STRICT VBOX_STRICT
