@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114626 2026-07-04 01:32:49Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114732 2026-07-20 13:04:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -545,11 +545,14 @@ static DECLCALLBACK(int) vbclWaylandWorker(bool volatile *pfShutdown)
     }
 #endif
 
-    /* Start polling host input focus events. */
-    if (RT_SUCCESS(rc))
+    /* Start waiting host input focus events (only basic Wayland clipboard protocol
+       requires this, thus the pfnPopup check). */
+    if (   RT_SUCCESS(rc)
+        && g_pWaylandHelperClipboard
+        && g_pWaylandHelperClipboard->clip.pfnPopup != NULL)
     {
         rc = vbcl_wayland_thread_start(&g_hHostInputFocusThread, vbclWaylandHostInputFocusWorker, "wl-focus", (void *)pfShutdown);
-        VBClLogVerbose(1, "host input focus polling thread started, rc=%Rrc\n", rc);
+        VBClLogVerbose(1, "host input focus event thread started, rc=%Rrc\n", rc);
     }
 
     /* Notify parent thread that we are successfully started. */

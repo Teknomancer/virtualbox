@@ -1,4 +1,4 @@
-/* $Id: wayland-helper.h 114464 2026-06-21 01:25:02Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.h 114732 2026-07-20 13:04:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Wayland helpers.
  */
@@ -167,6 +167,7 @@ typedef struct
      * Callback to force guest to announce its clipboard content.
      *
      * @returns IPRT status code.
+     * @note Optional. Only needed by plain Wayland/Gtk.
      */
     DECLCALLBACKMEMBER(int, pfnPopup, (void));
 

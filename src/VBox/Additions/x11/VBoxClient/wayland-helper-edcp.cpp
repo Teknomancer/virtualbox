@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114732 2026-07-20 13:04:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -832,14 +832,6 @@ static DECLCALLBACK(void) vbcl_wayland_hlp_edcp_clip_set_ctx(PSHCLCONTEXT pCtx)
 }
 
 /**
- * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnPopup}
- */
-static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_popup(void)
-{
-    return VINF_SUCCESS;
-}
-
-/**
  * @callback_method_impl{FNVBCLWAYLANDSESSIONJOIN,
  *      Session callback: Copy clipboard from the host.}
  *
@@ -902,7 +894,7 @@ const VBCLWAYLANDHELPER g_WaylandHelperEdcp =
         /* .pfnInit            = */ vbcl_wayland_hlp_edcp_clip_init,
         /* .pfnTerm            = */ vbcl_wayland_hlp_edcp_clip_term,
         /* .pfnSetClipboardCtx = */ vbcl_wayland_hlp_edcp_clip_set_ctx,
-        /* .pfnPopup           = */ vbcl_wayland_hlp_edcp_clip_popup,
+        /* .pfnPopup           = */ NULL,
         /* .pfnHGClipReport    = */ vbcl_wayland_hlp_edcp_clip_hg_report,
         /* .pfnGHClipRead      = */ NULL,
     },
