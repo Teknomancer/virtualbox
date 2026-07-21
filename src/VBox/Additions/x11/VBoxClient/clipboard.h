@@ -1,4 +1,4 @@
-/* $Id: clipboard.h 114744 2026-07-21 18:37:21Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard.h 114748 2026-07-21 20:16:49Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard - Main header.
  */
@@ -107,6 +107,11 @@ int     VBClClipboardSerializeCache(SHCLCACHE const *pCache, SHCLFORMATS fFormat
                                     RTMSINTERVAL cMsTimeout);
 int     VBClClipboardDeserializeCache(struct RTHANDLE const *pHandleSrc, PSHCLCACHE pCache, SHCLFORMATS *pfFormats,
                                       RTMSINTERVAL cMsTimeout);
+
+/* clipboard-x11.cpp */
+int  VBClX11ClipboardInit(void);
+int  VBClX11ClipboardDestroy(void);
+int  VBClX11ClipboardMain(void);
 
 /* clipboard-wayland.cpp */
 int  VBClClipboardWaylandInit(SHCLCONTEXT *pCtx);

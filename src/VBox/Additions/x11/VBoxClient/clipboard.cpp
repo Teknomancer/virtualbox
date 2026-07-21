@@ -1,4 +1,4 @@
-/* $Id: clipboard.cpp 114744 2026-07-21 18:37:21Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard.cpp 114748 2026-07-21 20:16:49Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common Shared Clipboard wrapper service.
  */
@@ -49,7 +49,6 @@
 #include "VBoxClient.h"
 
 #include "clipboard.h"
-#include "clipboard-x11.h"
 
 
 /** Shared Clipboard context.
