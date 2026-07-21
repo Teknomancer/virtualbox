@@ -1,4 +1,4 @@
-; $Id: bs3-apic-1-asm.asm 114735 2026-07-21 07:31:36Z alexander.eichner@oracle.com $
+; $Id: bs3-apic-1-asm.asm 114736 2026-07-21 10:54:49Z alexander.eichner@oracle.com $
 ;; @file
 ; BS3Kit - bs3-apic-1
 ;
@@ -72,15 +72,15 @@ BS3_GLOBAL_LOCAL_LABEL .ap_thirty_two_bit
         mov     ds, ax
 
 BS3_GLOBAL_LOCAL_LABEL .ap_lck_busy
-        mov al, 0
-        mov bl, 1
+        mov     al, 0
+        mov     bl, 1
         lock cmpxchg [BS3_DATA16_WRT(g_fApLock)], bl
         jne .ap_lck_busy
 
         ;
         ; Setup the initial stack for the AP
         ;
-        mov esp, dword [BS3_DATA16_WRT(g_AddrApInitStack)]
+        mov     esp, dword [BS3_DATA16_WRT(g_AddrApInitStack)]
 
         mov     ax, BS3_SEL_R0_SS32
         mov     ss, ax
@@ -103,13 +103,13 @@ BS3_GLOBAL_LOCAL_LABEL .ap_lck_busy
         ;
         ; Set the final stack top returned from the previous call.
         ;
-        mov esp, eax
+        mov     esp, eax
 
         ;
         ; Unlock the AP lock so other APs can continue.
         ;
-        mov al, 0
-        xchg [BS3_DATA16_WRT(g_fApLock)], al
+        mov     al, 0
+        xchg    [BS3_DATA16_WRT(g_fApLock)], al
 
 .hlt_loop:
         ; Loop for interrupts
