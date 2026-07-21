@@ -1,4 +1,4 @@
-/* $Id: wayland.cpp 114732 2026-07-20 13:04:35Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Wayland Desktop Environment assistant.
  */
@@ -531,7 +531,7 @@ static DECLCALLBACK(int) vbclWaylandWorker(bool volatile *pfShutdown)
     int rc = VINF_SUCCESS;
     if (RT_VALID_PTR(g_pWaylandHelperClipboard))
     {
-        rc = vbcl_wayland_thread_start(&g_hClipboardThread, vbclWaylandClipboardWorker, "wl-clip", (void *)pfShutdown);
+        rc = VBClStartThread(&g_hClipboardThread, vbclWaylandClipboardWorker, "wl-clip", (void *)pfShutdown);
         VBClLogVerbose(1, "clipboard thread started, rc=%Rrc\n", rc);
     }
 
@@ -551,7 +551,7 @@ static DECLCALLBACK(int) vbclWaylandWorker(bool volatile *pfShutdown)
         && g_pWaylandHelperClipboard
         && g_pWaylandHelperClipboard->clip.pfnPopup != NULL)
     {
-        rc = vbcl_wayland_thread_start(&g_hHostInputFocusThread, vbclWaylandHostInputFocusWorker, "wl-focus", (void *)pfShutdown);
+        rc = VBClStartThread(&g_hHostInputFocusThread, vbclWaylandHostInputFocusWorker, "wl-focus", (void *)pfShutdown);
         VBClLogVerbose(1, "host input focus event thread started, rc=%Rrc\n", rc);
     }
 

@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -45,11 +45,14 @@
 #include <iprt/stream.h>
 #include <iprt/env.h>
 #include <iprt/process.h>
+#include <iprt/thread.h>
 #include <iprt/linux/sysfs.h>
 #include <VBox/VBoxGuestLib.h>
 #include <VBox/err.h>
 #include <VBox/version.h>
+
 #include "VBoxClient.h"
+#include "clipboard.h"
 
 
 /*********************************************************************************************************************************
@@ -249,6 +252,48 @@ int VBClExplicitLoadClientLibrariesForDisplayServer(VBGHDISPLAYSERVERTYPE enmTyp
 }
 
 /**
+ * Starts a thread, waiting 30 secs for it indicate readyness via the user semaphore.
+ */
+int VBClStartThread(PRTTHREAD phThread, PFNRTTHREAD pfnThread, const char *pszName, void *pvUser)
+{
+    RTTHREAD hThread = NIL_RTTHREAD;
+    int rc = RTThreadCreate(&hThread, pfnThread, pvUser, 0, RTTHREADTYPE_IO,
+                            RTTHREADFLAGS_WAITABLE | RTTHREADFLAGS_USER_SIGNAL_ON_TERM, pszName);
+    if (RT_SUCCESS(rc))
+    {
+        *phThread = hThread;
+        rc = RTThreadUserWait(hThread, RT_MS_30SEC /* msTimeout */);
+        if (RT_SUCCESS(rc))
+        {
+            int rcThread = VINF_SUCCESS;
+            rc = RTThreadWait(hThread, 0, &rcThread);
+            if (rc == VERR_TIMEOUT)
+            {
+                VBClLogVerbose(1, "started %s thread\n", pszName);
+                return VINF_SUCCESS;
+            }
+
+            if (RT_SUCCESS(rc))
+            {
+                /* Note! If we end up with VINF_SUCCESS here, it could in theorybe some
+                         kind of race with a regular exit.  Though, it shouldn't since
+                         we shouldn't be using that shortlived threads... */
+                VBClLogError("thread '%s' failed to initialize: %Rrc\n", pszName, rcThread);
+                rc = !RT_SUCCESS_NP(rcThread) ? rcThread : VERR_INTERNAL_ERROR_2;
+            }
+            else
+                VBClLogError("Failed checking thread '%s' after initialization: %Rrc\n", pszName, rc);
+        }
+        else
+            VBClLogError("Failed waiting (30s) for thread '%s' to initialize: %Rrc\n", pszName, rc);
+    }
+    else
+        VBClLogError("Failed to start thread '%s': %Rrc\n", pszName, rc);
+    *phThread = NIL_RTTHREAD;
+    return rc;
+}
+
+/**
  * Xlib error handler for certain errors that we can't avoid.
  */
 static int vboxClientXLibErrorHandler(Display *pDisplay, XErrorEvent *pError)
@@ -389,19 +434,7 @@ static DECLCALLBACK(RTEXITCODE) vbclCmdSessionDetect2(void)
     /* This is mainly about deciding whether we should use X11 service mode
        or wayland.  Pure wayland leaves no options, of course. */
     VBGHDISPLAYSERVERTYPE const enmType = VBGHDisplayServerTypeDetect();
-    bool fWayland = enmType == VBGHDISPLAYSERVERTYPE_PURE_WAYLAND;
-
-    /* In case of XWayland, X11 version of VBoxClient still can
-     * work, however with some DEs, such as Plasma on Wayland,
-     * this will no longer work. Detect such DEs here. */
-    if (enmType == VBGHDISPLAYSERVERTYPE_XWAYLAND)
-    {
-        const char *pszDesktopSession = RTEnvGet(VBGH_ENV_DESKTOP_SESSION);
-        fWayland = RT_VALID_PTR(pszDesktopSession)
-                && (   RTStrIStr(pszDesktopSession, "plasmawayland") != NULL
-                    || RTStrIStr(pszDesktopSession, "plasma")        != NULL);
-    }
-
+    bool const fWayland = VBClClipboardShouldUseWayland(enmType);
     RTPrintf("%s\n", fWayland ? "WL" : "X11");
     return RTEXITCODE_SUCCESS;
 }
@@ -1024,10 +1057,14 @@ int main(int argc, char *argv[])
 
                 int rcThread = VERR_GENERAL_FAILURE;
                 rc = RTThreadWait(g_Service.Thread, RT_INDEFINITE_WAIT, &rcThread);
+                VBClLogVerbose(3, "Service thread wait returned: %Rrc rcThread=%Rrc\n", rc, rcThread);
                 if (RT_SUCCESS(rc))
+                {
                     rc = rcThread;
-
-                if (RT_FAILURE(rc))
+                    if (RT_FAILURE(rc))
+                        VBClLogError("Service worker thread exitted with rcThread=%Rrc\n", rc);
+                }
+                else
                     VBClLogError("Waiting on worker thread to stop failed, rc=%Rrc\n", rc);
 
                 if (g_Service.pDesc->pfnTerm)

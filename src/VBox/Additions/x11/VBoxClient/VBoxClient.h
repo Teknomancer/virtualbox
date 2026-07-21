@@ -1,4 +1,4 @@
-/* $Id: VBoxClient.h 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxClient.h 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
 /** @file
  *
  * VirtualBox additions user session daemon.
@@ -68,6 +68,40 @@ extern void VBClShutdown(bool fExit = true);
 extern VBGHDISPLAYSERVERTYPE VBClGetDisplayServerType(void);
 extern VBGHDISPLAYSERVERTYPE VBClGetDisplayServerTypeResolveAuto(void);
 extern int VBClExplicitLoadClientLibrariesForDisplayServer(VBGHDISPLAYSERVERTYPE enmType, bool fXWaylandAsPureWayland);
+
+#ifdef IPRT_INCLUDED_thread_h
+extern int VBClStartThread(PRTTHREAD phThread, PFNRTTHREAD pfnThread, const char *pszName, void *pvUser);
+#endif
+
+#ifdef VBOX_INCLUDED_VBoxGuestLibGuestProp_h
+/** Host input focus monitor state. */
+typedef struct VBCLHOSTINPUTFOCUSSTATE
+{
+    /** @name User Settable Properties.
+     * @{  */
+    DECLCALLBACKMEMBER(bool, pfnFocusEnter,(struct VBCLHOSTINPUTFOCUSSTATE *pThis));
+    DECLCALLBACKMEMBER(bool, pfnFocusExit,(struct VBCLHOSTINPUTFOCUSSTATE *pThis));
+    bool volatile      *pfShutdown;
+    void               *pvUser;
+    /** @} */
+
+    /** @name Internal
+     *  @{ */
+    RTTHREAD            hThread;
+    VBGLGSTPROPCLIENT   GuestPropClient;
+    bool volatile       fShutdownInternal;
+    /** @} */
+} VBCLHOSTINPUTFOCUSSTATE;
+#else
+struct VBCLHOSTINPUTFOCUSSTATE;
+#endif
+/** Pointer to host input focus monitor state. */
+typedef struct VBCLHOSTINPUTFOCUSSTATE *PVBCLHOSTINPUTFOCUSSTATE;
+
+void VBClHostInputFocusMonitorInit(PVBCLHOSTINPUTFOCUSSTATE pState);
+int  VBClHostInputFocusMonitorStart(PVBCLHOSTINPUTFOCUSSTATE pState, const char *pszThreadName);
+void VBClHostInputFocusMonitorStop(PVBCLHOSTINPUTFOCUSSTATE pState);
+int  VBClHostInputFocusMonitorTerm(PVBCLHOSTINPUTFOCUSSTATE pState);
 
 struct RTGETOPTSTATE;
 

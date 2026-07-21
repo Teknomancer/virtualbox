@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-edcp.cpp 114732 2026-07-20 13:04:35Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-edcp.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Ext Data Control Protocol (EDCP) helper for Wayland.
  *
@@ -792,7 +792,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_edcp_clip_init(void)
     int rc = vbClWaylandHlpEdcpCtxInit(&g_EdcpCtx);
     if (RT_SUCCESS(rc))
     {
-        rc = vbcl_wayland_thread_start(&g_EdcpCtx.BaseCtx.Thread, vbcl_wayland_hlp_edcp_event_loop, "wl-edcp", &g_EdcpCtx);
+        rc = VBClStartThread(&g_EdcpCtx.BaseCtx.Thread, vbcl_wayland_hlp_edcp_event_loop, "wl-edcp", &g_EdcpCtx);
         if (RT_FAILURE(rc))
             vbClWaylandHlpEdcpCtxTerm(&g_EdcpCtx);
     }
