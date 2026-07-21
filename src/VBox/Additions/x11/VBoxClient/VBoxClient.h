@@ -1,4 +1,4 @@
-/* $Id: VBoxClient.h 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxClient.h 114740 2026-07-21 14:36:59Z knut.osmundsen@oracle.com $ */
 /** @file
  *
  * VirtualBox additions user session daemon.
@@ -79,16 +79,33 @@ typedef struct VBCLHOSTINPUTFOCUSSTATE
 {
     /** @name User Settable Properties.
      * @{  */
+    /**
+     * Called when the host VM process receives input focus.
+     *
+     * @return Quit indicator - true to quit, false to keep going.
+     * @param  pThis    Pointer to this structure.
+     */
     DECLCALLBACKMEMBER(bool, pfnFocusEnter,(struct VBCLHOSTINPUTFOCUSSTATE *pThis));
+    /**
+     * Called when the host VM process loses input focus.
+     *
+     * @return Quit indicator - true to quit, false to keep going.
+     * @param  pThis    Pointer to this structure.
+     */
     DECLCALLBACKMEMBER(bool, pfnFocusExit,(struct VBCLHOSTINPUTFOCUSSTATE *pThis));
+    /** Pointer to the shutdown indicator (will be set to fShutdownInternal if NULL). */
     bool volatile      *pfShutdown;
+    /** Where to store user data. */
     void               *pvUser;
     /** @} */
 
     /** @name Internal
      *  @{ */
+    /** Handle of the monitoring thread (don't touch). */
     RTTHREAD            hThread;
+    /** Guest property client handle (don't touch). */
     VBGLGSTPROPCLIENT   GuestPropClient;
+    /** Internal shutdown indicator (don't touch). */
     bool volatile       fShutdownInternal;
     /** @} */
 } VBCLHOSTINPUTFOCUSSTATE;

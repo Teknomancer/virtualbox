@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114740 2026-07-21 14:36:59Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -52,7 +52,9 @@
 #include <VBox/version.h>
 
 #include "VBoxClient.h"
-#include "clipboard.h"
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
+# include "clipboard.h"
+#endif
 
 
 /*********************************************************************************************************************************
@@ -424,6 +426,7 @@ static VBCLCOMMAND const g_CmdSessionDetect =
     /* .pfnExecute = */     vbclCmdSessionDetect,
 };
 
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
 
 /**
  * --session-detect2
@@ -449,6 +452,8 @@ static VBCLCOMMAND const g_CmdSessionDetect2 =
     /* .pfnOption = */      NULL,
     /* .pfnExecute = */     vbclCmdSessionDetect2,
 };
+
+#endif /* VBOX_WITH_SHARED_CLIPBOARD */
 
 
 /**
@@ -867,7 +872,9 @@ int main(int argc, char *argv[])
                 g_Service.pCommand = &(a_Command); \
                 break
             VBOXCLIENT_OPT_CASE_COMMAND(VBOXCLIENT_OPT_SESSION_DETECT,      g_CmdSessionDetect);
+#ifdef VBOX_WITH_SHARED_CLIPBOARD
             VBOXCLIENT_OPT_CASE_COMMAND(VBOXCLIENT_OPT_SESSION_DETECT2,     g_CmdSessionDetect2);
+#endif
 #ifdef VBOX_WITH_WAYLAND_ADDITIONS
             VBOXCLIENT_OPT_CASE_COMMAND(VBOXCLIENT_OPT_CLIPBOARD_GET,       g_CmdClipboardGet);
             VBOXCLIENT_OPT_CASE_COMMAND(VBOXCLIENT_OPT_CLIPBOARD_SET,       g_CmdClipboardSet);
