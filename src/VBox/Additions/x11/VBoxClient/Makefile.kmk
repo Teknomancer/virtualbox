@@ -1,4 +1,4 @@
-# $Id: Makefile.kmk 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $
+# $Id: Makefile.kmk 114742 2026-07-21 18:04:56Z knut.osmundsen@oracle.com $
 ## @file
 # Sub-Makefile for the VirtualBox Guest Addition X11 Client.
 #
@@ -253,10 +253,10 @@ ifdef VBOX_WITH_SHARED_CLIPBOARD_X11_LAZY_LOAD
  $(evalcall2 VBOXCLIENT_LAZYLOAD_GEN_ASM_FN,$(PATH_ROOT)/src/VBox/GuestHost/libwayland-client.def,libwayland-client,$(VBOX_VBOXCLIENT_LIBWAYLANDCLIENT_VER))
 endif
 
-ifdef VBOX_WITH_WAYLAND_ADDITIONS
+if 0 #def VBOX_WITH_WAYLAND_ADDITIONS - not needed any more.
  #
  # vboxwl - GTK Wayland helper for VBoxClient.
- ## @todo merge into VBoxClient.
+ ## @todo merge into VBoxClient - done, except for DnD which isn't in the repo.
  #
  PROGRAMS.linux += vboxwl
  define VBOXCLIENT_LAZYLOAD_GEN_ASM_FN2
