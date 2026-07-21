@@ -1,4 +1,4 @@
-/* $Id: VBoxClient.h 114741 2026-07-21 17:38:02Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxClient.h 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
 /** @file
  *
  * VirtualBox additions user session daemon.
@@ -205,7 +205,7 @@ extern VBCLSERVICE g_SvcDisplaySVGASession;
 extern VBCLSERVICE g_SvcDragAndDrop;
 extern VBCLSERVICE g_SvcHostVersion;
 extern VBCLSERVICE g_SvcSeamless;
-# ifdef VBOX_WITH_WAYLAND_ADDITIONS
+# ifdef VBOX_WITH_WAYLAND_ADDITIONS_LEGACY
 extern VBCLSERVICE const g_SvcWayland;
 # endif
 

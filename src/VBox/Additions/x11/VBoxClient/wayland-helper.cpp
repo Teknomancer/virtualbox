@@ -1,6 +1,8 @@
-/* $Id: wayland-helper.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Wayland Desktop Environment helpers.
+ *
+ * @note Obsolete. Compiled with 'kmk VBOX_WITH_WAYLAND_ADDITIONS_LEGACY=1'.
  */
 
 /*

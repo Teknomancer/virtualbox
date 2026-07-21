@@ -1,6 +1,8 @@
-/* $Id: wayland-helper-ipc.cpp 114495 2026-06-22 21:47:36Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-ipc.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - IPC between VBoxClient and vboxwl tool.
+ *
+ * @note Obsolete. Compiled with 'kmk VBOX_WITH_WAYLAND_ADDITIONS_LEGACY=1'.
  */
 
 /*

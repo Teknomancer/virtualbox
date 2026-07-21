@@ -1,6 +1,8 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114505 2026-06-24 08:58:53Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
+ *
+ * @note Obsolete. Compiled with 'kmk VBOX_WITH_WAYLAND_ADDITIONS_LEGACY=1'.
  */
 
 /*

@@ -1,4 +1,4 @@
-/* $Id: main.cpp 114740 2026-07-21 14:36:59Z knut.osmundsen@oracle.com $ */
+/* $Id: main.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * VirtualBox Guest Additions - X11 Client.
  */
@@ -507,7 +507,7 @@ static RTEXITCODE vboxClientUsage(void)
 #endif
     RTPrintf("  --display            starts VMSVGA dynamic resizing for legacy guests\n");
 #endif
-#ifdef VBOX_WITH_WAYLAND_ADDITIONS
+#ifdef VBOX_WITH_WAYLAND_ADDITIONS_LEGACY
     RTPrintf("  --wayland            starts the shared clipboard and drag-and-drop services for Wayland\n");
 #endif
     RTPrintf("\n");
@@ -734,7 +734,7 @@ int main(int argc, char *argv[])
         { "--vmsvga-session",               VBOXCLIENT_OPT_VMSVGA_SESSION,      RTGETOPT_REQ_NOTHING },
         { "--display",                      VBOXCLIENT_OPT_DISPLAY,             RTGETOPT_REQ_NOTHING },
 #endif
-#ifdef VBOX_WITH_WAYLAND_ADDITIONS
+#ifdef VBOX_WITH_WAYLAND_ADDITIONS_LEGACY
         { "--wayland",                      VBOXCLIENT_OPT_WAYLAND,             RTGETOPT_REQ_NOTHING },
 #endif
 
@@ -849,7 +849,7 @@ int main(int argc, char *argv[])
 # endif
             VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_DISPLAY,             g_SvcDisplayLegacy);
 #endif
-#ifdef VBOX_WITH_WAYLAND_ADDITIONS
+#ifdef VBOX_WITH_WAYLAND_ADDITIONS_LEGACY
             VBOXCLIENT_OPT_CASE_SERVICE(VBOXCLIENT_OPT_WAYLAND,             g_SvcWayland);
 #endif
 #undef VBOXCLIENT_OPT_CASE_SERVICE

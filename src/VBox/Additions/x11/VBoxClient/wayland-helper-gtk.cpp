@@ -1,9 +1,11 @@
-/* $Id: wayland-helper-gtk.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
  * This module implements Shared Clipboard and Drag-n-Drop
  * support for Wayland guests using the basic protocols.
+ *
+ * @note Obsolete. Compiled with 'kmk VBOX_WITH_WAYLAND_ADDITIONS_LEGACY=1'.
  */
 
 /*
