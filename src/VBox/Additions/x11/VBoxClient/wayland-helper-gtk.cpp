@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-gtk.cpp 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-gtk.cpp 114747 2026-07-21 19:17:44Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Gtk helper for Wayland.
  *
@@ -56,7 +56,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_probe(void)
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnInit}
  */
-int vbcl_wayland_hlp_gtk_clip_init(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_init(void)
 {
     VBCL_LOG_CALLBACK;
 
@@ -66,7 +66,7 @@ int vbcl_wayland_hlp_gtk_clip_init(void)
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_CLIPBOARD,pfnTerm}
  */
-int vbcl_wayland_hlp_gtk_clip_term(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_term(void)
 {
     PSHCLCONTEXT const pShClCtx = &g_Ctx;
 
@@ -121,7 +121,7 @@ static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_clip_hg_report(PSHCLCONTEXT pCtx, 
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_DND,pfnInit}
  */
-int vbcl_wayland_hlp_gtk_dnd_init(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_dnd_init(void)
 {
     VBCL_LOG_CALLBACK;
 
@@ -131,7 +131,7 @@ int vbcl_wayland_hlp_gtk_dnd_init(void)
 /**
  * @interface_method_impl{VBCLWAYLANDHELPER_DND,pfnTerm}
  */
-int vbcl_wayland_hlp_gtk_dnd_term(void)
+static DECLCALLBACK(int) vbcl_wayland_hlp_gtk_dnd_term(void)
 {
     VBCL_LOG_CALLBACK;
 
