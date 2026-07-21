@@ -1,4 +1,4 @@
-/** $Id: clipboard.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard.cpp 114744 2026-07-21 18:37:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common Shared Clipboard wrapper service.
  */
@@ -187,7 +187,7 @@ static DECLCALLBACK(int) vbclShClTerm(void)
     return VINF_SUCCESS;
 }
 
-VBCLSERVICE g_SvcClipboard =
+VBCLSERVICE const g_SvcClipboard =
 {
     "shcl",                      /* szName */
     "Shared Clipboard",          /* pszDescription */

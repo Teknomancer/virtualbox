@@ -1,4 +1,4 @@
-/* $Id: draganddrop.cpp 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: draganddrop.cpp 114744 2026-07-21 18:37:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common drag'n drop wrapper service.
  */
@@ -95,7 +95,7 @@ static DECLCALLBACK(int) vbclDnDTerm(void)
     return rc;
 }
 
-VBCLSERVICE g_SvcDragAndDrop =
+VBCLSERVICE const g_SvcDragAndDrop =
 {
     "dnd",                         /* szName */
     "Drag'n'Drop",                 /* pszDescription */

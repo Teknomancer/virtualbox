@@ -1,4 +1,4 @@
-/** $Id: clipboard.h 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard.h 114744 2026-07-21 18:37:21Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - X11 Shared Clipboard - Main header.
  */
