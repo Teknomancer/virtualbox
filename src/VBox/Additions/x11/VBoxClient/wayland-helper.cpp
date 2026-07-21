@@ -1,4 +1,4 @@
-/* $Id: wayland-helper.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper.cpp 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Wayland Desktop Environment helpers.
  *
@@ -165,7 +165,7 @@ static int vbclWaylandSessionWaitForState(vbcl_wl_session_state_t volatile *penm
 
 
 
-RTDECL(void) vbcl_wayland_session_init(vbcl_wl_session_t *pSession)
+void vbcl_wayland_session_init(vbcl_wl_session_t *pSession)
 {
     AssertPtrReturnVoid(pSession);
 
@@ -179,10 +179,8 @@ RTDECL(void) vbcl_wayland_session_init(vbcl_wl_session_t *pSession)
     ASMAtomicWriteU32(&pSession->cUsers, 0);
 }
 
-RTDECL(int) vbcl_wayland_session_start(vbcl_wl_session_t *pSession,
-                                       vbcl_wl_session_type_t enmType,
-                                       PFNVBCLWLSESSIONCB pfnStart,
-                                       void *pvUser)
+int vbcl_wayland_session_start(vbcl_wl_session_t *pSession, vbcl_wl_session_type_t enmType,
+                               PFNVBCLWLSESSIONCB pfnStart, void *pvUser)
 {
     int rc;
     const char *pcszDesc;
@@ -322,8 +320,7 @@ int VBClWaylandSessionJoinAnyTypeEx(vbcl_wl_session_t *pSession, PFNVBCLWLSESSIO
     return rc;
 }
 
-RTDECL(int) vbcl_wayland_session_end(vbcl_wl_session_t *pSession,
-                                     PFNVBCLWLSESSIONCB pfnEnd, void *pvUser)
+int vbcl_wayland_session_end(vbcl_wl_session_t *pSession, PFNVBCLWLSESSIONCB pfnEnd, void *pvUser)
 {
     int rc;
 
@@ -382,7 +379,7 @@ RTDECL(int) vbcl_wayland_session_end(vbcl_wl_session_t *pSession,
     return rc;
 }
 
-RTDECL(bool) vbcl_wayland_session_is_started(vbcl_wl_session_t *pSession)
+bool vbcl_wayland_session_is_started(vbcl_wl_session_t *pSession)
 {
     /* Make sure mandatory parameters were provided. */
     AssertPtrReturn(pSession, false);

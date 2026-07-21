@@ -1,4 +1,4 @@
-/* $Id: display-ipc.cpp 114416 2026-06-17 23:01:21Z knut.osmundsen@oracle.com $ */
+/* $Id: display-ipc.cpp 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - DRM IPC communication core functions.
  */
@@ -80,8 +80,8 @@
  * @param   cTxListCapacity     Maximum number of messages which can be queued for TX for this IPC session.
  * @param   pfnRxCb             IPC RX callback function pointer.
  */
-RTDECL(int) vbDrmIpcClientInit(PVBOX_DRMIPC_CLIENT pClient, RTTHREAD hThread, RTLOCALIPCSESSION hClientSession,
-                               uint32_t cTxListCapacity, PFNDRMIPCRXCB pfnRxCb)
+int vbDrmIpcClientInit(PVBOX_DRMIPC_CLIENT pClient, RTTHREAD hThread, RTLOCALIPCSESSION hClientSession,
+                       uint32_t cTxListCapacity, PFNDRMIPCRXCB pfnRxCb)
 {
     AssertReturn(pClient,           VERR_INVALID_PARAMETER);
     AssertReturn(hThread,           VERR_INVALID_PARAMETER);
@@ -109,7 +109,7 @@ RTDECL(int) vbDrmIpcClientInit(PVBOX_DRMIPC_CLIENT pClient, RTTHREAD hThread, RT
  * @return  IPRT status code.
  * @param   pClient     IPC session private data to be initialized.
  */
-RTDECL(int) vbDrmIpcClientReleaseResources(PVBOX_DRMIPC_CLIENT pClient)
+int vbDrmIpcClientReleaseResources(PVBOX_DRMIPC_CLIENT pClient)
 {
     pClient->hClientSession = NIL_RTLOCALIPCSESSION;
 
@@ -215,7 +215,7 @@ static PVBOX_DRMIPC_TX_LIST_ENTRY vbDrmIpcSessionPickupTxMessage(PVBOX_DRMIPC_CL
     return pEntry;
 }
 
-RTDECL(int) vbDrmIpcAuth(RTLOCALIPCSESSION hClientSession)
+int vbDrmIpcAuth(RTLOCALIPCSESSION hClientSession)
 {
     AssertReturn(hClientSession != NIL_RTLOCALIPCSESSION, VERR_INVALID_PARAMETER);
 
@@ -247,7 +247,7 @@ RTDECL(int) vbDrmIpcAuth(RTLOCALIPCSESSION hClientSession)
     return rc;
 }
 
-RTDECL(int) vbDrmIpcSetPrimaryDisplay(PVBOX_DRMIPC_CLIENT pClient, uint32_t idDisplay)
+int vbDrmIpcSetPrimaryDisplay(PVBOX_DRMIPC_CLIENT pClient, uint32_t idDisplay)
 {
     int rc = VERR_GENERAL_FAILURE;
 
@@ -293,7 +293,7 @@ RTDECL(int) vbDrmIpcSetPrimaryDisplay(PVBOX_DRMIPC_CLIENT pClient, uint32_t idDi
  * @param   cDisplays   Number of monitors which have offsets changed.
  * @param   aDisplays   Offsets data.
  */
-RTDECL(int) vbDrmIpcReportDisplayOffsets(PVBOX_DRMIPC_CLIENT pClient, uint32_t cDisplays, struct VBOX_DRMIPC_VMWRECT *aDisplays)
+int vbDrmIpcReportDisplayOffsets(PVBOX_DRMIPC_CLIENT pClient, uint32_t cDisplays, struct VBOX_DRMIPC_VMWRECT *aDisplays)
 {
     int rc = VERR_GENERAL_FAILURE;
 
@@ -340,7 +340,7 @@ RTDECL(int) vbDrmIpcReportDisplayOffsets(PVBOX_DRMIPC_CLIENT pClient, uint32_t c
  * @return  IPRT status code.
  * @param   pClient     IPC connection private data.
  */
-RTDECL(int) vbDrmIpcConnectionHandler(PVBOX_DRMIPC_CLIENT pClient)
+int vbDrmIpcConnectionHandler(PVBOX_DRMIPC_CLIENT pClient)
 {
     int                 rc;
     static uint8_t      aInputBuf[VBOX_DRMIPC_RX_BUFFER_SIZE];

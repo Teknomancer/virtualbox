@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-xdcp-common.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-xdcp-common.cpp 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common code for Data Control Protocol (DCP) family helper for Wayland.
  *
@@ -314,7 +314,7 @@ static int vbcl_wayland_hlp_dcp_write_wl_fd(int fd, void *pvBuf, size_t cbBuf)
  * @returns IPRT status code.
  * @param   pCtx                Context data.
  */
-RTDECL(int) vbcl_wayland_xdcp_next_event(vbox_wl_xdcp_base_ctx_t *pCtx)
+int vbcl_wayland_xdcp_next_event(vbox_wl_xdcp_base_ctx_t *pCtx)
 {
     int rc = VINF_SUCCESS;
 
@@ -380,7 +380,7 @@ static void vbcl_wayland_xdcp_session_init(vbox_wl_dcp_session_t *pSession)
     pSession->clip.fFmts.init(VBOX_SHCL_FMT_NONE, VBCL_WAYLAND_VALUE_WAIT_TIMEOUT_MS);
 }
 
-RTDECL(void) vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx)
+void vbcl_wayland_xdcp_session_prepare(vbox_wl_xdcp_base_ctx_t *pCtx)
 {
     AssertPtrReturnVoid(pCtx);
 

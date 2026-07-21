@@ -1,4 +1,4 @@
-/* $Id: display-helper.h 112403 2026-01-11 19:29:08Z knut.osmundsen@oracle.com $ */
+/* $Id: display-helper.h 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Definitions for Desktop Environment helpers.
  */
@@ -101,26 +101,26 @@ typedef struct
  *
  * @returns IPRT status code.
  */
-RTDECL(int) vbcl_hlp_generic_init(void);
+int vbcl_hlp_generic_init(void);
 
 /**
  * Termination callback for generic Desktop Environment helper.
  *
  * @returns IPRT status code.
  */
-RTDECL(int) vbcl_hlp_generic_term(void);
+int vbcl_hlp_generic_term(void);
 
 /**
  * Subscribe to display offset change notifications emitted by Generic Desktop Environment helper.
  *
  * @param   pfnCb   A pointer to callback function which will be triggered when event arrives.
  */
-RTDECL(void) vbcl_hlp_generic_subscribe_display_offset_changed(FNDISPLAYOFFSETCHANGE *pfnCb);
+void vbcl_hlp_generic_subscribe_display_offset_changed(FNDISPLAYOFFSETCHANGE *pfnCb);
 
 /**
  * Unsubscribe from display offset change notifications emitted by Generic Desktop Environment helper.
  */
-RTDECL(void) vbcl_hlp_generic_unsubscribe_display_offset_changed(void);
+void vbcl_hlp_generic_unsubscribe_display_offset_changed(void);
 
 /** GNOME3 helper private data. */
 extern const VBCLDISPLAYHELPER g_DisplayHelperGnome3;

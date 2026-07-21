@@ -1,4 +1,4 @@
-/* $Id: wayland-helper-ipc.cpp 114743 2026-07-21 18:31:58Z knut.osmundsen@oracle.com $ */
+/* $Id: wayland-helper-ipc.cpp 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - IPC between VBoxClient and vboxwl tool.
  *
@@ -46,7 +46,7 @@
 #include "VBoxClient.h"
 #include "wayland-helper-ipc.h"
 
-RTDECL(int) vbcl_wayland_hlp_gtk_ipc_srv_name(const char *pszNamePrefix, char *pszBuf, size_t cbBuf)
+int vbcl_wayland_hlp_gtk_ipc_srv_name(const char *pszNamePrefix, char *pszBuf, size_t cbBuf)
 {
     /*
      * Validate and prep input.
