@@ -1,4 +1,4 @@
-/* $Id: VBoxClient.h 114740 2026-07-21 14:36:59Z knut.osmundsen@oracle.com $ */
+/* $Id: VBoxClient.h 114741 2026-07-21 17:38:02Z knut.osmundsen@oracle.com $ */
 /** @file
  *
  * VirtualBox additions user session daemon.
@@ -69,11 +69,11 @@ extern VBGHDISPLAYSERVERTYPE VBClGetDisplayServerType(void);
 extern VBGHDISPLAYSERVERTYPE VBClGetDisplayServerTypeResolveAuto(void);
 extern int VBClExplicitLoadClientLibrariesForDisplayServer(VBGHDISPLAYSERVERTYPE enmType, bool fXWaylandAsPureWayland);
 
-#ifdef IPRT_INCLUDED_thread_h
+#if defined(IPRT_INCLUDED_thread_h) || defined(DOXYGEN_RUNNING)
 extern int VBClStartThread(PRTTHREAD phThread, PFNRTTHREAD pfnThread, const char *pszName, void *pvUser);
 #endif
 
-#ifdef VBOX_INCLUDED_VBoxGuestLibGuestProp_h
+#if defined(VBOX_INCLUDED_VBoxGuestLibGuestProp_h) || defined(DOXYGEN_RUNNING)
 /** Host input focus monitor state. */
 typedef struct VBCLHOSTINPUTFOCUSSTATE
 {
