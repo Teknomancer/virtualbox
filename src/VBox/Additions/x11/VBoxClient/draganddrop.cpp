@@ -1,4 +1,4 @@
-/* $Id: draganddrop.cpp 114744 2026-07-21 18:37:21Z knut.osmundsen@oracle.com $ */
+/* $Id: draganddrop.cpp 114749 2026-07-22 08:56:08Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Common drag'n drop wrapper service.
  */
@@ -46,11 +46,11 @@ static DECLCALLBACK(int) vbclDnDInit(void)
         case VBGHDISPLAYSERVERTYPE_X11:
             g_pSvc = new VBClX11DnDSvc();
             break;
-
         case VBGHDISPLAYSERVERTYPE_PURE_WAYLAND:
-            RT_FALL_THROUGH();
-        default:
+        case VBGHDISPLAYSERVERTYPE_XWAYLAND:
             return VERR_NOT_SUPPORTED;
+        default:
+            AssertFailedReturn(VERR_NOT_SUPPORTED);
     }
 
     if (!g_pSvc)
