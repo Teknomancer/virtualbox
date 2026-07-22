@@ -1,4 +1,4 @@
-/* $Id: display-ipc.cpp 114745 2026-07-21 18:40:35Z knut.osmundsen@oracle.com $ */
+/* $Id: display-ipc.cpp 114750 2026-07-22 10:41:07Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - DRM IPC communication core functions.
  */
@@ -234,13 +234,9 @@ int vbDrmIpcAuth(RTLOCALIPCSESSION hClientSession)
 
         if (pUserRecord && pUserRecord->pw_name)
         {
-            while (*pAllowedGroup->gr_mem)
-            {
-                if (RTStrNCmp(*pAllowedGroup->gr_mem, pUserRecord->pw_name, LOGIN_NAME_MAX) == 0)
+            for (unsigned iGrp = 0; pAllowedGroup->gr_mem[iGrp] != NULL; iGrp++)
+                if (RTStrCmp(pAllowedGroup->gr_mem[iGrp], pUserRecord->pw_name) == 0)
                     return VINF_SUCCESS;
-
-                pAllowedGroup->gr_mem++;
-            }
         }
     }
 
