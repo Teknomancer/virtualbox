@@ -1,4 +1,4 @@
-/* $Id: host-input-focus.cpp 114738 2026-07-21 13:40:26Z knut.osmundsen@oracle.com $ */
+/* $Id: host-input-focus.cpp 114751 2026-07-22 11:12:18Z knut.osmundsen@oracle.com $ */
 /** @file
  * Guest Additions - Host Input Focus Monitor.
  */
@@ -61,25 +61,28 @@ static DECLCALLBACK(int) vbclHostInputFocusMonitorThread(RTTHREAD ThreadSelf, vo
     {
         RTThreadUserSignal(ThreadSelf);
 
+        /** @todo r=bird: While catching all events may be desirable, the actual
+         *        callbacks may take so long to complete, that we could end up lagging
+         *        too far behind events... */
+        uint64_t u64PrevTimestamp = 0;  /* (try catch all events) */
         while (!ASMAtomicReadBool(pThis->pfShutdown) && !pThis->fShutdownInternal)
         {
-            char achBuf[GUEST_PROP_MAX_NAME_LEN + GUEST_PROP_MAX_VALUE_LEN + GUEST_PROP_MAX_FLAGS_LEN];
+            char  achBuf[GUEST_PROP_MAX_NAME_LEN + GUEST_PROP_MAX_VALUE_LEN + GUEST_PROP_MAX_FLAGS_LEN];
             char *pszName = NULL;
             char *pszValue = NULL;
             char *pszFlags = NULL;
             bool fWasDeleted = false;
             uint64_t u64Timestamp = 0;
-            /** @todo r=bird: Please comment on u64Timestamp=0 instead of reusing the
-             *        previous timestamp...  */
-
             rc = VbglGuestPropWait(&pThis->GuestPropClient, VBOX_GUI_FOCUS_CHANGE_GUEST_PROP_NAME, achBuf, sizeof(achBuf),
-                                   u64Timestamp, RT_MS_30SEC, &pszName, &pszValue, &u64Timestamp, &pszFlags, NULL, &fWasDeleted);
+                                   u64PrevTimestamp, RT_MS_30SEC, &pszName, &pszValue, &u64Timestamp, &pszFlags, NULL, &fWasDeleted);
             if (ASMAtomicReadBool(pThis->pfShutdown) && !pThis->fShutdownInternal)
                 break;
             if (RT_SUCCESS(rc))
             {
-                VBClLogVerbose(1, "guest property change: name: %s, val: %s, flags: %s, fWasDeleted: %RTbool\n",
-                               pszName, pszValue, pszFlags, fWasDeleted);
+                VBClLogVerbose(1, "guest property '%s' changed: '%s' flags: '%s' ts=%RU64 (+%'RU64)%s%s\n", pszName,
+                               pszValue, pszFlags, u64Timestamp, u64Timestamp - u64PrevTimestamp, fWasDeleted ? " deleted" : "",
+                               rc == VINF_SUCCESS ? "" : rc == VWRN_NOT_FOUND ? " VWRN_NOT_FOUND" : "VWRN_XXXX");
+                u64PrevTimestamp = u64Timestamp;
 
                 uint32_t fFlags = 0;
                 if (RT_SUCCESS(GuestPropValidateFlags(pszFlags, &fFlags)))
