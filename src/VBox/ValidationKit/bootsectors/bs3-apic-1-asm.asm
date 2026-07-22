@@ -1,4 +1,4 @@
-; $Id: bs3-apic-1-asm.asm 114736 2026-07-21 10:54:49Z alexander.eichner@oracle.com $
+; $Id: bs3-apic-1-asm.asm 114752 2026-07-22 16:52:58Z alexander.eichner@oracle.com $
 ;; @file
 ; BS3Kit - bs3-apic-1
 ;
@@ -111,12 +111,11 @@ BS3_GLOBAL_LOCAL_LABEL .ap_lck_busy
         mov     al, 0
         xchg    [BS3_DATA16_WRT(g_fApLock)], al
 
-.hlt_loop:
-        ; Loop for interrupts
-        sti
-        hlt
-        cli
-        jmp .hlt_loop
+        ;
+        ; Call the AP runloop.
+        ;
+        extern  NAME(bs3ApicApRunloop_pe32)
+        call    NAME(bs3ApicApRunloop_pe32)
 
         ; Never reached
         int 3
