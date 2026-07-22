@@ -1970,9 +1970,9 @@ int emR3ForcedActions(PVM pVM, PVMCPU pVCpu, int rc)
                             rc2 = emR3SvmNstGstIntrIntercept(pVCpu);
                         else
                             rc2 = VINF_NO_CHANGE;
-
                         if (rc2 == VINF_NO_CHANGE)
                         {
+#if 1
                             bool fInjected = false;
                             CPUM_IMPORT_EXTRN_RET(pVCpu, IEM_CPUMCTX_EXTRN_XCPT_MASK);
                             /** @todo this really isn't nice, should properly handle this */
@@ -1989,6 +1989,9 @@ int emR3ForcedActions(PVM pVM, PVMCPU pVCpu, int rc)
                             if (fInjected)
                                 rcIrq = rc2;
 # endif
+#else
+                            rc2 = VINF_EM_RESCHEDULE;
+#endif
                         }
                         UPDATE_RC();
                     }

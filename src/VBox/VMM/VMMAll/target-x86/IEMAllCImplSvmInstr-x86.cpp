@@ -482,7 +482,7 @@ static VBOXSTRICTRC iemSvmVmrun(PVMCPUCC pVCpu, uint8_t cbInstr, RTGCPHYS GCPhys
         pVmcbCtrl->TLBCtrl.n.u24Reserved          = 0;
         pVmcbCtrl->IntCtrl.n.u6Reserved           = 0;
         pVmcbCtrl->IntCtrl.n.u3Reserved           = 0;
-        pVmcbCtrl->IntCtrl.n.u5Reserved           = 0;
+        pVmcbCtrl->IntCtrl.n.u4Reserved           = 0;
         pVmcbCtrl->IntCtrl.n.u24Reserved          = 0;
         pVmcbCtrl->IntShadow.n.u30Reserved        = 0;
         pVmcbCtrl->ExitIntInfo.n.u19Reserved      = 0;
@@ -514,6 +514,16 @@ static VBOXSTRICTRC iemSvmVmrun(PVMCPUCC pVCpu, uint8_t cbInstr, RTGCPHYS GCPhys
         {
             Log(("iemSvmVmrun: AVIC not supported -> Disabling\n"));
             pVmcbCtrl->IntCtrl.n.u1AvicEnable = 0;
+        }
+
+        /* X2AVIC. */
+        if (    pVmcbCtrl->IntCtrl.n.u1X2AvicEnable
+            && (   !pVmcbCtrl->IntCtrl.n.u1AvicEnable
+                || !pVM->cpum.ro.GuestFeatures.fSvmX2Avic
+                || !pVM->cpum.ro.GuestFeatures.fSvmAvic))
+        {
+            Log(("iemSvmVmrun: X2AVIC not supported or trying to be enabled without XAVIC -> #VMEXIT\n"));
+            return iemSvmVmexit(pVCpu, SVM_EXIT_INVALID, 0 /* uExitInfo1 */, 0 /* uExitInfo2 */);
         }
 
         /* Last branch record (LBR) virtualization. */

@@ -398,7 +398,7 @@ static void apicSignalNextPendingIntr(PVMCPUCC pVCpu)
              */
             if (XAPIC_PPR_GET_PP(uVector) > XAPIC_PPR_GET_PP(uIsrVec))
             {
-                Log2(("APIC%u: apicSignalNextPendingIntr: Signalling pending interrupt. uVector=%#x\n", pVCpu->idCpu, uVector));
+                Log2(("APIC%u: apicSignalNextPendingIntr: Signalling pending interrupt. uVector=%#x irr=%.*Rhxd\n", pVCpu->idCpu, uVector, sizeof(pXApicPage->irr), &pXApicPage->irr.u));
                 apicSetInterruptFF(pVCpu, PDMAPICIRQ_HARDWARE);
             }
             else
@@ -1428,7 +1428,7 @@ DECLINLINE(VBOXSTRICTRC) apicWriteRegister(PPDMDEVINS pDevIns, PVMCPUCC pVCpu, u
 {
     VMCPU_ASSERT_EMT(pVCpu);
     Assert(offReg <= XAPIC_OFF_MAX_VALID);
-    Assert(!XAPIC_IN_X2APIC_MODE(pVCpu->apic.s.uApicBaseMsr));
+    //Assert(!XAPIC_IN_X2APIC_MODE(pVCpu->apic.s.uApicBaseMsr));
 
     VBOXSTRICTRC rcStrict = VINF_SUCCESS;
     switch (offReg)
@@ -2835,7 +2835,7 @@ static DECLCALLBACK(void) apicUpdatePendingInterrupts(PVMCPUCC pVCpu)
     PXAPICPAGE pXApicPage       = VMCPU_TO_XAPICPAGE(pVCpu);
     bool       fHasPendingIntrs = false;
 
-    Log3(("APIC%u: apicUpdatePendingInterrupts:\n", pVCpu->idCpu));
+    Log2(("APIC%u: apicUpdatePendingInterrupts:\n", pVCpu->idCpu));
     STAM_PROFILE_START(&pApicCpu->StatUpdatePendingIntrs, a);
 
     /* Update edge-triggered pending interrupts. */
@@ -2946,6 +2946,35 @@ static DECLCALLBACK(VBOXSTRICTRC) apicExportState(PVMCPUCC pVCpu)
 {
     RT_NOREF(pVCpu);
     return VERR_NOT_IMPLEMENTED;
+}
+
+
+/**
+ * @interface_method_impl{PDMAPICBACKENDR0,pfnUpdateStateAfterWrite}
+ */
+static DECLCALLBACK(VBOXSTRICTRC) apicVBoxUpdateStateAfterWrite(PVMCPUCC pVCpu, uint16_t offApicReg)
+{
+    AssertReturn(pVCpu,   VERR_INVALID_PARAMETER);
+
+    Assert(PDMHasApic(pVCpu->CTX_SUFF(pVM)));
+
+    PPDMDEVINS pDevIns  = VMCPU_TO_DEVINS(pVCpu);
+    uint32_t u32Value = 0;
+
+    VBOXSTRICTRC rcStrict = apicReadRegister(pDevIns, pVCpu, offApicReg, &u32Value);
+    if (rcStrict == VINF_SUCCESS)
+    {
+        /* In SVM, vAPIC registers are 32-bits wide and currently the two 64-bit accesses
+           (Self-IPI, and ICR) are both trap-like accesses meaning the the higher 32 bits
+           are already updated. */
+        rcStrict = apicWriteRegister(pDevIns, pVCpu, offApicReg, u32Value);
+    }
+
+    if (   rcStrict == VINF_IOM_R3_MMIO_READ
+        || rcStrict == VINF_IOM_R3_MMIO_WRITE)
+        rcStrict = VINF_APIC_R3_UPDATE_STATE;
+
+    return rcStrict;
 }
 
 
@@ -3083,5 +3112,6 @@ const PDMAPICBACKEND g_ApicBackend =
 #endif
     /* .pfnImportState = */             apicImportState,
     /* .pfnExportState = */             apicExportState,
+    /* .pfnUpdateStateAfterWrite = */   apicVBoxUpdateStateAfterWrite
 };
 

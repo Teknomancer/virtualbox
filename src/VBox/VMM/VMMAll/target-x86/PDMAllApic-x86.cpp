@@ -465,6 +465,22 @@ VMM_INT_DECL(VBOXSTRICTRC) PDMApicExportState(PVMCPUCC pVCpu)
 
 
 /**
+ * Updates the APIC state after a write to the APIC page by hardware.
+ *
+ * @returns Strict VBox status code.
+ * @param   pVCpu           The cross context virtual CPU structure.
+ * @param   offApicReg      The APIC register offset which was updated.
+ *
+ * @note This is a helper for AVIC/APICv when used on AMD or Intel.
+ */
+VMM_INT_DECL(VBOXSTRICTRC) PDMApicUpdateStateAfterWrite(PVMCPUCC pVCpu, uint16_t offApicReg)
+{
+    AssertReturn(PDMCPU_TO_APICBACKEND(pVCpu)->pfnUpdateStateAfterWrite, VERR_INVALID_POINTER);
+    return PDMCPU_TO_APICBACKEND(pVCpu)->pfnUpdateStateAfterWrite(pVCpu, offApicReg);
+}
+
+
+/**
  * Registers a PDM APIC backend.
  *
  * @returns VBox status code.
@@ -506,6 +522,7 @@ VMM_INT_DECL(int) PDMApicRegisterBackend(PVMCC pVM, PDMAPICBACKENDTYPE enmBacken
 #elif defined(IN_RING0)
     AssertPtrReturn(pBackend->pfnGetApicPageForCpu,         VERR_INVALID_POINTER);
 #endif
+    AssertPtrReturn(pBackend->pfnUpdateStateAfterWrite,     VERR_INVALID_POINTER);
 
     /*
      * Register the backend.

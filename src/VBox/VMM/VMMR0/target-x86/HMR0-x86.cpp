@@ -861,6 +861,7 @@ static int hmR0EnableCpu(PVMCC pVM, RTCPUID idCpu)
     Assert(!RTThreadPreemptIsEnabled(NIL_RTTHREAD));
 
     pHostCpu->idCpu = idCpu;
+    pHostCpu->idApic = ASMGetApicId();
     /* Do NOT reset cTlbFlushes here, see @bugref{6255}. */
 
     int rc;

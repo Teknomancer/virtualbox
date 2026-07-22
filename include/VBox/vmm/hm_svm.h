@@ -65,6 +65,8 @@
 #define SVM_MSRPM_PAGES                 2
 /** Number of pages required for the IO permission bitmap. */
 #define SVM_IOPM_PAGES                  3
+/** Number of pages required for the AVIC per-VM (APIC access, logical, physical tables). */
+#define SVM_AVIC_PAGES                  3
 /** @} */
 
 /*
@@ -627,7 +629,8 @@ typedef union
         uint32_t    u3Reserved          : 3;
         uint32_t    u1VIntrMasking      : 1;    /* V_INTR_MASKING */
         uint32_t    u1VGifEnable        : 1;    /* VGIF enable */
-        uint32_t    u5Reserved          : 5;
+        uint32_t    u4Reserved          : 4;
+        uint32_t    u1X2AvicEnable      : 1;    /* X2AVIC enable */
         uint32_t    u1AvicEnable        : 1;    /* AVIC enable */
         uint32_t    u8VIntrVector       : 8;    /* V_INTR_VECTOR */
         uint32_t    u24Reserved         : 24;

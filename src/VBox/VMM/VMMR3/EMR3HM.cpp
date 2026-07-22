@@ -43,10 +43,12 @@
 #include <VBox/vmm/mm.h>
 #include <VBox/vmm/ssm.h>
 #include <VBox/vmm/pdmapi.h>
+#include <VBox/vmm/pdmapic.h>
 #include <VBox/vmm/pdmcritsect.h>
 #include <VBox/vmm/pdmqueue.h>
 #include <VBox/vmm/hm.h>
 #include "EMInternal.h"
+#include "HMInternal.h"
 #include <VBox/vmm/vm.h>
 #include <VBox/vmm/gim.h>
 #include <VBox/dis.h>

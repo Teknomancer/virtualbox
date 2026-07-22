@@ -151,6 +151,10 @@ int emR3NemHandleRC(PVM pVM, PVMCPU pVCpu, int rc)
         case VINF_EM_HM_PATCH_TPR_INSTR:
             rc = HMR3PatchTprInstr(pVM, pVCpu);
             break;
+
+        case VINF_APIC_R3_UPDATE_STATE:
+            rc = VBOXSTRICTRC_TODO(PDMApicUpdateStateAfterWrite(pVCpu, pVCpu->hm.s.offApicReg));
+            break;
 #endif
 
         case VINF_EM_RAW_GUEST_TRAP:

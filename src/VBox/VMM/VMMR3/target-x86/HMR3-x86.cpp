@@ -281,6 +281,7 @@ VMMR3_INT_DECL(int) HMR3Init(PVM pVM)
                               "|SvmPauseFilterThreshold"
                               "|SvmVirtVmsaveVmload"
                               "|SvmVGif"
+                              "|SvmAvic"
                               "|LovelyMesaDrvWorkaround"
                               "|MissingOS2TlbFlushWorkaround"
                               "|AlwaysInterceptVmxMovDRx"
@@ -423,6 +424,12 @@ VMMR3_INT_DECL(int) HMR3Init(PVM pVM)
      * available. This is disabled by default as it's only useful while debugging
      * and enabling it causes a small hit to performance. */
     rc = CFGMR3QueryBoolDef(pCfgHm, "SvmLbrVirt", &pVM->hm.s.svm.fLbrVirt, false);
+    AssertRCReturn(rc, rc);
+
+    /** @cfgm{/HM/SvmAvic, bool, false}
+     * Whether to make use of the AVIC virtualization feature of the CPU if it's
+     * available. */
+    rc = CFGMR3QueryBoolDef(pCfgHm, "SvmAvic", &pVM->hm.s.svm.fAvic, true);
     AssertRCReturn(rc, rc);
 
     /** @cfgm{/HM/Exclusive, bool}
@@ -990,6 +997,11 @@ static int hmR3InitFinalizeR3(PVM pVM)
             HM_REG_COUNTER(&pHmCpu->StatVmxPreemptionReusingDeadlineExpired,   "/HM/CPU%u/PreemptTimer/ReusingDeadlineExpired",   "VMX-preemption timer arming logic found previous deadline already expired (ignored)");
             HM_REG_COUNTER(&pHmCpu->StatVmxPreemptionRecalcingDeadline,        "/HM/CPU%u/PreemptTimer/RecalcingDeadline",        "VMX-preemption timer arming logic recalculating the deadline (slightly expensive)");
             HM_REG_COUNTER(&pHmCpu->StatVmxPreemptionRecalcingDeadlineExpired, "/HM/CPU%u/PreemptTimer/RecalcingDeadlineExpired", "VMX-preemption timer arming logic found recalculated deadline expired (ignored)");
+        }
+        else
+        {
+            HM_REG_COUNTER(&pHmCpu->StatSvmExitAvicIncompleteIpi,              "/HM/CPU%u/AVIC/IncompleteIpi",                    "VM exit due to an incomplete IPI.");
+            HM_REG_COUNTER(&pHmCpu->StatSvmExitAvicNoAccel,                    "/HM/CPU%u/AVIC/UnAcceleratedAccess",              "VM exit due to an unaccelerated APIC access");
         }
 #ifdef VBOX_WITH_STATISTICS
         /*
@@ -2060,6 +2072,9 @@ static int hmR3InitFinalizeR0Amd(PVM pVM)
 
     if (pVM->hm.s.fPostedIntrs)
         LogRel(("HM:   Enabled posted-interrupt processing support\n"));
+
+    if (pVM->hm.s.svm.fAvic)
+        LogRel(("HM:   Enabled AVIC support\n"));
 
     hmR3DisableRawMode(pVM);
 

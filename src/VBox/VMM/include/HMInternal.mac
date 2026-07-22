@@ -151,9 +151,11 @@ endstruc
 
 struc HMCPUSVM
     .fEmulateLongModeSysEnterExit   resb    1
+    .fUseAvic                       resb    1
 
     alignb 8
     .NstGstVmcbCache                resb    40
+    .u64GstMsrApicBase              resq    1
 endstruc
 
 struc HMCPU
@@ -241,6 +243,7 @@ struc HMR0CPUSVM
     alignb 8
     .pSvmTransient                  RTR0PTR_RES  1
     .u64HostTscAux                  resq    1
+    .u64PhysIdEntry                 resq    1
 
     alignb 8
     .Dis                            resb    0d8h
