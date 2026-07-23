@@ -1,4 +1,4 @@
-/* $Id: tstClipboardMimeConv.cpp 114632 2026-07-07 15:27:30Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardMimeConv.cpp 114758 2026-07-23 12:22:27Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard MIME converter testcase.
  */
@@ -25,17 +25,23 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+
+/*********************************************************************************************************************************
+*   Header Files                                                                                                                 *
+*********************************************************************************************************************************/
 #include <VBox/GuestHost/SharedClipboard.h>
 #include <VBox/GuestHost/mime-type-converter.h>
 
 #include <iprt/errcore.h>
-#include <iprt/mem.h>
 #include <iprt/string.h>
 #include <iprt/test.h>
+#include <iprt/utf16.h>
+#include <iprt/zero.h>
 
-#include <string.h>
 
-
+/*********************************************************************************************************************************
+*   Structures and Typedefs                                                                                                      *
+*********************************************************************************************************************************/
 /** MIME enumeration test state. */
 typedef struct TSTMIMECONVENUMCTX
 {
@@ -99,7 +105,7 @@ static void testUriListMapping(void)
     {
         RTTESTI_CHECK_MSG(cbOut == strlen(szUriList), ("cbOut=%zu expected=%zu\n", cbOut, strlen(szUriList)));
         RTTESTI_CHECK_MSG(memcmp(pvOut, szUriList, cbOut) == 0, ("URI-list ToVBox data changed\n"));
-        RTMemFree(pvOut);
+        VbghMimeConvFreeBuf(pvOut, cbOut);
     }
 
     pvOut = NULL;
@@ -110,7 +116,7 @@ static void testUriListMapping(void)
     {
         RTTESTI_CHECK_MSG(cbOut == strlen(szUriList), ("cbOut=%zu expected=%zu\n", cbOut, strlen(szUriList)));
         RTTESTI_CHECK_MSG(memcmp(pvOut, szUriList, cbOut) == 0, ("URI-list FromVBox data changed\n"));
-        RTMemFree(pvOut);
+        VbghMimeConvFreeBuf(pvOut, cbOut);
     }
 
     uint8_t abInvalid[] = { 'f', 'i', 'l', 'e', ':', '/', '/', 0xff, 0x00 };
@@ -118,15 +124,147 @@ static void testUriListMapping(void)
     cbOut = 0;
     rc = VbghMimeConvToVBox("text/uri-list", abInvalid, sizeof(abInvalid), &pvOut, &cbOut);
     RTTESTI_CHECK_MSG(RT_FAILURE(rc), ("invalid UTF-8 URI-list accepted by ToVBox: rc=%Rrc\n", rc));
-    if (pvOut)
-        RTMemFree(pvOut);
+    VbghMimeConvFreeBuf(pvOut, cbOut);
 
     pvOut = NULL;
     cbOut = 0;
     rc = VbghMimeConvFromVBox("text/uri-list", abInvalid, sizeof(abInvalid), &pvOut, &cbOut);
     RTTESTI_CHECK_MSG(RT_FAILURE(rc), ("invalid UTF-8 URI-list accepted by FromVBox: rc=%Rrc\n", rc));
-    if (pvOut)
-        RTMemFree(pvOut);
+    VbghMimeConvFreeBuf(pvOut, cbOut);
+}
+
+static void testText(RTTEST hTest)
+{
+    RTTestISub("text");
+    static struct
+    {
+        const char *pszMimeType;    /**< The MIME type */
+        bool        fVBoxUtf8;      /**< Whether the VBox string is UTF-8 (true) or UTF-16 (false). */
+        const char *pszVBox;        /**< The UTF-8 version of the VBox output. */
+        const char *pszNativeSrc;   /**< The native source text. */
+        size_t      cchNativeSrc;   /**< Length of the native source text. */
+        const char *pszNativeOut;   /**< The native output text, optional. */
+        size_t      cchNativeOut;   /**< Length of the native output text, optional. */
+    } const s_aTexts[] =
+    {
+        /* utf-8 */
+        { "text/plain;charset=utf-8",   0, "",                          },
+        { "text/plain;charset=utf-8",   0, "VirtualBox",                },
+        { "text/plain;charset=utf-8",   0, "\r\n",                      RT_STR_TUPLE("\n") },
+        { "text/plain;charset=utf-8",   0, "1\r\n2",                    RT_STR_TUPLE("1\n2") },
+        { "text/plain;charset=utf-8",   0, "1\r\n2\r\n",                RT_STR_TUPLE("1\n2\n") },
+
+#if 0 /* busted */
+        /* latin-1 */
+        { "text/plain",                 0, "",                          },
+        { "text/plain",                 0, "VirtualBox",                },
+        { "text/plain",                 0, "\r\n",                      RT_STR_TUPLE("\n") },
+        { "text/plain",                 0, "1\r\n2",                    RT_STR_TUPLE("1\n2") },
+        { "text/plain",                 0, "1\r\n2\r\n",                RT_STR_TUPLE("1\n2\n") },
+#endif
+#if 0 /* busted */
+        /* html */
+        { "text/html",                  1, "<!DOCTYPE html><html><head><title>hello</title></head></html>", },
+        { "text/html",                  1, "<!DOCTYPE html>\n<html>\n\t<head><title>hello</title></head>\n</html>", },
+        { "text/html",                  1, "<!DOCTYPE html>\r\n<html>\r\n\t<head><title>hello</title></head>\r\n</html>\r\n", },
+#endif
+#if 0 /* busted (probably useless) */
+        /* uri-list */
+        { "text/uri-list",              1, "file:///tmp\r\n",           },
+#endif
+    };
+
+    for (unsigned i = 0; i < RT_ELEMENTS(s_aTexts); i++)
+    {
+        void               *pvOut;
+        size_t              cbOut;
+        int                 rc;
+
+        /* Copy & expand the test data. */
+        const char * const  pszMimeType      = s_aTexts[i].pszMimeType;
+        const char * const  pszNativeSrc     = s_aTexts[i].pszNativeSrc ? s_aTexts[i].pszNativeSrc : s_aTexts[i].pszVBox;
+        size_t const        cchNativeSrc     = s_aTexts[i].pszNativeSrc ? s_aTexts[i].cchNativeSrc : strlen(s_aTexts[i].pszVBox);
+        const char * const  pszNativeOut     = s_aTexts[i].pszNativeOut ? s_aTexts[i].pszNativeOut : pszNativeSrc;
+        size_t const        cchNativeOut     = s_aTexts[i].pszNativeOut ? s_aTexts[i].cchNativeOut : cchNativeSrc;
+        size_t const        cchNativeOutZero = 1;
+
+        /* Produce the VBox string. This is UTF-8 for html and URI-lists. */
+        size_t const        cbVBox   = s_aTexts[i].fVBoxUtf8
+                                     ? strlen(s_aTexts[i].pszVBox) + 1
+                                     : (RTStrCalcUtf16Len(s_aTexts[i].pszVBox) + 1) * sizeof(RTUTF16);
+        void * const        pvVBox   = RTTestGuardedAllocTail(hTest, cbVBox);
+        if (s_aTexts[i].fVBoxUtf8)
+            memcpy(pvVBox, s_aTexts[i].pszVBox, cbVBox);
+        else
+        {
+            PRTUTF16 pwszVBox = (PRTUTF16)pvVBox;
+            rc = RTStrToUtf16Ex(s_aTexts[i].pszVBox, RTSTR_MAX, &pwszVBox, cbVBox / sizeof(RTUTF16), NULL);
+            if (RT_FAILURE(rc))
+            {
+                RTTestIFailed("Failed to convert vbox string #%u(%s) to UTF-16: %Rrc", i, pszMimeType, rc);
+                RTTestGuardedFree(hTest, pvVBox);
+                continue;
+            }
+            RTTESTI_CHECK((void *)pwszVBox == pvVBox);
+            RTTESTI_CHECK(RTUtf16Len(pwszVBox) == cbVBox / sizeof(RTUTF16) - 1);
+        }
+
+        /* Translate To VBox and check the output. */
+        pvOut = NULL;
+        cbOut = 0;
+        rc = VbghMimeConvToVBox(pszMimeType, pszNativeSrc, (int)cchNativeSrc, &pvOut, &cbOut);
+        if (RT_FAILURE(rc))
+            RTTestIFailed("string #%u(%s): VbghMimeConvToVBox failed: %Rrc", i, pszMimeType, rc);
+        else if (cbOut != cbVBox || memcmp(pvOut, pvVBox, cbVBox))
+            RTTestIFailed("string #%u(%s): Wrong VbghMimeConvToVBox output: %#zx bytes, expected %#zx\n'%.*Rhxs', expected\n'%.*Rhxs'",
+                          i, cbOut, cbVBox, cbOut, pvOut, cbVBox, pvVBox);
+        VbghMimeConvFreeBuf(pvOut, cbOut);
+
+        /* Translate the other way. */
+        pvOut = NULL;
+        cbOut = 0;
+        rc = VbghMimeConvFromVBox(pszMimeType, pvVBox, (int)cbVBox, &pvOut, &cbOut);
+        if (RT_FAILURE(rc))
+            RTTestIFailed("string #%u(%s): VbghMimeConvFromVBox failed: %Rrc", i, pszMimeType, rc);
+        else if (cbOut != cchNativeOut || memcmp(pvOut, pszNativeOut, cchNativeOut))
+            RTTestIFailed("string #%u(%s): Wrong VbghMimeConvFromVBox output: %#zx bytes, expected %#zx\n'%.*Rhxs', expected\n'%.*Rhxs'",
+                          i, pszMimeType, cbOut, cchNativeOut, cbOut, pvOut, cchNativeOut, pszNativeOut);
+        else if (memcmp((char *)pvOut + cbOut, g_abRTZero4K, cchNativeOutZero))
+            RTTestIFailed("string #%u(%s): Incorrectly terminated VbghMimeConvToVBox output: %.*Rhxs",
+                          i, pszMimeType, cchNativeOutZero, (char *)pvOut + cbOut);
+        VbghMimeConvFreeBuf(pvOut, cbOut);
+
+        /* Translate To VBox, but supply buffer including the zero terminator in the count. */
+        pvOut = NULL;
+        cbOut = 0;
+        rc = VbghMimeConvToVBox(pszMimeType, pszNativeSrc, (int)(cchNativeSrc + 1), &pvOut, &cbOut);
+        if (RT_FAILURE(rc))
+            RTTestIFailed("string #%u(%s): VbghMimeConvToVBox w/zero failed: %Rrc", i, pszMimeType, rc);
+        else if (cbOut != cbVBox || memcmp(pvOut, pvVBox, cbVBox))
+            RTTestIFailed("string #%u(%s): Wrong VbghMimeConvToVBox w/zero output: %#zx bytes, expected %#zx\n'%.*Rhxs', expected\n'%.*Rhxs'",
+                          i, pszMimeType, cbOut, cbVBox, cbOut, pvOut, cbVBox, pvVBox);
+        VbghMimeConvFreeBuf(pvOut, cbOut);
+
+        /* Translate to VBox, but supply an untermianted input string with an electric tail guard. */
+        char * const pachGuardedIn = (char *)RTTestGuardedAllocTail(hTest, cchNativeSrc);
+        if (pachGuardedIn)
+        {
+            memcpy(pachGuardedIn, pszNativeSrc, cchNativeSrc);
+            pvOut = NULL;
+            cbOut = 0;
+            rc = VbghMimeConvToVBox(pszMimeType, pszNativeSrc, (int)cchNativeSrc, &pvOut, &cbOut);
+            if (RT_FAILURE(rc))
+                RTTestIFailed("string #%u(%s): VbghMimeConvToVBox w/o zero failed: %Rrc", i, pszMimeType, rc);
+            else if (cbOut != cbVBox || memcmp(pvOut, pvVBox, cbVBox))
+                RTTestIFailed("string #%u(%s): Wrong VbghMimeConvToVBox w/o zero output: %#zx bytes, expected %#zx\n'%.*Rhxs', expected\n'%.*Rhxs'",
+                              i, pszMimeType, cbOut, cbVBox, cbOut, pvOut, cbVBox, pvVBox);
+            VbghMimeConvFreeBuf(pvOut, cbOut);
+            RTTestGuardedFree(hTest, pachGuardedIn);
+        }
+
+        /* Cleanup VBox buffer. */
+        RTTestGuardedFree(hTest, pvVBox);
+    }
 }
 
 
@@ -143,7 +281,7 @@ int main(int argc, char **argv)
         return rcExit;
 
     RTTestBanner(hTest);
-
+    testText(hTest);
     testUriListMapping();
 
     return RTTestSummaryAndDestroy(hTest);

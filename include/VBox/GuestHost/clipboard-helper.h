@@ -1,4 +1,4 @@
-/* $Id: clipboard-helper.h 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-helper.h 114758 2026-07-23 12:22:27Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard - Helper functions.
  */
@@ -93,10 +93,10 @@ int ShClHlpUtf16CRLFLenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
  * @returns VBox status code.
  * @param  pcwszSrc             UTF-16 string to return size for.
  * @param  cwcSrc               Length of the source string in RTUTF16 units.
- * @param  pchLen               Where to return the length (in UTF-8 characters).
- *                              Does not include terminator.
+ * @param  pcbLenSansTerm       Where to return the length (in
+ *                              bytes). Does not include terminator.
  */
-int ShClHlpUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen);
+int ShClHlpUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pcbLenSansTerm);
 
 /**
  * Converts an UTF-16 string with LF EOL to an UTF-16 string with CRLF EOL.
@@ -171,16 +171,19 @@ int ShClHlpConvUtf16ToUtf8HTML(PCRTUTF16 pcwszSrc, size_t cwcSrc, char **ppszDst
 int ShClHlpConvUtf8LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
 
 /**
- * Converts a Latin-1 string with LF EOL into UTF-16 CRLF.
+ * Converts a Latin-1 string with LF line endings into an UTF-16 string with CRLF endings.
  *
  * @returns VBox status code.
- * @param  pcszSrc              UTF-8 string to convert.
- * @param  cbSrc                Size of string (in bytes), not counting the terminating zero.
- * @param  ppwszDst             Where to return the allocated buffer on success.
- * @param  pcwDst               Where to return the size (in RTUTF16 units) of the allocated buffer on success.
- *                              Does not include terminator.
+ * @param   pcszSrc     Latin-1 string to convert.
+ * @param   cbSrc       Size of string (in bytes), not counting the terminating zero.
+ * @param   ppwszDst    Where to return the allocated buffer on success.
+ * @param   pcwcDst     Where to return the size (in RTUTF16 units) of the
+ *                      allocated buffer on success. Does not include
+ *                      terminator.
+ *
+ * @note    Only converts the source until the string terminator is found (or length limit is hit).
  */
-int ShClHlpConvLatin1LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwDst);
+int ShClHlpConvLatin1LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc, PRTUTF16 *ppwszDst, size_t *pcwcDst);
 
 /**
  * Convert CF_DIB data to full BMP data by prepending the BM header.

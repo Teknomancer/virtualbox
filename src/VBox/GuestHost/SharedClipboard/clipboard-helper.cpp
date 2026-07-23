@@ -1,4 +1,4 @@
-/* $Id: clipboard-helper.cpp 114620 2026-07-04 00:00:20Z knut.osmundsen@oracle.com $ */
+/* $Id: clipboard-helper.cpp 114758 2026-07-23 12:22:27Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard: Helper functions.
  */
@@ -44,55 +44,53 @@
 *   Implementation                                                                                                               *
 *********************************************************************************************************************************/
 
-int ShClHlpUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pchLen)
+int ShClHlpUtf16LenUtf8(PCRTUTF16 pcwszSrc, size_t cwcSrc, size_t *pcbLenSansTerm)
 {
     AssertPtrReturn(pcwszSrc, VERR_INVALID_POINTER);
-    AssertPtrReturn(pchLen, VERR_INVALID_POINTER);
+    AssertPtrReturn(pcbLenSansTerm, VERR_INVALID_POINTER);
 
-    size_t chLen = 0;
-    int rc = RTUtf16CalcUtf8LenEx(pcwszSrc, cwcSrc, &chLen);
+    size_t cbLenSansTerm = 0;
+    int rc = RTUtf16CalcUtf8LenEx(pcwszSrc, cwcSrc, &cbLenSansTerm);
     if (RT_SUCCESS(rc))
-        *pchLen = chLen;
+        *pcbLenSansTerm = cbLenSansTerm;
     return rc;
 }
 
-int ShClHlpConvUtf16CRLFToUtf8LF(PCRTUTF16 pcwszSrc, size_t cwcSrc,
-                                  char *pszBuf, size_t cbBuf, size_t *pcbLen)
+int ShClHlpConvUtf16CRLFToUtf8LF(PCRTUTF16 pcwszSrc, size_t cwcSrc, char *pszBuf, size_t cbBuf, size_t *pcbLen)
 {
     AssertPtrReturn(pcwszSrc, VERR_INVALID_POINTER);
-    AssertReturn   (cwcSrc,   VERR_INVALID_PARAMETER);
     AssertPtrReturn(pszBuf,   VERR_INVALID_POINTER);
+    AssertReturn(   cbBuf,    VERR_INVALID_PARAMETER);
     AssertPtrReturn(pcbLen,   VERR_INVALID_POINTER);
 
-    int rc;
-
-    PRTUTF16 pwszTmp = NULL;
+    /*
+     * Do a two step conversion.  First, do the CRLF -> LF bit,
+     * then do the UTF-16 to UTF-8.
+     */
+    /* Step 1: */
     size_t   cchTmp  = 0;
-
-    size_t   cbLen = 0;
-
-    /* How long will the converted text be? */
-    rc = ShClHlpUtf16CRLFLenUtf8(pcwszSrc, cwcSrc, &cchTmp);
+    int rc = ShClHlpUtf16CRLFLenUtf8(pcwszSrc, cwcSrc, &cchTmp);
     if (RT_SUCCESS(rc))
     {
         cchTmp++; /* Add space for terminator. */
 
-        pwszTmp = (PRTUTF16)RTMemAllocZ(cchTmp * sizeof(RTUTF16));
+        PRTUTF16 pwszTmp = (PRTUTF16)RTMemTmpAllocZ(cchTmp * sizeof(RTUTF16));
         if (pwszTmp)
         {
             rc = ShClHlpConvUtf16CRLFToLF(pcwszSrc, cwcSrc, pwszTmp, cchTmp);
             if (RT_SUCCESS(rc))
-                rc = RTUtf16ToUtf8Ex(pwszTmp + 1, cchTmp - 1, &pszBuf, cbBuf, &cbLen);
+            {
+                /* Step 2: */
+                size_t cbLenSansTerm = 0;
+                rc = RTUtf16ToUtf8Ex(pwszTmp + 1, cchTmp - 1, &pszBuf, cbBuf, &cbLenSansTerm);
+                if (RT_SUCCESS(rc))
+                    *pcbLen = cbLenSansTerm;
+            }
 
-            RTMemFree(reinterpret_cast<void *>(pwszTmp));
+            RTMemTmpFree(reinterpret_cast<void *>(pwszTmp));
         }
         else
             rc = VERR_NO_MEMORY;
-    }
-
-    if (RT_SUCCESS(rc))
-    {
-        *pcbLen = cbLen;
     }
 
     return rc;
@@ -133,10 +131,9 @@ int ShClHlpConvUtf16LFToCRLFA(PCRTUTF16 pcwszSrc, size_t cwcSrc,
 }
 
 int ShClHlpConvUtf8LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc,
-                                  PRTUTF16 *ppwszDst, size_t *pcwDst)
+                                 PRTUTF16 *ppwszDst, size_t *pcwDst)
 {
     AssertPtrReturn(pcszSrc,  VERR_INVALID_POINTER);
-    AssertReturn(cbSrc,       VERR_INVALID_PARAMETER);
     AssertPtrReturn(ppwszDst, VERR_INVALID_POINTER);
     AssertPtrReturn(pcwDst,   VERR_INVALID_POINTER);
 
@@ -153,62 +150,59 @@ int ShClHlpConvUtf8LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc,
     return rc;
 }
 
-/**
- * Converts a Latin-1 string with LF line endings into an UTF-16 string with CRLF endings.
- *
- * @returns VBox status code.
- * @param   pcszSrc             Latin-1 string to convert.
- * @param   cbSrc               Size (in bytes) of Latin-1 string to convert.
- * @param   ppwszDst            Where to return the converted UTF-16 string on success.
- * @param   pcwDst              Where to return the length (in UTF-16 characters) on success.
- *
- * @note    Only converts the source until the string terminator is found (or length limit is hit).
- */
 int ShClHlpConvLatin1LFToUtf16CRLF(const char *pcszSrc, size_t cbSrc,
-                                    PRTUTF16 *ppwszDst, size_t *pcwDst)
+                                    PRTUTF16 *ppwszDst, size_t *pcwcDst)
 {
     AssertPtrReturn(pcszSrc,  VERR_INVALID_POINTER);
-    AssertReturn(cbSrc,       VERR_INVALID_PARAMETER);
     AssertPtrReturn(ppwszDst, VERR_INVALID_POINTER);
-    AssertPtrReturn(pcwDst,   VERR_INVALID_POINTER);
+    AssertPtrReturn(pcwcDst,  VERR_INVALID_POINTER);
 
-    size_t chSrc = 0;
-
-    PRTUTF16 pwszDst = NULL;
-
-    /* Calculate the space needed. */
-    size_t cwDst = 0;
-    for (size_t i = 0; i < cbSrc && pcszSrc[i] != '\0'; ++i)
+    /* Count the LF codepoints that will double in size when prefixed by CR. */
+    size_t cLinefeeds = 0;
+    for (size_t iSrc = 0; iSrc < cbSrc; ++iSrc)
     {
-        if (pcszSrc[i] == VBOX_SHCL_LINEFEED)
-            cwDst += 2; /* Space for VBOX_SHCL_CARRIAGERETURN + VBOX_SHCL_LINEFEED. */
-        else
-            ++cwDst;
-        chSrc++;
-    }
-
-    pwszDst = (PRTUTF16)RTMemAllocZ((cwDst + 1 /* Leave space for the terminator */) * sizeof(RTUTF16));
-    AssertPtrReturn(pwszDst, VERR_NO_MEMORY);
-
-    /* Do the conversion, bearing in mind that Latin-1 expands "naturally" to UTF-16. */
-    for (size_t i = 0, j = 0; i < chSrc; ++i, ++j)
-    {
-        AssertMsg(j <= cwDst, ("cbSrc=%zu, j=%u vs. cwDst=%u\n", cbSrc, j, cwDst));
-        if (pcszSrc[i] != VBOX_SHCL_LINEFEED)
-            pwszDst[j] = pcszSrc[i];
+        char const ch = pcszSrc[iSrc];
+        if (ch != '\0')
+        {
+            if (ch == VBOX_SHCL_LINEFEED)
+                cLinefeeds += 1;
+        }
         else
         {
-            pwszDst[j]     = VBOX_SHCL_CARRIAGERETURN;
-            pwszDst[j + 1] = VBOX_SHCL_LINEFEED;
-            ++j;
+            cbSrc = iSrc;
+            break;
         }
     }
 
-    pwszDst[cwDst] = '\0';  /* Make sure we are zero-terminated. */
+    /* Allocate output buffer. */
+    size_t const   cwcDst  = cbSrc + cLinefeeds;
+    PRTUTF16 const pwszDst = (PRTUTF16)RTMemAllocZ((cwcDst + 1 /* Leave space for the terminator */) * sizeof(RTUTF16));
+    AssertPtrReturn(pwszDst, VERR_NO_MEMORY);
+
+    /* Do the conversion, bearing in mind that Latin-1 expands "naturally" to UTF-16. */
+    size_t iDst = 0;
+    for (size_t iSrc = 0; iSrc < cbSrc; ++iSrc)
+    {
+        Assert(iDst < cwcDst);
+        if (pcszSrc[iSrc] != VBOX_SHCL_LINEFEED)
+            pwszDst[iDst++] = pcszSrc[iSrc];
+        else
+        {
+            if (iDst - iSrc < cLinefeeds)
+                pwszDst[iDst++] = VBOX_SHCL_CARRIAGERETURN;
+            else
+                AssertMsgFailed(("line feed count increased! iSrc=%#zx iDst=%#zx cLinefeeds=%#zx cbSrc=%#zx\n",
+                                 iSrc, iDst, cLinefeeds, cbSrc));
+            pwszDst[iDst++] = VBOX_SHCL_LINEFEED;
+        }
+    }
+    AssertMsg(iDst == cwcDst, ("line feed count decreased! iDst=%#zx cwcDst=%#zx cbSrc=%#zx cLinefeeds=%#zx\n",
+                               iDst, cwcDst, cbSrc, cLinefeeds));
+    Assert(iDst <= cwcDst);  /* impossible ...  */
+    pwszDst[cwcDst] = '\0';  /* ... but make sure we are zero-terminated. */
 
     *ppwszDst = pwszDst;
-    *pcwDst   = cwDst;
-
+    *pcwcDst  = iDst;
     return VINF_SUCCESS;
 }
 
@@ -237,6 +231,7 @@ int ShClHlpConvUtf16ToUtf8HTML(PCRTUTF16 pcwszSrc, size_t cwcSrc, char **ppszDst
         /* Convert found string. */
         char  *psz = NULL;
         size_t cch = 0;
+        /** @todo r=bird: What on earth is going on with the output buffer size calculation here?!? */
         rc = RTUtf16ToUtf8Ex(pwTmp, cwTmp, &psz, pwTmp - pcwszSrc, &cch);
         if (RT_FAILURE(rc))
             break;
@@ -415,51 +410,44 @@ int ShClHlpConvUtf16LFToCRLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pu16Dst
     return VERR_BUFFER_OVERFLOW;
 }
 
-int ShClHlpConvUtf16CRLFToLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pu16Dst, size_t cwDst)
+int ShClHlpConvUtf16CRLFToLF(PCRTUTF16 pcwszSrc, size_t cwcSrc, PRTUTF16 pwszDst, size_t cwcDst)
 {
     AssertPtrReturn(pcwszSrc, VERR_INVALID_POINTER);
-    AssertReturn(cwcSrc,      VERR_INVALID_PARAMETER);
-    AssertPtrReturn(pu16Dst,  VERR_INVALID_POINTER);
-    AssertReturn(cwDst,       VERR_INVALID_PARAMETER);
+    AssertPtrReturn(pwszDst,  VERR_INVALID_POINTER);
+    AssertReturn(cwcDst,      VERR_INVALID_PARAMETER);
 
     AssertMsgReturn(pcwszSrc[0] != VBOX_SHCL_UTF16BEMARKER,
                     ("Big endian UTF-16 not supported yet\n"), VERR_NOT_SUPPORTED);
 
     /* Prepend the Utf16 byte order marker if it is missing. */
-    size_t cwDstPos;
+    size_t offDst;
     if (pcwszSrc[0] == VBOX_SHCL_UTF16LEMARKER)
-    {
-        cwDstPos = 0;
-    }
+        offDst = 0;
     else
     {
-        pu16Dst[0] = VBOX_SHCL_UTF16LEMARKER;
-        cwDstPos = 1;
+        pwszDst[0] = VBOX_SHCL_UTF16LEMARKER;
+        offDst = 1;
     }
 
-    for (size_t i = 0; i < cwcSrc; ++i, ++cwDstPos)
+    for (size_t i = 0; i < cwcSrc; ++i, ++offDst)
     {
         if (pcwszSrc[i] == 0)
             break;
 
-        if (cwDstPos == cwDst)
+        if (offDst == cwcDst)
             return VERR_BUFFER_OVERFLOW;
 
-        if (   (i + 1 < cwcSrc)
-            && (pcwszSrc[i]     == VBOX_SHCL_CARRIAGERETURN)
-            && (pcwszSrc[i + 1] == VBOX_SHCL_LINEFEED))
-        {
+        if (   i + 1 < cwcSrc
+            && pcwszSrc[i]     == VBOX_SHCL_CARRIAGERETURN
+            && pcwszSrc[i + 1] == VBOX_SHCL_LINEFEED)
             ++i;
-        }
-
-        pu16Dst[cwDstPos] = pcwszSrc[i];
+        pwszDst[offDst] = pcwszSrc[i];
     }
 
-    if (cwDstPos == cwDst)
-        return VERR_BUFFER_OVERFLOW;
-
     /* Add terminating zero. */
-    pu16Dst[cwDstPos] = 0;
+    if (offDst == cwcDst)
+        return VERR_BUFFER_OVERFLOW;
+    pwszDst[offDst] = 0;
 
     return VINF_SUCCESS;
 }
