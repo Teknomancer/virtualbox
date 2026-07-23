@@ -1,4 +1,4 @@
-/* $Id: tstClipboardMimeConv.cpp 114758 2026-07-23 12:22:27Z knut.osmundsen@oracle.com $ */
+/* $Id: tstClipboardMimeConv.cpp 114759 2026-07-23 12:24:56Z knut.osmundsen@oracle.com $ */
 /** @file
  * Shared Clipboard MIME converter testcase.
  */
@@ -217,7 +217,7 @@ static void testText(RTTEST hTest)
             RTTestIFailed("string #%u(%s): VbghMimeConvToVBox failed: %Rrc", i, pszMimeType, rc);
         else if (cbOut != cbVBox || memcmp(pvOut, pvVBox, cbVBox))
             RTTestIFailed("string #%u(%s): Wrong VbghMimeConvToVBox output: %#zx bytes, expected %#zx\n'%.*Rhxs', expected\n'%.*Rhxs'",
-                          i, cbOut, cbVBox, cbOut, pvOut, cbVBox, pvVBox);
+                          i, pszMimeType, cbOut, cbVBox, cbOut, pvOut, cbVBox, pvVBox);
         VbghMimeConvFreeBuf(pvOut, cbOut);
 
         /* Translate the other way. */
