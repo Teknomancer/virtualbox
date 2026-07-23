@@ -1104,7 +1104,7 @@ VMMR0DECL(int) SVMR0SetupVM(PVMCC pVM)
     bool const fUseLbrVirt           = fLbrVirt && pVM->hm.s.svm.fLbrVirt; /** @todo IEM implementation etc. */
 
     bool const fAvic                 = RT_BOOL(g_fHmSvmFeatures & X86_CPUID_SVM_FEATURE_EDX_AVIC);
-    bool const fUseAvic              = fAvic && pVM->hm.s.svm.fAvic;
+    bool const fUseAvic              = fAvic && pVM->hm.s.svm.fAvic && PDMHasApic(pVM);
 
     //bool const fX2Avic               = RT_BOOL(g_fHmSvmFeatures & X86_CPUID_SVM_FEATURE_EDX_X2AVIC);
     //bool const fUseX2Avic            = fX2Avic && pVM->hm.s.svm.fAvic;
@@ -1295,8 +1295,7 @@ VMMR0DECL(int) SVMR0SetupVM(PVMCC pVM)
     /* Initially all VMCB clean bits MBZ indicating that everything should be loaded from the VMCB in memory. */
     Assert(pVmcbCtrl0->u32VmcbCleanBits == 0);
 
-    if (   fUseAvic
-        && PDMHasApic(pVM))
+    if (fUseAvic)
     {
         void *pvVirtApic = NULL;
         RTHCPHYS HCPhysVirtApic = 0;
@@ -4312,14 +4311,12 @@ static VBOXSTRICTRC hmR0SvmPreRunGuest(PVMCPUCC pVCpu, PSVMTRANSIENT pSvmTransie
     /*
      * Setup the AVIC state if enabled.
      */
-    if (   pVCpu->hm.s.svm.fUseAvic
-        && PDMHasApic(pVM)) /** @todo Check where we can merge the PDMHasApic() call into fUseAvic. */
+    if (pVCpu->hm.s.svm.fUseAvic)
     {
+        Assert(PDMHasApic(pVM));
+
         /* Get the APIC base MSR from the virtual APIC device. */
         uint64_t const uApicBaseMsr = PDMApicGetBaseMsrNoCheck(pVCpu);
-
-        Log4(("fUpdateApicFF=%RTbool uApicBaseMsr=%#RX64 u64GstMsrApicBase=%RX64\n", VMCPU_FF_IS_SET(pVCpu, VMCPU_FF_UPDATE_APIC), uApicBaseMsr, pVCpu->hm.s.svm.u64GstMsrApicBase));
-
         Assert(   MSR_IA32_APICBASE_GET_ADDR(uApicBaseMsr) == MSR_IA32_APICBASE_ADDR
                || !(uApicBaseMsr & MSR_IA32_APICBASE_EN));
         if (uApicBaseMsr != pVCpu->hm.s.svm.u64GstMsrApicBase)
@@ -4329,12 +4326,14 @@ static VBOXSTRICTRC hmR0SvmPreRunGuest(PVMCPUCC pVCpu, PSVMTRANSIENT pSvmTransie
             /* Unalias any existing mapping. */
             RTGCPHYS const GCPhysApic = uApicBaseMsr & ~(RTGCPHYS)GUEST_PAGE_OFFSET_MASK;
             hmR0SvmUnmapHCApicAccessPage(pVCpu, GCPhysApic);
+            Log4(("Unaliasing any previous AVIC backing page mappings at %#RGp\n", GCPhysApic));
 
             /* XAPIC. */
             if (uApicBaseMsr & MSR_IA32_APICBASE_EN)
             {
                 rc = hmR0SvmMapHCApicAccessPage(pVCpu, GCPhysApic);
                 AssertRCReturn(rc, rc);
+                Log4(("Mapped AVIC backing page at %#RGp\n", GCPhysApic));
             }
 
             /* X2APIC. */
@@ -4358,10 +4357,10 @@ static VBOXSTRICTRC hmR0SvmPreRunGuest(PVMCPUCC pVCpu, PSVMTRANSIENT pSvmTransie
             pVmcb->ctrl.AvicBar.u = MSR_IA32_APICBASE_GET_ADDR(uApicBaseMsr);
             pVmcb->ctrl.u32VmcbCleanBits &= ~HMSVM_VMCB_CLEAN_AVIC;
             /** @todo Do we need to flush the TLB with SVM_TLB_FLUSH_SINGLE_CONTEXT here? */
-        }
 
-        /* Update the per-VCPU cache of the APIC base MSR corresponding to the mapped APIC access page. */
-        pVCpu->hm.s.svm.u64GstMsrApicBase = uApicBaseMsr;
+            /* Update the per-VCPU cache of the APIC base MSR corresponding to the mapped APIC access page. */
+            pVCpu->hm.s.svm.u64GstMsrApicBase = uApicBaseMsr;
+        }
     }
 
 #ifdef VBOX_WITH_NESTED_HWVIRT_SVM
