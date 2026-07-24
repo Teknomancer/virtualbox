@@ -906,6 +906,65 @@ static int apicSetTprEx(PVMCPUCC pVCpu, uint32_t uTpr, bool fForceX2ApicBehaviou
 
 
 /**
+ * Helper for processing an EOI when the vector corresponding to the EOI is
+ * given.
+ *
+ * @param   pVCpu       The cross context virtual CPU structure.
+ * @param   uVector     The vector for attempted EOI. This is the highest
+ *                      in-service vector found in the ISR.
+ */
+static void apicProcessEoi(PVMCPUCC pVCpu, uint8_t uVector)
+{
+    /*
+    * Broadcast the EOI to the I/O APIC(s).
+    *
+    * We'll handle the EOI broadcast first as there is tiny chance we get rescheduled to
+    * ring-3 due to contention on the I/O APIC lock. This way we don't mess with the rest
+    * of the APIC state and simply restart the EOI write operation from ring-3.
+    */
+    PXAPICPAGE pXApicPage = VMCPU_TO_XAPICPAGE(pVCpu);
+    bool const fLevelTriggered = apicTestVectorInReg(&pXApicPage->tmr, uVector);
+    if (fLevelTriggered)
+    {
+        PDMIoApicBroadcastEoi(pVCpu->CTX_SUFF(pVM), uVector);
+
+        /*
+        * Clear the vector from the TMR.
+        *
+        * The broadcast to I/O APIC can re-trigger new interrupts to arrive via the bus. However,
+        * apicUpdatePendingInterrupts() which updates TMR can only be done from EMT which we
+        * currently are on, so no possibility of concurrent updates.
+        */
+        apicClearVectorInReg(&pXApicPage->tmr, uVector);
+
+        /*
+        * Clear the remote IRR bit for level-triggered, fixed mode LINT0 interrupt.
+        * The LINT1 pin does not support level-triggered interrupts.
+        * See Intel spec. 10.5.1 "Local Vector Table".
+        */
+        uint32_t const uLvtLint0 = pXApicPage->lvt_lint0.all.u32LvtLint0;
+        if (   XAPIC_LVT_GET_REMOTE_IRR(uLvtLint0)
+            && XAPIC_LVT_GET_VECTOR(uLvtLint0) == uVector
+            && XAPIC_LVT_GET_DELIVERY_MODE(uLvtLint0) == XAPICDELIVERYMODE_FIXED)
+        {
+            ASMAtomicAndU32((volatile uint32_t *)&pXApicPage->lvt_lint0.all.u32LvtLint0, ~XAPIC_LVT_REMOTE_IRR);
+            Log2(("APIC%u: apicSetEoi: Cleared remote-IRR for LINT0. uVector=%#x\n", pVCpu->idCpu, uVector));
+        }
+
+        Log2(("APIC%u: apicSetEoi: Cleared level triggered interrupt from TMR. uVector=%#x\n", pVCpu->idCpu, uVector));
+    }
+
+    /*
+    * Mark interrupt as serviced, update the PPR and signal pending interrupts.
+    */
+    Log2(("APIC%u: apicSetEoi: Clearing interrupt from ISR. uVector=%#x\n", pVCpu->idCpu, uVector));
+    apicClearVectorInReg(&pXApicPage->isr, uVector);
+    apicUpdatePpr(pVCpu);
+    apicSignalNextPendingIntr(pVCpu);
+}
+
+
+/**
  * Sets the End-Of-Interrupt (EOI) register.
  *
  * @returns Strict VBox status code.
@@ -930,53 +989,9 @@ static DECLCALLBACK(VBOXSTRICTRC) apicSetEoi(PVMCPUCC pVCpu, uint32_t uEoi, bool
     int isrv = apicGetHighestSetBitInReg(&pXApicPage->isr, -1 /* rcNotFound */);
     if (isrv >= 0)
     {
-        /*
-         * Broadcast the EOI to the I/O APIC(s).
-         *
-         * We'll handle the EOI broadcast first as there is tiny chance we get rescheduled to
-         * ring-3 due to contention on the I/O APIC lock. This way we don't mess with the rest
-         * of the APIC state and simply restart the EOI write operation from ring-3.
-         */
         Assert(isrv <= (int)UINT8_MAX);
-        uint8_t const uVector      = isrv;
-        bool const fLevelTriggered = apicTestVectorInReg(&pXApicPage->tmr, uVector);
-        if (fLevelTriggered)
-        {
-            PDMIoApicBroadcastEoi(pVCpu->CTX_SUFF(pVM), uVector);
-
-            /*
-             * Clear the vector from the TMR.
-             *
-             * The broadcast to I/O APIC can re-trigger new interrupts to arrive via the bus. However,
-             * apicUpdatePendingInterrupts() which updates TMR can only be done from EMT which we
-             * currently are on, so no possibility of concurrent updates.
-             */
-            apicClearVectorInReg(&pXApicPage->tmr, uVector);
-
-            /*
-             * Clear the remote IRR bit for level-triggered, fixed mode LINT0 interrupt.
-             * The LINT1 pin does not support level-triggered interrupts.
-             * See Intel spec. 10.5.1 "Local Vector Table".
-             */
-            uint32_t const uLvtLint0 = pXApicPage->lvt_lint0.all.u32LvtLint0;
-            if (   XAPIC_LVT_GET_REMOTE_IRR(uLvtLint0)
-                && XAPIC_LVT_GET_VECTOR(uLvtLint0) == uVector
-                && XAPIC_LVT_GET_DELIVERY_MODE(uLvtLint0) == XAPICDELIVERYMODE_FIXED)
-            {
-                ASMAtomicAndU32((volatile uint32_t *)&pXApicPage->lvt_lint0.all.u32LvtLint0, ~XAPIC_LVT_REMOTE_IRR);
-                Log2(("APIC%u: apicSetEoi: Cleared remote-IRR for LINT0. uVector=%#x\n", pVCpu->idCpu, uVector));
-            }
-
-            Log2(("APIC%u: apicSetEoi: Cleared level triggered interrupt from TMR. uVector=%#x\n", pVCpu->idCpu, uVector));
-        }
-
-        /*
-         * Mark interrupt as serviced, update the PPR and signal pending interrupts.
-         */
-        Log2(("APIC%u: apicSetEoi: Clearing interrupt from ISR. uVector=%#x\n", pVCpu->idCpu, uVector));
-        apicClearVectorInReg(&pXApicPage->isr, uVector);
-        apicUpdatePpr(pVCpu);
-        apicSignalNextPendingIntr(pVCpu);
+        uint8_t const uVector = isrv;
+        apicProcessEoi(pVCpu, uVector);
     }
     else
     {
@@ -988,6 +1003,30 @@ static DECLCALLBACK(VBOXSTRICTRC) apicSetEoi(PVMCPUCC pVCpu, uint32_t uEoi, bool
 #endif
     }
 
+    return VINF_SUCCESS;
+}
+
+
+/**
+ * Sets the End-Of-Interrupt (EOI) register when the ISR is already known.
+ *
+ * This is an optimization that lets us avoid scanning the 256-bit sparse ISR
+ * register figuring out the highest pending in-service vector.
+ *
+ * @returns Strict VBox status code.
+ * @param   pVCpu    The cross context virtual CPU structure.
+ * @param   uVector  The vector for attempted EOI. This is the vector for the
+ *                   highest in-service vector.
+ *
+ * @note    It it assumed the caller (hardware in the case of SVM AVIC) has
+ *          already validated the value written to the EOI register.
+ */
+static DECLCALLBACK(VBOXSTRICTRC) apicSetEoiFast(PVMCPUCC pVCpu, uint8_t uVector)
+{
+    VMCPU_ASSERT_EMT(pVCpu);
+    Log2(("APIC%u: apicSetEoiFast: uEoi=%#RX32 uVector=%#x\n", pVCpu->idCpu, uVector));
+    STAM_COUNTER_INC(&pVCpu->apic.s.StatEoiWriteFast);
+    apicProcessEoi(pVCpu, uVector);
     return VINF_SUCCESS;
 }
 
@@ -3112,6 +3151,7 @@ const PDMAPICBACKEND g_ApicBackend =
 #endif
     /* .pfnImportState = */             apicImportState,
     /* .pfnExportState = */             apicExportState,
-    /* .pfnUpdateStateAfterWrite = */   apicVBoxUpdateStateAfterWrite
+    /* .pfnUpdateStateAfterWrite = */   apicVBoxUpdateStateAfterWrite,
+    /* .pfnSetEoiFast = */              apicSetEoiFast,
 };
 

@@ -428,6 +428,7 @@ static R0PTRTYPE(void *)    g_pvIOBitmap;
                                  | HMSVM_LOG_GS \
                                  | HMSVM_LOG_LBR)
 
+/** A list of x2APIC MSRs we don't want to intercept when using the AVIC. */
 static const uint32_t g_aX2AvicMsrs[] =
 {
     MSR_IA32_X2APIC_ID,
@@ -4337,21 +4338,17 @@ static VBOXSTRICTRC hmR0SvmPreRunGuest(PVMCPUCC pVCpu, PSVMTRANSIENT pSvmTransie
             }
 
             /* X2APIC. */
-            uint8_t *pbMsrBitmap = (uint8_t *)pVCpu->hmr0.s.svm.pvMsrBitmap;
-            if ((uApicBaseMsr & (MSR_IA32_APICBASE_EN | MSR_IA32_APICBASE_EXTD))
-                             == (MSR_IA32_APICBASE_EN | MSR_IA32_APICBASE_EXTD))
             {
-                /* Don't intercept X2APIC MSRs as the intercept has a higher priority than the AVIC hardware. */
+                /* If enabled don't intercept X2APIC MSRs as the intercept has higher priority than the AVIC hardware. */
+                bool const fX2AvicEnable = (uApicBaseMsr & (MSR_IA32_APICBASE_EN | MSR_IA32_APICBASE_EXTD))
+                                                        == (MSR_IA32_APICBASE_EN | MSR_IA32_APICBASE_EXTD);
+                SVMMSREXITREAD  const fRdPerm = fX2AvicEnable ? SVMMSREXIT_PASSTHRU_READ  : SVMMSREXIT_INTERCEPT_READ;
+                SVMMSREXITWRITE const fWrPerm = fX2AvicEnable ? SVMMSREXIT_PASSTHRU_WRITE : SVMMSREXIT_INTERCEPT_WRITE;
+
+                uint8_t *pbMsrBitmap = (uint8_t *)pVCpu->hmr0.s.svm.pvMsrBitmap;
                 for (uint32_t i = 0; i < RT_ELEMENTS(g_aX2AvicMsrs); i++)
-                    hmR0SvmSetMsrPermission(pVCpu, pbMsrBitmap, g_aX2AvicMsrs[i], SVMMSREXIT_PASSTHRU_READ, SVMMSREXIT_PASSTHRU_WRITE);
-                pVmcb->ctrl.IntCtrl.n.u1X2AvicEnable = 1;
-            }
-            else
-            {
-                /* Restore intercepts to X2APIC MSRs. */
-                for (uint32_t i = 0; i < RT_ELEMENTS(g_aX2AvicMsrs); i++)
-                    hmR0SvmSetMsrPermission(pVCpu, pbMsrBitmap, g_aX2AvicMsrs[i], SVMMSREXIT_INTERCEPT_READ, SVMMSREXIT_INTERCEPT_WRITE);
-                pVmcb->ctrl.IntCtrl.n.u1X2AvicEnable = 0;
+                    hmR0SvmSetMsrPermission(pVCpu, pbMsrBitmap, g_aX2AvicMsrs[i], fRdPerm, fWrPerm);
+                pVmcb->ctrl.IntCtrl.n.u1X2AvicEnable = fX2AvicEnable;
             }
 
             pVmcb->ctrl.AvicBar.u = MSR_IA32_APICBASE_GET_ADDR(uApicBaseMsr);
@@ -9367,6 +9364,12 @@ HMSVM_EXIT_DECL hmR0SvmExitAvicNoAccel(PVMCPUCC pVCpu, PSVMTRANSIENT pSvmTransie
         /** @todo Extended Interrupt Local Vector Table Registers when we start supporting it. */
             Assert(fWr);
             break;
+
+        case XAPIC_OFF_EOI:
+        {
+            uint8_t const uVector = pSvmTransient->pVmcb->ctrl.u64ExitInfo2 & 0xff;
+            return PDMApicSetEoiFast(pVCpu, uVector);
+        }
 
         default:
             /* These accesses fault -> emulate completely and be done with it. */

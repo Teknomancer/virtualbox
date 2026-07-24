@@ -336,6 +336,8 @@ typedef struct APICCPU
     STAMCOUNTER                 StatTprRead;
     /** Number of times the EOI is written. */
     STAMCOUNTER                 StatEoiWrite;
+    /** Number of times the EOI is written in the fast path. */
+    STAMCOUNTER                 StatEoiWriteFast;
     /** Number of times TPR masks an interrupt in apicGetInterrupt(). */
     STAMCOUNTER                 StatMaskedByTpr;
     /** Number of times PPR masks an interrupt in apicGetInterrupt(). */

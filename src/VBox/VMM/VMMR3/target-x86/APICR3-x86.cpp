@@ -1094,6 +1094,7 @@ DECLCALLBACK(int) apicR3Construct(PPDMDEVINS pDevIns, int iInstance, PCFGMNODE p
         APIC_REG_COUNTER(&pApicCpu->StatTprWrite,      "%u/TprWrite",       "Number of TPR writes.");
         APIC_REG_COUNTER(&pApicCpu->StatTprRead,       "%u/TprRead",        "Number of TPR reads.");
         APIC_REG_COUNTER(&pApicCpu->StatEoiWrite,      "%u/EoiWrite",       "Number of EOI writes.");
+        APIC_REG_COUNTER(&pApicCpu->StatEoiWriteFast,  "%u/EoiWriteFast",   "Number of EOI writes using the fast path.");
         APIC_REG_COUNTER(&pApicCpu->StatMaskedByTpr,   "%u/MaskedByTpr",    "Number of times TPR masks an interrupt in apicGetInterrupt.");
         APIC_REG_COUNTER(&pApicCpu->StatMaskedByPpr,   "%u/MaskedByPpr",    "Number of times PPR masks an interrupt in apicGetInterrupt.");
         APIC_REG_COUNTER(&pApicCpu->StatTimerIcrWrite, "%u/TimerIcrWrite",  "Number of times the timer ICR is written.");

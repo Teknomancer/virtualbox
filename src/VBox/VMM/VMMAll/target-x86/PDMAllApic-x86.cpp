@@ -481,6 +481,23 @@ VMM_INT_DECL(VBOXSTRICTRC) PDMApicUpdateStateAfterWrite(PVMCPUCC pVCpu, uint16_t
 
 
 /**
+ * Sets the End-Of-Interrupt (EOI) register when the ISR is already known.
+ *
+ * This is an optimization that lets us avoid scanning the 256-bit sparse ISR
+ * register figuring out the highest pending in-service vector.
+ *
+ * @returns Strict VBox status code.
+ * @param   pVCpu       The cross context virtual CPU structure.
+ * @param   uVector     The vector (highest ISR) for the attempted EOI.
+ */
+VMM_INT_DECL(VBOXSTRICTRC) PDMApicSetEoiFast(PVMCPUCC pVCpu, uint8_t uVector)
+{
+    AssertReturn(PDMCPU_TO_APICBACKEND(pVCpu)->pfnSetEoiFast, VERR_INVALID_POINTER);
+    return PDMCPU_TO_APICBACKEND(pVCpu)->pfnSetEoiFast(pVCpu, uVector);
+}
+
+
+/**
  * Registers a PDM APIC backend.
  *
  * @returns VBox status code.
@@ -523,6 +540,7 @@ VMM_INT_DECL(int) PDMApicRegisterBackend(PVMCC pVM, PDMAPICBACKENDTYPE enmBacken
     AssertPtrReturn(pBackend->pfnGetApicPageForCpu,         VERR_INVALID_POINTER);
 #endif
     AssertPtrReturn(pBackend->pfnUpdateStateAfterWrite,     VERR_INVALID_POINTER);
+    AssertPtrReturn(pBackend->pfnSetEoiFast,                VERR_INVALID_POINTER);
 
     /*
      * Register the backend.
