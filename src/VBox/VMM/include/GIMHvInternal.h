@@ -552,10 +552,20 @@ AssertCompile(MSR_GIM_HV_RANGE11_FIRST <= MSR_GIM_HV_RANGE11_LAST);
 #define MSR_GIM_HV_STIMER_AUTO_ENABLE             RT_BIT_64(3)
 /** Whether Stimer is enabled or not. */
 #define MSR_GIM_HV_STIMER_IS_AUTO_ENABLED(a)      RT_BOOL((a) & MSR_GIM_HV_STIMER_AUTO_ENABLE)
+/** The Stimer direct-mode APIC vector mask (bits 11:4). */
+#define MSR_GIM_HV_STIMER_VECTOR_MASK             UINT64_C(0xff0)
+/** Gets the APIC vector when direct-mode is used. */
+#define MSR_GIM_HV_STIMER_GET_VECTOR(a)           ((a) & MSR_GIM_HV_STIMER_VECTOR_MASK)
 /** The Stimer SINTx mask (bits 16:19). */
 #define MSR_GIM_HV_STIMER_SINTX                   UINT64_C(0xf0000)
+/** The Stimer direct mode mask. */
+#define MSR_GIM_HV_STIMER_DIRECT_MODE             RT_BIT_64(12)
+/** Whether direct mode is enabled. */
+#define MSR_GIM_HV_STIMER_IS_DIRECT_MODE(a)       RT_BOOL((a) & MSR_GIM_HV_STIMER_DIRECT_MODE)
+/** THe SINT source mask. */
+#define MSR_GIM_HV_STIMER_SINT_MASK               0xf
 /** Gets the Stimer synthetic interrupt source. */
-#define MSR_GIM_HV_STIMER_GET_SINTX(a)            (((a) >> 16) & 0xf)
+#define MSR_GIM_HV_STIMER_GET_SINTX(a)            (((a) >> 16) & MSR_GIM_HV_STIMER_SINT_MASK)
 /** The Stimer valid read/write mask. */
 #define MSR_GIM_HV_STIMER_RW_VALID                (  MSR_GIM_HV_STIMER_ENABLE | MSR_GIM_HV_STIMER_PERIODIC    \
                                                    | MSR_GIM_HV_STIMER_LAZY   | MSR_GIM_HV_STIMER_AUTO_ENABLE \
@@ -974,9 +984,9 @@ typedef struct GIMHVMSGHDR
     uint16_t        uRsvd;
     union
     {
-        uint64_t    uOriginatorId;
+        uint64_t    uOriginationId;
         uint64_t    uPartitionId;
-        uint64_t    uPortId;
+        uint32_t    uPortId;
     } msgid;
 } GIMHVMSGHDR;
 /** Pointer to a synthetic interrupt message header. */
@@ -991,8 +1001,28 @@ AssertCompileSize(GIMHVMSGHDR, GIM_HV_MSG_SIZE - GIM_HV_MSG_MAX_PAYLOAD_SIZE);
  */
 typedef struct GIMHVMSG
 {
-    GIMHVMSGHDR     MsgHdr;
-    uint64_t        aPayload[GIM_HV_MSG_MAX_PAYLOAD_UNITS];
+    /** Header. */
+    GIMHVMSGHDR     Header;
+
+    /** Payload. */
+    union
+    {
+        /** Timer expiration payload. */
+        struct
+        {
+            /** Index of the synthetic timer */
+            uint32_t    idxStimer;
+            uint32_t    uRsvd0;
+            /** The absolute expiration time in 100-ns units. */
+            uint64_t    uExpirationTime;
+            /** The absolute message delivery time in 100-ns units. */
+            uint64_t    uDeliveryTime;
+        } timer;
+        /* Generic payload units view. */
+        uint64_t        aPayload[GIM_HV_MSG_MAX_PAYLOAD_UNITS];
+        /* Generic payload size view. */
+        uint8_t         abPayload[GIM_HV_MSG_MAX_PAYLOAD_SIZE];
+    } u;
 } GIMHVMSG;
 /** Pointer to a synthetic interrupt message. */
 typedef GIMHVMSG *PGIMHVMSG;
@@ -1292,12 +1322,14 @@ typedef struct GIMHVSTIMER
     TMTIMERHANDLE               hTimer;
     /** Virtual CPU ID this timer belongs to (for reverse mapping). */
     VMCPUID                     idCpu;
-    /** The index of this timer in the auStimers array (for reverse mapping). */
+    /** The index of this timer in the aStimers array (for reverse mapping). */
     uint32_t                    idxStimer;
     /** Synthetic timer config MSR. */
     uint64_t                    uStimerConfigMsr;
     /** Synthetic timer count MSR. */
     uint64_t                    uStimerCountMsr;
+    /** The absolute expiration time in 100-ns units. */
+    uint64_t                    uExpirationTime;
 } GIMHVSTIMER;
 /** Pointer to per-VCPU Hyper-V synthetic timer. */
 typedef GIMHVSTIMER *PGIMHVSTIMER;
@@ -1389,8 +1421,6 @@ VMM_INT_DECL(VBOXSTRICTRC)      gimHvHypercallEx(PVMCPUCC pVCpu, PCPUMCTX pCtx, 
 VMM_INT_DECL(VBOXSTRICTRC)      gimHvReadMsr(PVMCPUCC pVCpu, uint32_t idMsr, PCCPUMMSRRANGE pRange, uint64_t *puValue);
 VMM_INT_DECL(VBOXSTRICTRC)      gimHvWriteMsr(PVMCPUCC pVCpu, uint32_t idMsr, PCCPUMMSRRANGE pRange, uint64_t uRawValue);
 #endif
-
-VMM_INT_DECL(void)              gimHvStartStimer(PVMCPUCC pVCpu, PCGIMHVSTIMER pHvStimer);
 
 RT_C_DECLS_END
 

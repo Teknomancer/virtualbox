@@ -279,8 +279,8 @@ VMMR3_INT_DECL(int) gimR3HvInit(PVM pVM, PCFGMNODE pGimCfg)
         pHv->uBaseFeat = 0
                      //| GIM_HV_BASE_FEAT_VP_RUNTIME_MSR
                        | GIM_HV_BASE_FEAT_PART_TIME_REF_COUNT_MSR
-                     //| GIM_HV_BASE_FEAT_BASIC_SYNIC_MSRS          // Both required for synethetic timers
-                     //| GIM_HV_BASE_FEAT_STIMER_MSRS               // Both required for synethetic timers
+                       | GIM_HV_BASE_FEAT_BASIC_SYNIC_MSRS          // Both required for synethetic timers
+                       | GIM_HV_BASE_FEAT_STIMER_MSRS               // Both required for synethetic timers
                        | GIM_HV_BASE_FEAT_APIC_ACCESS_MSRS
                        | GIM_HV_BASE_FEAT_HYPERCALL_MSRS
                        | GIM_HV_BASE_FEAT_VP_ID_MSR
@@ -299,6 +299,7 @@ VMMR3_INT_DECL(int) gimR3HvInit(PVM pVM, PCFGMNODE pGimCfg)
                          | GIM_HV_MISC_FEAT_TIMER_FREQ
                          | GIM_HV_MISC_FEAT_GUEST_CRASH_MSRS
                        //| GIM_HV_MISC_FEAT_DEBUG_MSRS
+                         | GIM_HV_MISC_FEAT_USE_DIRECT_SYNTH_MSRS
                          ;
 
         /* Hypervisor recommendations to the guest. */
@@ -1107,26 +1108,90 @@ static DECLCALLBACK(void) gimR3HvTimerCallback(PVM pVM, TMTIMERHANDLE hTimer, vo
 
     PVMCPU    pVCpu  = pVM->apCpusR3[pHvStimer->idCpu];
     PGIMHVCPU pHvCpu = &pVCpu->gim.s.u.HvCpu;
-    Assert(pHvStimer->idxStimer < RT_ELEMENTS(pHvCpu->aStatStimerFired));
 
-    STAM_COUNTER_INC(&pHvCpu->aStatStimerFired[pHvStimer->idxStimer]);
-
+    /* Get the VCPU's synthetic timer config and timer index.  */
     uint64_t const uStimerConfig = pHvStimer->uStimerConfigMsr;
-    uint16_t const idxSint       = MSR_GIM_HV_STIMER_GET_SINTX(uStimerConfig);
-    if (RT_LIKELY(idxSint < RT_ELEMENTS(pHvCpu->auSintMsrs)))
+    uint16_t const idxStimer     = pHvStimer->idxStimer;
+
+    /* Sanity. */
+    Assert(idxStimer < RT_ELEMENTS(pHvCpu->aStatStimerFired));
+    Assert(idxStimer < RT_ELEMENTS(pHvCpu->aStimers));
+    AssertCompile(MSR_GIM_HV_STIMER_SINT_MASK < RT_ELEMENTS(pHvCpu->auSintMsrs));
+    AssertCompile(RT_ELEMENTS(pHvCpu->auSintMsrs) * GIM_HV_MSG_SIZE == GIM_HV_PAGE_SIZE);
+
+    STAM_COUNTER_INC(&pHvCpu->aStatStimerFired[idxStimer]);
+
+    /* Get the interrupt details from the SINT MSR corresponding to the SINT index. */
+    uint8_t const  idxSint = MSR_GIM_HV_STIMER_GET_SINTX(uStimerConfig);
+    uint64_t const uSint   = pHvCpu->auSintMsrs[idxSint];
+
+    LogRelMax(200, ("GIM%u: HyperV: uSint%u=%#RX64\n", pVCpu->idCpu, pVCpu->idCpu, uSint));
+
+    if (!MSR_GIM_HV_SINT_IS_MASKED(uSint))
     {
-        uint64_t const uSint = pHvCpu->auSintMsrs[idxSint];
-        if (!MSR_GIM_HV_SINT_IS_MASKED(uSint))
+        /* For direct mode, send the interrupt directly, no messing with the SIM page. */
+        if (MSR_GIM_HV_STIMER_IS_DIRECT_MODE(uStimerConfig))
         {
-            uint8_t const uVector  = MSR_GIM_HV_SINT_GET_VECTOR(uSint);
-            bool const    fAutoEoi = MSR_GIM_HV_SINT_IS_AUTOEOI(uSint);
-            PDMApicHvSendInterrupt(pVCpu, uVector, fAutoEoi, XAPICTRIGGERMODE_EDGE);
+            uint8_t const uVector = MSR_GIM_HV_STIMER_GET_VECTOR(uStimerConfig);
+            PDMApicHvSendInterrupt(pVCpu, uVector, false /* fAutoEoi */, XAPICTRIGGERMODE_EDGE);
         }
+        else if (MSR_GIM_HV_SIMP_IS_ENABLED(pHvCpu->uSimpMsr))
+        {
+            /* For indirect mode, send the interrupt via a message slot in the SIM page. */
+            RTGCPHYS const GCPhysSimp = MSR_GIM_HV_SIMP_GPA(pHvCpu->uSimpMsr);
+            RTGCPHYS const GCPhysMsg  = GCPhysSimp + idxSint * GIM_HV_MSG_SIZE;
+            GIMHVMSG Msg;
+            int rc = PGMPhysSimpleReadGCPhys(pVM, &Msg, GCPhysMsg, sizeof(Msg));
+            if (RT_SUCCESS(rc))
+            {
+                if (Msg.Header.enmMessageType == GIMHVMSGTYPE_NONE)
+                {
+                    /* The SINT message slot is free, update the timer message in the slot. */
+                    RT_ZERO(Msg);
+                    Msg.Header.enmMessageType   = GIMHVMSGTYPE_TIMEREXPIRED;
+                    Msg.Header.cbPayload        = sizeof(Msg.u.timer);
+                    Msg.u.timer.idxStimer       = pHvStimer->idxStimer;
+                    Msg.u.timer.uExpirationTime = pHvStimer->uExpirationTime;
+                    /** @todo We cannot call gimHvGetTimeRefCount(pVCpu) as we're not on the EMT corresponding to the timer */
+                    Msg.u.timer.uDeliveryTime   = pHvStimer->uExpirationTime; /* Not really correct but see todo above. */
+                    rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysMsg, &Msg, sizeof(Msg));
+                    if (RT_SUCCESS(rc))
+                    {
+                        uint8_t const uVector  = MSR_GIM_HV_SINT_GET_VECTOR(uSint);
+                        bool const    fAutoEoi = MSR_GIM_HV_SINT_IS_AUTOEOI(uSint);
+                        PDMApicHvSendInterrupt(pVCpu, uVector, fAutoEoi, XAPICTRIGGERMODE_EDGE);
+                    }
+                    else
+                    {
+                        LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to write STIMER%u in SIM page. rc=%Rrc\n",
+                                  pVCpu->idCpu, pHvStimer->idxStimer, rc));
+                    }
+                }
+                else
+                {
+                    /* The SINT message slot is not free, queue the timer as pending. */
+                    /** @todo Implement message queue, u1MessagePending=1. */
+                    AssertReleaseMsgFailed(("TODO: SINT slot not free. enmMessageType=%#x\n", Msg.Header.enmMessageType));
+                }
+            }
+            else
+            {
+                LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to read STIMER%u in SIM page. rc=%Rrc\n",
+                          pVCpu->idCpu, pHvStimer->idxStimer, rc));
+            }
+        }
+        /** @todo else: Should we disable timers here? */
     }
 
-    /* Re-arm the timer if it's periodic. */
+    /* Re-arm the timer if it's periodic. Disable the timer if it's one-shot. */
     if (MSR_GIM_HV_STIMER_IS_PERIODIC(uStimerConfig))
-        gimHvStartStimer(pVCpu, pHvStimer);
+    {
+        uint64_t const uTimerCount  = pHvStimer->uStimerCountMsr;    /* in 100-ns units. */
+        uint64_t const cNanosToNext = uTimerCount * 100 /* ns */;   /* number of nanos to expiry. */
+        TMTimerSetNano(pVM, hTimer, cNanosToNext);
+    }
+    else
+        pHvStimer->uStimerConfigMsr &= ~MSR_GIM_HV_STIMER_ENABLE;
 }
 
 
@@ -1293,56 +1358,6 @@ VMMR3_INT_DECL(int) gimR3HvEnableTscPage(PVM pVM, RTGCPHYS GCPhysTscPage, bool f
     return rc;
 #endif
 }
-
-
-/**
- * Enables the Hyper-V SIM page.
- *
- * @returns VBox status code.
- * @param   pVCpu           The cross context virtual CPU structure.
- * @param   GCPhysSimPage   Where to map the SIM page.
- */
-VMMR3_INT_DECL(int) gimR3HvEnableSimPage(PVMCPU pVCpu, RTGCPHYS GCPhysSimPage)
-{
-    PVM             pVM     = pVCpu->CTX_SUFF(pVM);
-    PPDMDEVINSR3    pDevIns = pVM->gim.s.pDevInsR3;
-    AssertPtrReturn(pDevIns, VERR_GIM_DEVICE_NOT_REGISTERED);
-
-    /*
-     * Map the SIMP page at the specified address.
-     */
-    /** @todo this is buggy when large pages are used due to a PGM limitation, see
-     *        @bugref{7532}. Instead of the overlay style mapping, we just
-     *        rewrite guest memory directly. */
-    AssertCompile(sizeof(g_abRTZero64K) >= GUEST_PAGE_SIZE);
-    int rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysSimPage, g_abRTZero64K, GUEST_PAGE_SIZE);
-    if (RT_SUCCESS(rc))
-    {
-        /** @todo SIM setup. */
-        LogRel(("GIM%u: HyperV: Enabled SIM page at %#RGp\n", pVCpu->idCpu, GCPhysSimPage));
-    }
-    else
-    {
-        LogRelFunc(("GIM%u: HyperV: PGMPhysSimpleWriteGCPhys failed. rc=%Rrc\n", pVCpu->idCpu, rc));
-        rc = VERR_GIM_OPERATION_FAILED;
-    }
-    return rc;
-}
-
-
-/**
- * Disables the Hyper-V SIM page.
- *
- * @returns VBox status code.
- * @param   pVCpu   The cross context virtual CPU structure.
- */
-VMMR3_INT_DECL(int) gimR3HvDisableSimPage(PVMCPU pVCpu)
-{
-    LogRel(("GIM%u: HyperV: Disabled SIM page\n", pVCpu->idCpu));
-    /** @todo SIM teardown. */
-    return VINF_SUCCESS;
-}
-
 
 
 /**
