@@ -1,4 +1,4 @@
-/* $Id: ClipboardBackendWin.cpp 115060 2026-08-17 17:28:06Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardBackendWin.cpp 115106 2026-08-24 17:32:24Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Win32 host.
  */
@@ -281,17 +281,14 @@ static DECLCALLBACK(void) shClSvcWinTransferOnCreatedCallback(PSHCLTRANSFERCALLB
 /**
  * @copydoc SHCLTRANSFERCALLBACKS::pfnOnInitialize
  *
- * For G->H: Called on transfer intialization to notify the "in-flight" IDataObject about a data transfer.
- * For H->G: Called on transfer intialization to populate the transfer's root list.
+ * For G->H: Defers binding the transfer because the transfer lock is held here.
+ * For H->G: Called on transfer initialization to populate the transfer's root list.
  *
- * @thread  Service main thread.
+ * @thread  Shared Clipboard service thread.
  */
 static DECLCALLBACK(int) shClSvcWinTransferOnInitializeCallback(PSHCLTRANSFERCALLBACKCTX pCbCtx)
 {
     LogFlowFuncEnter();
-
-    PSHCLCONTEXT pCtx = (PSHCLCONTEXT)pCbCtx->pvUser;
-    AssertPtr(pCtx);
 
     PSHCLTRANSFER pTransfer = pCbCtx->pTransfer;
     AssertPtr(pTransfer);
@@ -302,7 +299,9 @@ static DECLCALLBACK(int) shClSvcWinTransferOnInitializeCallback(PSHCLTRANSFERCAL
     {
         case SHCLTRANSFERDIR_GUEST_TO_HOST:
         {
-            vrc = ShClWinTransferInitialize(&pCtx->Win, pTransfer);
+            /* The transfer lock is held while this callback runs.  Defer
+             * attaching the transfer to the data object until the post-init
+             * callback, which runs after the transfer lock has been released. */
             break;
         }
 
@@ -325,7 +324,7 @@ static DECLCALLBACK(int) shClSvcWinTransferOnInitializeCallback(PSHCLTRANSFERCAL
  * @copydoc SHCLTRANSFERCALLBACKS::pfnOnInitialized
  *
  * Called by ShClTransferInit via VbglR3.
- * For G->H: Starts the data transfer for the "in-flight" IDataObject.
+ * For G->H: Binds and starts the data transfer for the "in-flight" IDataObject.
  * For H->G: Nothing to do here.
  *
  * @thread  Clipboard main thread.
@@ -346,7 +345,9 @@ static DECLCALLBACK(int) shClSvcWinTransferOnInitializedCallback(PSHCLTRANSFERCA
     {
         case SHCLTRANSFERDIR_GUEST_TO_HOST:
         {
-            vrc = ShClWinTransferStart(&pCtx->Win, pTransfer);
+            vrc = ShClWinTransferInitialize(&pCtx->Win, pTransfer);
+            if (RT_SUCCESS(vrc))
+                vrc = ShClWinTransferStart(&pCtx->Win, pTransfer);
             break;
         }
 
@@ -367,7 +368,7 @@ static DECLCALLBACK(int) shClSvcWinTransferOnInitializedCallback(PSHCLTRANSFERCA
  * Disables callbacks on the IDataObject and drops its long-lived transfer
  * reference before consuming teardown waits for temporary transfer users.
  *
- * @thread  Service main thread.
+ * @thread  Shared Clipboard service thread.
  */
 static DECLCALLBACK(void) shClSvcWinTransferOnUnregisteredCallback(PSHCLTRANSFERCALLBACKCTX pCbCtx,
                                                                    PSHCLTRANSFERCTX pTransferCtx)
@@ -435,7 +436,71 @@ static DECLCALLBACK(int) shClSvcWinDataObjectTransferBeginCallback(ShClWinDataOb
     LogFlowFuncLeaveRC(vrc);
     return vrc;
 }
+
+
+/**
+ * @copydoc ShClWinDataObject::CALLBACKS::pfnTransferEnd
+ *
+ * Publishes the terminal state after the data object has updated the native
+ * transfer.  Destruction remains with the normal service lifecycle owner.
+ *
+ * @thread  Windows data-object transfer thread or Shell COM callback thread.
+ */
+static DECLCALLBACK(int) shClSvcWinDataObjectTransferEndCallback(ShClWinDataObject::PCALLBACKCTX pCbCtx,
+                                                                 PSHCLTRANSFER pTransfer, int rcTransfer)
+{
+    PSHCLCONTEXT pCtx = (PSHCLCONTEXT)pCbCtx->pvUser;
+    AssertPtrReturn(pCtx, VERR_INVALID_POINTER);
+    AssertPtrReturn(pCtx->pConn, VERR_INVALID_POINTER);
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+
+    SHCLTRANSFERSTATUS const enmStatus = ShClTransferGetStatus(pTransfer);
+    int vrcStatus;
+    switch (enmStatus)
+    {
+        case SHCLTRANSFERSTATUS_COMPLETED:
+            vrcStatus = VINF_SUCCESS;
+            break;
+
+        case SHCLTRANSFERSTATUS_CANCELED:
+            vrcStatus = VERR_CANCELLED;
+            break;
+
+        case SHCLTRANSFERSTATUS_ERROR:
+        case SHCLTRANSFERSTATUS_KILLED:
+            vrcStatus = RT_FAILURE(rcTransfer) ? rcTransfer : VERR_GENERAL_FAILURE;
+            break;
+
+        default:
+            return VINF_SUCCESS;
+    }
+
+    return pCtx->pConn->transferReportStatus(pTransfer, enmStatus, vrcStatus);
+}
 #endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
+
+/**
+ * Checks whether the current Windows clipboard contents were published by us.
+ *
+ * OleSetClipboard() assigns ownership to an internal OLE window.  The exact
+ * handle is cached when publishing the data object; compare it here without
+ * calling back into OLE from a clipboard notification, as that can synchronously
+ * wait for the same STA which is currently dispatching the notification.
+ *
+ * @returns Whether the current clipboard contents were published by us.
+ * @param   pWinCtx             Windows clipboard context.  The caller must own
+ *                              its critical section.
+ * @param   hWndClipboardOwner  Current clipboard owner.
+ */
+static bool shClBackendWinIsClipboardOwner(PSHCLWINCTX pWinCtx, HWND hWndClipboardOwner)
+{
+    Assert(RTCritSectIsOwned(&pWinCtx->CritSect));
+
+    if (hWndClipboardOwner == NULL)
+        return false;
+
+    return pWinCtx->hWndClipboardOwnerUs == hWndClipboardOwner;
+}
 
 static LRESULT CALLBACK vboxClipboardSvcWinWndProcMain(PSHCLCONTEXT pCtx,
                                                        HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) RT_NOTHROW_DEF
@@ -460,7 +525,7 @@ static LRESULT CALLBACK vboxClipboardSvcWinWndProcMain(PSHCLCONTEXT pCtx,
                 LogFunc(("WM_CLIPBOARDUPDATE: hWndClipboardOwnerUs=%p, hWndNewClipboardOwner=%p\n",
                          pWinCtx->hWndClipboardOwnerUs, hWndClipboardOwner));
 
-                if (pWinCtx->hWndClipboardOwnerUs != hWndClipboardOwner)
+                if (!shClBackendWinIsClipboardOwner(pWinCtx, hWndClipboardOwner))
                 {
                     int vrc2 = RTCritSectLeave(&pWinCtx->CritSect);
                     AssertRC(vrc2);
@@ -500,7 +565,7 @@ static LRESULT CALLBACK vboxClipboardSvcWinWndProcMain(PSHCLCONTEXT pCtx,
                 LogFunc(("WM_DRAWCLIPBOARD: hWndClipboardOwnerUs=%p, hWndNewClipboardOwner=%p\n",
                          pWinCtx->hWndClipboardOwnerUs, hWndClipboardOwner));
 
-                if (pWinCtx->hWndClipboardOwnerUs != hWndClipboardOwner)
+                if (!shClBackendWinIsClipboardOwner(pWinCtx, hWndClipboardOwner))
                 {
                     int vrc2 = RTCritSectLeave(&pWinCtx->CritSect);
                     AssertRC(vrc2);
@@ -616,6 +681,7 @@ static LRESULT CALLBACK vboxClipboardSvcWinWndProcMain(PSHCLCONTEXT pCtx,
                 ShClWinDataObject::CALLBACKS Callbacks;
                 RT_ZERO(Callbacks);
                 Callbacks.pfnTransferBegin = shClSvcWinDataObjectTransferBeginCallback;
+                Callbacks.pfnTransferEnd   = shClSvcWinDataObjectTransferEndCallback;
 
                 vrc = ShClWinTransferCreateAndSetDataObject(pWinCtx, pCtx, &Callbacks);
             }
@@ -885,7 +951,9 @@ static int shClBackendWinThreadStop(PSHCLCONTEXT pCtx, bool fWaitDiagnostic)
  * Synchronizes the host and the guest clipboard formats by sending all supported host clipboard
  * formats to the guest.
  *
- * @returns VBox status code, VINF_NO_CHANGE if no synchronization was required.
+ * @retval  VINF_NO_CHANGE if there is no connected guest or its visible
+ *          formats did not change.
+ * @retval  VERR_INVALID_POINTER if @a pCtx is invalid.
  * @param   pCtx                Clipboard context to synchronize.
  */
 static int vboxClipboardSvcWinSyncInternal(PSHCLCONTEXT pCtx)
@@ -898,10 +966,23 @@ static int vboxClipboardSvcWinSyncInternal(PSHCLCONTEXT pCtx)
 
     if (pCtx->pConn)
     {
-        SHCLFORMATS fFormats = 0;
-        vrc = ShClWinGetFormats(&pCtx->Win, &fFormats);
+        vrc = RTCritSectEnter(&pCtx->Win.CritSect);
         if (RT_SUCCESS(vrc))
-            vrc = pCtx->pConn->reportLocalFormats(fFormats);
+        {
+            bool const fClipboardOwner = shClBackendWinIsClipboardOwner(&pCtx->Win, GetClipboardOwner());
+            int const vrcLeave = RTCritSectLeave(&pCtx->Win.CritSect);
+            AssertRC(vrcLeave);
+
+            if (fClipboardOwner)
+                vrc = pCtx->pConn->reportLocalFormats(VBOX_SHCL_FMT_NONE);
+            else
+            {
+                SHCLFORMATS fFormats = 0;
+                vrc = ShClWinGetFormats(&pCtx->Win, &fFormats);
+                if (RT_SUCCESS(vrc))
+                    vrc = pCtx->pConn->reportLocalFormats(fFormats);
+            }
+        }
     }
     else /* If we don't have any client data (yet), bail out. */
         vrc = VINF_NO_CHANGE;

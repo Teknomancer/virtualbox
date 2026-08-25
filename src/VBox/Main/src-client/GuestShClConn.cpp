@@ -1,4 +1,4 @@
-/* $Id: GuestShClConn.cpp 115050 2026-08-17 15:20:35Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClConn.cpp 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main Shared Clipboard - Service connection management implementation.
  */
@@ -348,6 +348,10 @@ int GuestShClConn::reportLocalFormats(SHCLFORMATS fFormats)
 
 int GuestShClConn::readDataFromGuestAsync(SHCLFORMATS fFormats, PSHCLEVENT *ppEvent)
 {
+#ifdef VBOX_COM_INPROC
+    if (m_pOwner && !m_pOwner->IsNativeBackendActive())
+        return VERR_SHCLPB_NO_DATA;
+#endif
     SHCL_CONN_SVC_CALL_BEGIN(Transport);
     vrc = Transport.pOps->pfnReadDataFromGuestAsync(Transport.hClient, fFormats, ppEvent);
     i_callEnd();
@@ -355,7 +359,7 @@ int GuestShClConn::readDataFromGuestAsync(SHCLFORMATS fFormats, PSHCLEVENT *ppEv
 }
 
 
-int GuestShClConn::readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData)
+int GuestShClConn::i_readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData)
 {
     AssertPtrReturn(ppvData, VERR_INVALID_POINTER);
     AssertPtrReturn(pcbData, VERR_INVALID_POINTER);
@@ -366,66 +370,17 @@ int GuestShClConn::readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_
 }
 
 
-int GuestShClConn::guestDataBegin(PSHCLCLIENTCMDCTX pCmdCtx, SHCLFORMAT uFormat, PSHCLGUESTDATATOKEN phToken)
+int GuestShClConn::readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData)
 {
-    AssertPtrReturn(pCmdCtx, VERR_INVALID_POINTER);
-    AssertPtrReturn(phToken, VERR_INVALID_POINTER);
-    *phToken = NULL;
-    SHCL_CONN_SVC_CALL_BEGIN(Transport);
-    vrc = Transport.pOps->pfnGuestDataBegin(Transport.hClient, pCmdCtx, uFormat, phToken);
-    if (   RT_FAILURE(vrc)
-        || !*phToken)
-        i_callEnd();
-    return vrc;
-}
-
-
-int GuestShClConn::guestDataComplete(SHCLGUESTDATATOKEN hToken, void const *pvData, uint32_t cbData)
-{
-    AssertPtrReturn(hToken, VERR_INVALID_HANDLE);
-
-    SHCLTRANSPORT Transport;
-    int vrc = RTCritSectEnter(&m_CritSect);
-    if (RT_FAILURE(vrc))
-        return vrc;
-    if (m_cCalls > 0 && ShClTransportIsValid(&m_Transport))
-        Transport = m_Transport;
-    else
-    {
-        RT_ZERO(Transport);
-        vrc = VERR_INVALID_STATE;
-    }
-    RTCritSectLeave(&m_CritSect);
-
-    if (RT_SUCCESS(vrc))
-    {
-        vrc = Transport.pOps->pfnGuestDataComplete(Transport.hClient, hToken, pvData, cbData);
-        i_callEnd();
-    }
-    return vrc;
-}
-
-
-void GuestShClConn::guestDataCancel(SHCLGUESTDATATOKEN hToken)
-{
-    AssertPtrReturnVoid(hToken);
-
-    SHCLTRANSPORT Transport;
-    int const vrc = RTCritSectEnter(&m_CritSect);
-    if (RT_SUCCESS(vrc))
-    {
-        if (m_cCalls > 0 && ShClTransportIsValid(&m_Transport))
-            Transport = m_Transport;
-        else
-            RT_ZERO(Transport);
-        RTCritSectLeave(&m_CritSect);
-
-        if (ShClTransportIsValid(&Transport))
-        {
-            Transport.pOps->pfnGuestDataCancel(Transport.hClient, hToken);
-            i_callEnd();
-        }
-    }
+    AssertPtrReturn(ppvData, VERR_INVALID_POINTER);
+    AssertPtrReturn(pcbData, VERR_INVALID_POINTER);
+    *ppvData = NULL;
+    *pcbData = 0;
+#ifdef VBOX_COM_INPROC
+    if (m_pOwner && !m_pOwner->IsNativeBackendActive())
+        return VERR_SHCLPB_NO_DATA;
+#endif
+    return i_readDataFromGuest(uFormat, ppvData, pcbData);
 }
 
 
@@ -473,6 +428,40 @@ int GuestShClConn::writeDataToBackend(SHCLFORMAT uFormat, void *pvData, uint32_t
 
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+int GuestShClConn::transportAcquire(PCSHCLTRANSPORT pTransport)
+{
+    AssertReturn(ShClTransportIsValid(pTransport), VERR_INVALID_HANDLE);
+
+    int vrc = RTCritSectEnter(&m_CritSect);
+    if (RT_FAILURE(vrc))
+        return vrc;
+
+    if (   m_enmState == State_Connected
+        && ShClTransportIsEqual(&m_Transport, pTransport))
+    {
+        if (m_cCalls++ == 0)
+        {
+            int const vrcReset = RTSemEventMultiReset(m_hCallsDone);
+            AssertFatalMsgRC(vrcReset, ("Resetting the Shared Clipboard connection call-drain event failed with %Rrc\n",
+                                        vrcReset));
+        }
+        vrc = VINF_SUCCESS;
+    }
+    else
+        vrc = VERR_INVALID_HANDLE;
+
+    int const vrcLeave = RTCritSectLeave(&m_CritSect);
+    AssertFatalMsgRC(vrcLeave, ("Releasing the Shared Clipboard connection transport lock failed with %Rrc\n", vrcLeave));
+    return vrc;
+}
+
+
+void GuestShClConn::transportRelease(void)
+{
+    i_callEnd();
+}
+
+
 int GuestShClConn::transferGetCallbacks(PSHCLTRANSFERCALLBACKS pCallbacks)
 {
     AssertPtrReturn(pCallbacks, VERR_INVALID_POINTER);
@@ -506,15 +495,14 @@ PSHCLTRANSFER GuestShClConn::transferGetByIdRetained(SHCLTRANSFERID idTransfer)
 }
 
 
-PSHCLTRANSFER GuestShClConn::transferGetByKeyRetained(SHCLSESSIONID idSession, SHCLTRANSFERID idTransfer,
-                                                       SHCLTRANSFERGEN uGeneration)
+PSHCLTRANSFER GuestShClConn::transferGetByKeyRetained(PCSHCLTRANSFERKEY pKey)
 {
+    AssertPtrReturn(pKey, NULL);
     SHCLTRANSPORT Transport;
     int const vrc = i_callBegin(&Transport);
     if (RT_FAILURE(vrc))
         return NULL;
-    PSHCLTRANSFER const pTransfer = Transport.pOps->pfnTransferGetByKeyRetained(Transport.hClient,
-                                                                               idSession, idTransfer, uGeneration);
+    PSHCLTRANSFER const pTransfer = Transport.pOps->pfnTransferGetByKeyRetained(Transport.hClient, pKey);
     i_callEnd();
     return pTransfer;
 }
@@ -536,6 +524,15 @@ int GuestShClConn::transferInit(PSHCLTRANSFER pTransfer)
 {
     SHCL_CONN_SVC_CALL_BEGIN(Transport);
     vrc = Transport.pOps->pfnTransferInit(Transport.hClient, pTransfer);
+    i_callEnd();
+    return vrc;
+}
+
+
+int GuestShClConn::transferReportStatus(PSHCLTRANSFER pTransfer, SHCLTRANSFERSTATUS enmStatus, int rcStatus)
+{
+    SHCL_CONN_SVC_CALL_BEGIN(Transport);
+    vrc = Transport.pOps->pfnTransferReportStatus(Transport.hClient, pTransfer, enmStatus, rcStatus);
     i_callEnd();
     return vrc;
 }

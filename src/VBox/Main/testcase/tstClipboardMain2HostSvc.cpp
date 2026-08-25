@@ -1,4 +1,4 @@
-/* $Id: tstClipboardMain2HostSvc.cpp 115060 2026-08-17 17:28:06Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardMain2HostSvc.cpp 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main Shared Clipboard - Host Service integration testcase.
  */
@@ -36,9 +36,11 @@
 #include <VBox/HostServices/VBoxClipboardSvc.h>
 #include <VBox/VMMDev.h>
 
+#include <iprt/asm.h>
 #include <iprt/mem.h>
 #include <iprt/string.h>
 #include <iprt/test.h>
+#include <iprt/thread.h>
 
 
 /**
@@ -102,13 +104,9 @@ typedef struct TSTSHCLSTATE
     /** Number of transfer callback-table requests reaching the backend. */
     uint32_t                    cTransferCallbacks;
     /** Number of transfer status notifications reaching the backend. */
-    uint32_t                    cTransferStatuses;
-    /** Session of the last transfer notification. */
-    SHCLSESSIONID               idTransferSession;
-    /** ID of the last transfer notification. */
-    SHCLTRANSFERID              idTransfer;
-    /** Generation of the last transfer notification. */
-    SHCLTRANSFERGEN             uTransferGeneration;
+    volatile uint32_t           cTransferStatuses;
+    /** Exact identity in the last transfer notification. */
+    SHCLTRANSFERKEY             TransferKey;
     /** Last transfer status. */
     SHCLTRANSFERSTATUS          enmTransferStatus;
 #endif
@@ -264,11 +262,9 @@ static int tstBackendTransferHandleStatusReply(PSHCLCONTEXT pCtx, PSHCLTRANSFER 
 {
     RT_NOREF(enmSource, rcStatus);
     RTTESTI_CHECK(pCtx == &g_State.BackendCtx);
-    g_State.cTransferStatuses++;
-    g_State.idTransferSession = ShClTransferGetSessionId(pTransfer);
-    g_State.idTransfer = ShClTransferGetID(pTransfer);
-    g_State.uTransferGeneration = ShClTransferGetGeneration(pTransfer);
+    ShClTransferGetKey(pTransfer, &g_State.TransferKey);
     g_State.enmTransferStatus = enmStatus;
+    ASMAtomicIncU32(&g_State.cTransferStatuses);
     return VINF_SUCCESS;
 }
 #endif
@@ -323,7 +319,6 @@ static DECLCALLBACK(int) tstMainExtension(void *pvExtension, uint32_t uFunction,
     GuestShClConn * const pConn = (GuestShClConn *)pvExtension;
     RTTESTI_CHECK_RET(cbParms == sizeof(SHCLEXTPARMS), VERR_INVALID_PARAMETER);
     PSHCLEXTPARMS const pParms = (PSHCLEXTPARMS)pvParms;
-    int vrc;
     switch (uFunction)
     {
         case VBOX_CLIPBOARD_EXT_FN_BACKEND_INIT:
@@ -345,23 +340,24 @@ static DECLCALLBACK(int) tstMainExtension(void *pvExtension, uint32_t uFunction,
         case VBOX_CLIPBOARD_EXT_FN_FORMAT_REPORT_TO_HOST:
             return pConn->reportFormatsToBackend(pParms->u.ReportFormats.uFormats);
         case VBOX_CLIPBOARD_EXT_FN_DATA_WRITE:
-        {
-            SHCLGUESTDATATOKEN hToken = NULL;
-            vrc = pConn->guestDataBegin(pParms->u.ReadWriteData.pCmdCtx,
-                                        pParms->u.ReadWriteData.uFormat, &hToken);
-            if (RT_SUCCESS(vrc))
-                vrc = pConn->guestDataComplete(hToken, pParms->u.ReadWriteData.pvData,
-                                               pParms->u.ReadWriteData.cbData);
-            return vrc;
-        }
+            return VINF_SUCCESS;
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
         case VBOX_CLIPBOARD_EXT_FN_TRANSFER_CALLBACKS:
             return pConn->transferGetCallbacks(pParms->u.TransferCallbacks.pCallbacks);
         case VBOX_CLIPBOARD_EXT_FN_FILE_TRANSFER:
-            return pConn->transferHandleStatusReply(pParms->u.FileTransferData.pTransfer,
-                                                     pParms->u.FileTransferData.enmShClSource,
-                                                     pParms->u.FileTransferData.pReply->u.TransferStatus.uStatus,
-                                                     (int)pParms->u.FileTransferData.pReply->rc);
+        {
+            PSHCLTRANSFER const pTransfer
+                = pConn->transferGetByKeyRetained(&pParms->u.FileTransferData.Key);
+            if (!pTransfer)
+                return ShClTransferStatusIsTerminal(pParms->u.FileTransferData.enmStatus)
+                     ? VINF_SUCCESS : VERR_INVALID_CONTEXT;
+            int const vrc2 = pConn->transferHandleStatusReply(pTransfer,
+                                                               pParms->u.FileTransferData.enmReplySource,
+                                                               pParms->u.FileTransferData.enmStatus,
+                                                               pParms->u.FileTransferData.rcStatus);
+            ShClTransferRelease(pTransfer);
+            return vrc2;
+        }
 #endif
         default:
             return VERR_NOT_SUPPORTED;
@@ -575,6 +571,19 @@ static void tstGuestData(void *pvClient, GuestShClConn *pConn)
 }
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
+/** Waits for the asynchronous service-extension transfer-status worker. */
+static bool tstTransferStatusWait(uint32_t cExpected)
+{
+    for (uint32_t i = 0; i < 5000; i++)
+    {
+        if (ASMAtomicReadU32(&g_State.cTransferStatuses) >= cExpected)
+            return true;
+        RTThreadSleep(1);
+    }
+    return false;
+}
+
+
 /**
  * Checks post-initialization callback failure propagation across Main and the Host Service.
  *
@@ -660,10 +669,8 @@ static void tstTransfer(void *pvClient)
     int vrc = tstGuestCall(pvClient, VBOX_SHCL_GUEST_FN_REPLY, RT_ELEMENTS(aReply), aReply);
     RTTESTI_CHECK_RC(vrc, VINF_SUCCESS);
     RTTESTI_CHECK(g_State.cTransferCallbacks == 1);
-    RTTESTI_CHECK(g_State.cTransferStatuses == 1);
-    RTTESTI_CHECK(g_State.idTransferSession != NIL_SHCLSESSIONID);
-    RTTESTI_CHECK(g_State.idTransfer != NIL_SHCLTRANSFERID);
-    RTTESTI_CHECK(g_State.uTransferGeneration != NIL_SHCLTRANSFERGEN);
+    RTTESTI_CHECK(tstTransferStatusWait(1));
+    RTTESTI_CHECK(ShClTransferKeyIsValid(&g_State.TransferKey));
     RTTESTI_CHECK(g_State.enmTransferStatus == SHCLTRANSFERSTATUS_REQUESTED);
 
     VBOXHGCMSVCPARM aStatus[VBOX_SHCL_CPARMS_TRANSFER_STATUS];
@@ -674,13 +681,13 @@ static void tstTransfer(void *pvClient)
     HGCMSvcSetU32(&aStatus[4], 0);
     vrc = tstGuestCall(pvClient, VBOX_SHCL_GUEST_FN_MSG_GET, RT_ELEMENTS(aStatus), aStatus);
     RTTESTI_CHECK_RC(vrc, VINF_SUCCESS);
-    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_SESSION(aStatus[0].u.uint64) == g_State.idTransferSession);
-    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_TRANSFER(aStatus[0].u.uint64) == g_State.idTransfer);
+    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_SESSION(aStatus[0].u.uint64) == ShClTransferKeyGetSessionId(&g_State.TransferKey));
+    RTTESTI_CHECK(VBOX_SHCL_CONTEXTID_GET_TRANSFER(aStatus[0].u.uint64) == ShClTransferKeyGetTransferId(&g_State.TransferKey));
     RTTESTI_CHECK(aStatus[2].u.uint32 == SHCLTRANSFERSTATUS_REQUESTED);
 
     VBOXHGCMSVCPARM aCancel[2];
-    HGCMSvcSetU64(&aCancel[0], VBOX_SHCL_CONTEXTID_MAKE(g_State.idTransferSession, g_State.idTransfer, 0));
-    HGCMSvcSetU64(&aCancel[1], g_State.uTransferGeneration);
+    HGCMSvcSetU64(&aCancel[0], g_State.TransferKey.uContextId);
+    HGCMSvcSetU64(&aCancel[1], g_State.TransferKey.uGeneration);
     vrc = g_Table.pfnHostCall(g_Table.pvService, VBOX_SHCL_HOST_FN_CANCEL, RT_ELEMENTS(aCancel), aCancel);
     RTTESTI_CHECK_RC_OK(vrc);
 

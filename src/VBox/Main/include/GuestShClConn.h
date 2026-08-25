@@ -1,4 +1,4 @@
-/* $Id: GuestShClConn.h 115050 2026-08-17 15:20:35Z andreas.loeffler@oracle.com $ */
+/* $Id: GuestShClConn.h 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Main Shared Clipboard - Service connection management.
  */
@@ -135,55 +135,28 @@ public:
     int reportLocalFormats(SHCLFORMATS fFormats);
 
     /**
-     * Requests clipboard data from the guest without waiting for a reply.
+     * Requests clipboard data from the guest without waiting for a reply if
+     * the native backend is selected.
      *
-     * @returns VBox status code.
+     * @retval  VERR_SHCLPB_NO_DATA if the native backend is not selected or
+     *          there is no active guest clipboard connection.
      * @param   fFormats            Requested formats, VBOX_SHCL_FMT_XXX.
      * @param   ppEvent             Where to return the reply event. Optional.
      */
     int readDataFromGuestAsync(SHCLFORMATS fFormats, PSHCLEVENT *ppEvent);
 
     /**
-     * Requests and waits for clipboard data from the guest.
+     * Requests and waits for clipboard data from the guest if the native
+     * backend is selected.
      *
-     * @returns VBox status code.
+     * @retval  VERR_INVALID_POINTER if @a ppvData or @a pcbData is invalid.
+     * @retval  VERR_SHCLPB_NO_DATA if the native backend is not selected, the
+     *          guest clipboard is disconnected, or no data is available.
      * @param   uFormat             Requested format, VBOX_SHCL_FMT_XXX.
      * @param   ppvData             Where to return the allocated data buffer.
      * @param   pcbData             Where to return the data size.
      */
     int readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData);
-
-    /**
-     * Validates and retains a pending guest-data reply.
-     *
-     * @returns VBox status code.
-     * @retval  VINF_SUCCESS if the reply was retained or if its event already
-     *          expired.  In the latter case @a phToken is set to NULL.
-     * @param   pCmdCtx             Command context identifying the pending reply.
-     * @param   uFormat             Format carried by the reply.
-     * @param   phToken             Where to return the retained reply token, or
-     *                              NULL if the event already expired.  A returned
-     *                              token pins the connection until it is passed to
-     *                              guestDataComplete() or guestDataCancel().
-     */
-    int guestDataBegin(PSHCLCLIENTCMDCTX pCmdCtx, SHCLFORMAT uFormat, PSHCLGUESTDATATOKEN phToken);
-
-    /**
-     * Signals and releases a retained guest-data reply.
-     *
-     * @returns VBox status code.
-     * @param   hToken              Retained reply token returned by guestDataBegin().
-     * @param   pvData              Reply data. Optional when @a cbData is zero.
-     * @param   cbData              Reply data size in bytes.
-     */
-    int guestDataComplete(SHCLGUESTDATATOKEN hToken, void const *pvData, uint32_t cbData);
-
-    /**
-     * Releases a retained guest-data reply without signalling it.
-     *
-     * @param   hToken              Retained reply token returned by guestDataBegin().
-     */
-    void guestDataCancel(SHCLGUESTDATATOKEN hToken);
 
     /**
      * Synchronizes the native clipboard backend with the guest.
@@ -223,6 +196,26 @@ public:
 
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     /**
+     * Acquires the specified service transport for a transfer operation.
+     *
+     * Prevents the associated connection from completing teardown while the
+     * transport is acquired.  The call fails if @a pTransport is not the
+     * current service endpoint or connection teardown has already begun.
+     *
+     * @returns VBox status code.
+     * @param   pTransport          Service transport to acquire.
+     *
+     * On success, the caller must invoke transportRelease().
+     */
+    int transportAcquire(PCSHCLTRANSPORT pTransport);
+
+    /**
+     * Releases a service transport acquired by transportAcquire(), allowing
+     * deferred connection teardown to proceed.
+     */
+    void transportRelease(void);
+
+    /**
      * Returns the native backend callbacks for a new transfer.
      *
      * @returns VBox status code.
@@ -254,12 +247,9 @@ public:
      * Retains a service transfer selected by its complete generation key.
      *
      * @returns Retained transfer on success, or NULL if not found or disconnected.
-     * @param   idSession           Service session ID.
-     * @param   idTransfer          Transfer ID.
-     * @param   uGeneration        Transfer generation.
+     * @param   pKey                Host-side transfer key.
      */
-    PSHCLTRANSFER transferGetByKeyRetained(SHCLSESSIONID idSession, SHCLTRANSFERID idTransfer,
-                                           SHCLTRANSFERGEN uGeneration);
+    PSHCLTRANSFER transferGetByKeyRetained(PCSHCLTRANSFERKEY pKey);
 
     /**
      * Creates and retains a service-owned transfer.
@@ -281,6 +271,16 @@ public:
      * @param   pTransfer           Transfer to initialize.
      */
     int transferInit(PSHCLTRANSFER pTransfer);
+
+    /**
+     * Reports a host-side terminal transfer status through the service.
+     *
+     * @returns VBox status code.
+     * @param   pTransfer           Transfer whose terminal state is being reported.
+     * @param   enmStatus           Terminal transfer status.
+     * @param   rcStatus            Status-specific result code.
+     */
+    int transferReportStatus(PSHCLTRANSFER pTransfer, SHCLTRANSFERSTATUS enmStatus, int rcStatus);
 
     /**
      * Destroys a service-owned transfer selected by ID.
@@ -308,6 +308,8 @@ public:
 #endif
 
 private:
+    friend class GuestShCl;
+
     /** Internal connection lifecycle states. */
     enum State
     {
@@ -341,6 +343,18 @@ private:
      * Waits for every operation begun by i_callBegin() to finish.
      */
     void i_waitForCalls(void);
+    /**
+     * Requests and waits for clipboard data from the guest without checking
+     * which host clipboard provider is selected.
+     *
+     * @retval  VERR_INVALID_POINTER if @a ppvData or @a pcbData is invalid.
+     * @retval  VERR_SHCLPB_NO_DATA if the guest clipboard is disconnected or
+     *          no data is available.
+     * @param   uFormat             Requested format, VBOX_SHCL_FMT_XXX.
+     * @param   ppvData             Where to return the allocated data buffer.
+     * @param   pcbData             Where to return the data size.
+     */
+    int i_readDataFromGuest(SHCLFORMAT uFormat, void **ppvData, uint32_t *pcbData);
 
     /** GuestShCl instance owning this object for the full object lifetime; immutable. */
     GuestShCl                  *m_pOwner;

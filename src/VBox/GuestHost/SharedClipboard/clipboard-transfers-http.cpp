@@ -1,4 +1,4 @@
-/* $Id: clipboard-transfers-http.cpp 115055 2026-08-17 16:40:05Z andreas.loeffler@oracle.com $ */
+/* $Id: clipboard-transfers-http.cpp 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard: HTTP server implementation for Shared Clipboard transfers on UNIX-y guests / hosts.
  */
@@ -85,16 +85,24 @@ typedef struct _SHCLHTTPSERVERTRANSFER
     volatile uint32_t   cRefs;
     /** Number of active HTTP requests using this registration. */
     uint32_t            cRequests;
+    /** Number of advertised roots. */
+    uint64_t            cRoots;
+    /** Number of advertised regular-file roots. */
+    uint64_t            cFileRoots;
+    /** Number of regular-file roots successfully served at least once. */
+    uint64_t            cFileRootsCompleted;
+    /** Per-root completion state, indexed exactly like the transfer root list. */
+    bool               *pafRootCompleted;
+    /** Whether every advertised root is a regular file. */
+    bool                fAllRootsAreFiles;
+    /** Whether ShClTransferComplete() already has been issued. */
+    bool                fCompletionIssued;
     /** Signaled when the active request count transitions to zero. */
     RTSEMEVENTMULTI     hRequestsDrained;
     /** Whether the registration still is visible in the server lookup list.  Protected by the server lock. */
     bool                fRegistered;
-    /** Service session portion of the immutable transfer key. */
-    SHCLSESSIONID       idSession;
-    /** Transfer ID portion of the immutable transfer key. */
-    SHCLTRANSFERID      idTransfer;
-    /** Generation portion of the immutable transfer key. */
-    SHCLTRANSFERGEN     uGeneration;
+    /** Immutable identity of the registered transfer. */
+    SHCLTRANSFERKEY     Key;
     /** The virtual path of the HTTP server's root directory for this transfer.
      *  Always has to start with a "/". Unescaped. */
     char                szPathVirtual[RTPATH_MAX];
@@ -108,6 +116,16 @@ typedef struct _SHCLHTTPSERVERREQUEST
     PSHCLHTTPSERVERTRANSFER pSrvTx;
     /** Object handle opened for this request. */
     SHCLOBJHANDLE           hObj;
+    /** Root index resolved for this request. */
+    uint64_t                idxRoot;
+    /** Advertised size of the resolved regular-file root. */
+    uint64_t                cbRoot;
+    /** Whether @a idxRoot and @a cbRoot describe a regular-file GET payload. */
+    bool                    fRootResolved;
+    /** Result of closing the provider object. */
+    int                     rcClose;
+    /** Whether request-end must complete the transfer after releasing this request. */
+    bool                    fCompleteTransfer;
 } SHCLHTTPSERVERREQUEST;
 typedef SHCLHTTPSERVERREQUEST *PSHCLHTTPSERVERREQUEST;
 
@@ -119,6 +137,7 @@ static int shClTransferHttpServerDestroyInternal(PSHCLHTTPSERVER pThis);
 static const char *shClTransferHttpServerGetHost(PSHCLHTTPSERVER pSrv);
 static int shClTransferHttpServerDestroyTransfer(PSHCLHTTPSERVER pSrv, PSHCLHTTPSERVERTRANSFER pSrvTx);
 static SHCLHTTPSERVERSTATUS shclTransferHttpServerSetStatusLocked(PSHCLHTTPSERVER pSrv, SHCLHTTPSERVERSTATUS fStatus);
+static void shClTransferHttpRequestCompleted(PRTHTTPSERVERREQ pReq, PSHCLHTTPSERVERREQUEST pHttpReq);
 
 
 /*********************************************************************************************************************************
@@ -227,6 +246,9 @@ static uint32_t shClHttpTransferRelease(PSHCLHTTPSERVERTRANSFER pSrvTx)
         int rc2 = RTSemEventMultiDestroy(pSrvTx->hRequestsDrained);
         AssertRC(rc2);
         pSrvTx->hRequestsDrained = NIL_RTSEMEVENTMULTI;
+
+        RTMemFree(pSrvTx->pafRootCompleted);
+        pSrvTx->pafRootCompleted = NULL;
 
         ShClTransferRelease(pSrvTx->pTransfer);
         pSrvTx->pTransfer = NULL;
@@ -381,7 +403,7 @@ DECLINLINE(PSHCLHTTPSERVERTRANSFER) shClTransferHttpServerGetTransferById(PSHCLH
     PSHCLHTTPSERVERTRANSFER pSrvTx;
     RTListForEach(&pSrv->lstTransfers, pSrvTx, SHCLHTTPSERVERTRANSFER, Node) /** @todo Slow O(n) lookup, but does it for now. */
     {
-        if (pSrvTx->idTransfer == idTransfer)
+        if (ShClTransferKeyGetTransferId(&pSrvTx->Key) == idTransfer)
             return pSrvTx;
     }
 
@@ -393,24 +415,20 @@ DECLINLINE(PSHCLHTTPSERVERTRANSFER) shClTransferHttpServerGetTransferById(PSHCLH
  *
  * @returns Pointer to HTTP server transfer if found, NULL if not found.
  * @param   pSrv                HTTP server instance.
- * @param   idSession           Service session ID to match.
- * @param   idTransfer          Transfer ID to match.
- * @param   uGeneration         Transfer generation to match.
+ * @param   pKey                Host-side transfer key to match.
  *
  * @note    Caller needs to take the server critical section.
  */
 DECLINLINE(PSHCLHTTPSERVERTRANSFER)
-shClTransferHttpServerGetTransferByKey(PSHCLHTTPSERVER pSrv, SHCLSESSIONID idSession, SHCLTRANSFERID idTransfer,
-                                       SHCLTRANSFERGEN uGeneration)
+shClTransferHttpServerGetTransferByKey(PSHCLHTTPSERVER pSrv, PCSHCLTRANSFERKEY pKey)
 {
     Assert(RTCritSectIsOwner(&pSrv->CritSect));
+    AssertPtrReturn(pKey, NULL);
 
     PSHCLHTTPSERVERTRANSFER pSrvTx;
     RTListForEach(&pSrv->lstTransfers, pSrvTx, SHCLHTTPSERVERTRANSFER, Node)
     {
-        if (   pSrvTx->idSession   == idSession
-            && pSrvTx->idTransfer == idTransfer
-            && pSrvTx->uGeneration == uGeneration)
+        if (ShClTransferKeyIsEqual(&pSrvTx->Key, pKey))
             return pSrvTx;
     }
 
@@ -478,7 +496,7 @@ DECLINLINE(PSHCLHTTPSERVERTRANSFER) shClTransferHttpGetTransferFromHandle(PSHCLH
     {
         AssertPtr(pSrvTxCur->pTransfer);
 
-        if (pSrvTxCur->pTransfer->State.uID == uHandle) /** @ŧodo We're using the transfer ID as handle for now. */
+        if (ShClTransferKeyGetTransferId(&pSrvTxCur->pTransfer->State.Key) == uHandle) /** @ŧodo We're using the transfer ID as handle for now. */
             return pSrvTxCur;
     }
 
@@ -510,6 +528,7 @@ static int shClTransferHttpRequestClose(PSHCLHTTPSERVERREQUEST pHttpReq)
     pHttpReq->hObj = NIL_SHCLOBJHANDLE;
 
     int const rc = ShClTransferObjClose(pHttpReq->pSrvTx->pTransfer, hObj);
+    pHttpReq->rcClose = rc;
     if (RT_FAILURE(rc))
         LogRel(("Shared Clipboard: Error closing HTTP request object (handle %RU64), rc=%Rrc\n", hObj, rc));
     return rc;
@@ -539,9 +558,11 @@ static DECLCALLBACK(int) shClTransferHttpBegin(PRTHTTPCALLBACKDATA pData, PRTHTT
         rc = shClHttpTransferRequestRetain(pSrvTx);
         if (RT_SUCCESS(rc))
         {
-            pHttpReq->pSrvTx = pSrvTx;
-            pHttpReq->hObj   = NIL_SHCLOBJHANDLE;
-            pReq->pvUser     = pHttpReq;
+            pHttpReq->pSrvTx  = pSrvTx;
+            pHttpReq->hObj    = NIL_SHCLOBJHANDLE;
+            pHttpReq->idxRoot = UINT64_MAX;
+            pHttpReq->rcClose = VINF_SUCCESS;
+            pReq->pvUser      = pHttpReq;
         }
     }
 
@@ -566,14 +587,28 @@ static DECLCALLBACK(int) shClTransferHttpEnd(PRTHTTPCALLBACKDATA pData, PRTHTTPS
     PSHCLHTTPSERVERREQUEST pHttpReq = (PSHCLHTTPSERVERREQUEST)pReq->pvUser;
     if (pHttpReq)
     {
+        shClTransferHttpRequestCompleted(pReq, pHttpReq);
         pReq->pvUser = NULL;
 
         int rc2 = shClTransferHttpRequestClose(pHttpReq);
         AssertRC(rc2);
 
-        shClHttpTransferRequestRelease(pHttpReq->pSrvTx);
+        PSHCLHTTPSERVERTRANSFER const pSrvTx = pHttpReq->pSrvTx;
+        bool const fCompleteTransfer = pHttpReq->fCompleteTransfer;
+        if (fCompleteTransfer)
+            shClHttpTransferRetain(pSrvTx);
+
+        shClHttpTransferRequestRelease(pSrvTx);
         pHttpReq->pSrvTx = NULL;
         RTMemFree(pHttpReq);
+
+        if (fCompleteTransfer)
+        {
+            rc2 = ShClTransferComplete(pSrvTx->pTransfer);
+            if (RT_FAILURE(rc2))
+                LogRel(("Shared Clipboard: Completing HTTP transfer %RU16 failed, rc=%Rrc\n", ShClTransferKeyGetTransferId(&pSrvTx->Key), rc2));
+            shClHttpTransferRelease(pSrvTx);
+        }
     }
 
     return VINF_SUCCESS;
@@ -673,7 +708,7 @@ static DECLCALLBACK(int) shClTransferHttpClose(PRTHTTPCALLBACKDATA pData, PRTHTT
             SHCLOBJHANDLE const hObj = pHttpReq->hObj;
             rc = shClTransferHttpRequestClose(pHttpReq);
             if (RT_SUCCESS(rc))
-                LogRel2(("Shared Clipboard: HTTP transfer %RU16 done\n", pHttpReq->pSrvTx->idTransfer));
+                LogRel2(("Shared Clipboard: HTTP transfer %RU16 done\n", ShClTransferKeyGetTransferId(&pHttpReq->pSrvTx->Key)));
             else
                 LogRel(("Shared Clipboard: Error closing HTTP transfer (handle %RU64), rc=%Rrc\n", hObj, rc));
         }
@@ -685,6 +720,53 @@ static DECLCALLBACK(int) shClTransferHttpClose(PRTHTTPCALLBACKDATA pData, PRTHTT
 
     LogFlowFuncLeaveRC(rc);
     return rc;
+}
+
+/**
+ * Commits a successfully delivered GET to its advertised root.
+ *
+ * @param   pReq                Completed HTTP request.
+ * @param   pHttpReq            Shared Clipboard request state.
+ */
+static void shClTransferHttpRequestCompleted(PRTHTTPSERVERREQ pReq, PSHCLHTTPSERVERREQUEST pHttpReq)
+{
+    RTHTTPSERVERREQRESULT Result;
+    int const rc = RTHttpServerRequestQueryResult(pReq, &Result);
+    AssertRCReturnVoid(rc);
+
+    if (   pReq->enmMethod != RTHTTPMETHOD_GET
+        || RT_FAILURE(Result.rcRequest)
+        || !(Result.fFlags & RTHTTPSERVERREQRESULT_F_BODY_COMPLETE))
+        return;
+
+    if (   !pHttpReq->fRootResolved
+        || RT_FAILURE(pHttpReq->rcClose)
+        || Result.cbBodySent != pHttpReq->cbRoot)
+        return;
+
+    PSHCLHTTPSERVERTRANSFER pSrvTx = pHttpReq->pSrvTx;
+    AssertPtrReturnVoid(pSrvTx);
+    AssertPtrReturnVoid(pSrvTx->pafRootCompleted);
+
+    shClHttpTransferLock(pSrvTx);
+
+    if (   pHttpReq->idxRoot < pSrvTx->cRoots
+        && !pSrvTx->pafRootCompleted[pHttpReq->idxRoot])
+    {
+        pSrvTx->pafRootCompleted[pHttpReq->idxRoot] = true;
+        pSrvTx->cFileRootsCompleted++;
+        Assert(pSrvTx->cFileRootsCompleted <= pSrvTx->cFileRoots);
+
+        if (   pSrvTx->fAllRootsAreFiles
+            && pSrvTx->cFileRootsCompleted == pSrvTx->cFileRoots
+            && !pSrvTx->fCompletionIssued)
+        {
+            pSrvTx->fCompletionIssued = true;
+            pHttpReq->fCompleteTransfer = true;
+        }
+    }
+
+    shClHttpTransferUnlock(pSrvTx);
 }
 
 /** @copydoc RTHTTPSERVERCALLBACKS::pfnQueryInfo */
@@ -746,7 +828,7 @@ static DECLCALLBACK(int) shClTransferHttpQueryInfo(PRTHTTPCALLBACKDATA pData,
                         Log3Func(("pszParsedPath=%s\n", pszParsedPath));
 
                         uint64_t const cRoots = ShClTransferRootsCount(pTx);
-                        for (uint32_t i = 0; i < cRoots; i++)
+                        for (uint64_t i = 0; i < cRoots; i++)
                         {
                             PCSHCLLISTENTRY pEntry = ShClTransferRootsEntryGet(pTx, i);
                             AssertPtrBreakStmt(pEntry, rc = VERR_NOT_FOUND);
@@ -766,7 +848,8 @@ static DECLCALLBACK(int) shClTransferHttpQueryInfo(PRTHTTPCALLBACKDATA pData,
                                     rc = VERR_NOT_SUPPORTED; /* Play safe by default. */
 
                                     if (   pEntry->fInfo & VBOX_SHCL_INFO_F_FSOBJINFO
-                                        && pEntry->cbInfo == sizeof(SHCLFSOBJINFO))
+                                        && pEntry->cbInfo == sizeof(SHCLFSOBJINFO)
+                                        && pEntry->pvInfo)
                                     {
                                         PCSHCLFSOBJINFO pSrcObjInfo = (PSHCLFSOBJINFO)pEntry->pvInfo;
 
@@ -777,8 +860,16 @@ static DECLCALLBACK(int) shClTransferHttpQueryInfo(PRTHTTPCALLBACKDATA pData,
 
                                         if (RTFS_IS_FILE(pSrcObjInfo->Attr.fMode))
                                         {
-                                            memcpy(pObjInfo, pSrcObjInfo, sizeof(SHCLFSOBJINFO));
-                                            rc = VINF_SUCCESS;
+                                            if (pSrcObjInfo->cbObject >= 0)
+                                            {
+                                                memcpy(pObjInfo, pSrcObjInfo, sizeof(SHCLFSOBJINFO));
+                                                pHttpReq->idxRoot       = i;
+                                                pHttpReq->cbRoot        = (uint64_t)pSrcObjInfo->cbObject;
+                                                pHttpReq->fRootResolved = true;
+                                                rc = VINF_SUCCESS;
+                                            }
+                                            else
+                                                rc = VERR_OUT_OF_RANGE;
                                         }
                                         else
                                             rc = VERR_NOT_SUPPORTED;
@@ -1215,11 +1306,11 @@ static int shClTransferHttpServerDestroyTransfer(PSHCLHTTPSERVER pSrv, PSHCLHTTP
     pSrv->cTransfers--;
 
     LogFunc(("pTransfer=%p, idSession=%RU16, idTransfer=%RU16, uGeneration=%RU64, szPath=%s -> %RU32 transfers\n",
-             pSrvTx->pTransfer, pSrvTx->idSession, pSrvTx->idTransfer, pSrvTx->uGeneration,
-             pSrvTx->szPathVirtual, pSrv->cTransfers));
+             pSrvTx->pTransfer, ShClTransferKeyGetSessionId(&pSrvTx->Key), ShClTransferKeyGetTransferId(&pSrvTx->Key),
+             pSrvTx->Key.uGeneration, pSrvTx->szPathVirtual, pSrv->cTransfers));
 
     LogRel2(("Shared Clipboard: Destroyed HTTP transfer %RU16, now %RU32 HTTP transfers total\n",
-             pSrvTx->idTransfer, pSrv->cTransfers));
+             ShClTransferKeyGetTransferId(&pSrvTx->Key), pSrv->cTransfers));
 
     /* Drop the list owner only after the registration is unreachable to new
      * requests.  Existing requests keep their own references. */
@@ -1253,15 +1344,35 @@ int ShClTransferHttpServerRegisterTransfer(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER p
     AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
     AssertReturn(ASMAtomicReadBool(&pSrv->fInitialized), VERR_WRONG_ORDER);
 
-    SHCLSESSIONID const   idSession   = ShClTransferGetSessionId(pTransfer);
-    SHCLTRANSFERID const  idTransfer  = ShClTransferGetID(pTransfer);
-    SHCLTRANSFERGEN const uGeneration = ShClTransferGetGeneration(pTransfer);
-    AssertMsgReturn(ShClTransferKeyIsValid(idSession, idTransfer, uGeneration),
+    SHCLTRANSFERKEY Key;
+    ShClTransferGetKey(pTransfer, &Key);
+    AssertMsgReturn(ShClTransferKeyIsValid(&Key),
                     ("Transfer needs a valid session/ID/generation key before HTTP registration\n"), VERR_INVALID_PARAMETER);
+    SHCLTRANSFERID const idTransfer = ShClTransferKeyGetTransferId(&Key);
 
     uint64_t const cRoots = ShClTransferRootsCount(pTransfer);
     AssertMsgReturn(cRoots  > 0, ("Transfer has no root entries\n"), VERR_INVALID_PARAMETER);
-    /** @todo Check for directories? */
+    AssertReturn(cRoots <= (uint64_t)SIZE_MAX / sizeof(bool), VERR_OUT_OF_RANGE);
+
+    uint64_t cFileRoots = 0;
+    bool fAllRootsAreFiles = true;
+    for (uint64_t i = 0; i < cRoots; i++)
+    {
+        PCSHCLLISTENTRY const pEntry = ShClTransferRootsEntryGet(pTransfer, i);
+        if (   pEntry
+            && (pEntry->fInfo & VBOX_SHCL_INFO_F_FSOBJINFO)
+            && pEntry->cbInfo == sizeof(SHCLFSOBJINFO)
+            && pEntry->pvInfo
+            && RTFS_IS_FILE(((PCSHCLFSOBJINFO)pEntry->pvInfo)->Attr.fMode)
+            && ((PCSHCLFSOBJINFO)pEntry->pvInfo)->cbObject >= 0)
+            cFileRoots++;
+        else
+            fAllRootsAreFiles = false;
+    }
+
+    bool *pafRootCompleted = (bool *)RTMemAllocZ((size_t)cRoots * sizeof(bool));
+    if (!pafRootCompleted)
+        return VERR_NO_MEMORY;
 
     shClTransferHttpServerLock(pSrv);
 
@@ -1270,7 +1381,7 @@ int ShClTransferHttpServerRegisterTransfer(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER p
     bool fDrainEventCreated   = false;
     int rc = VINF_SUCCESS;
 
-    if (shClTransferHttpServerGetTransferByKey(pSrv, idSession, idTransfer, uGeneration))
+    if (shClTransferHttpServerGetTransferByKey(pSrv, &Key))
         rc = VERR_ALREADY_EXISTS;
     else
     {
@@ -1336,13 +1447,15 @@ int ShClTransferHttpServerRegisterTransfer(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER p
 
                         if (RT_SUCCESS(rc))
                         {
-                            pSrvTx->pTransfer   = pTransfer;
-                            pSrvTx->cRefs       = 1; /* Registration list owner. */
-                            pSrvTx->cRequests   = 0;
-                            pSrvTx->fRegistered = true;
-                            pSrvTx->idSession   = idSession;
-                            pSrvTx->idTransfer  = idTransfer;
-                            pSrvTx->uGeneration = uGeneration;
+                            pSrvTx->pTransfer           = pTransfer;
+                            pSrvTx->cRefs               = 1; /* Registration list owner. */
+                            pSrvTx->cRequests           = 0;
+                            pSrvTx->cRoots              = cRoots;
+                            pSrvTx->cFileRoots          = cFileRoots;
+                            pSrvTx->pafRootCompleted    = pafRootCompleted;
+                            pSrvTx->fAllRootsAreFiles   = fAllRootsAreFiles;
+                            pSrvTx->fRegistered         = true;
+                            pSrvTx->Key                 = Key;
 
                             ShClTransferAcquire(pTransfer);
 
@@ -1352,13 +1465,15 @@ int ShClTransferHttpServerRegisterTransfer(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER p
                             shclTransferHttpServerSetStatusLocked(pSrv, SHCLHTTPSERVERSTATUS_TRANSFER_REGISTERED);
 
                             LogFunc(("pTransfer=%p, idSession=%RU16, idTransfer=%RU16, uGeneration=%RU64, szPath=%s -> %RU32 transfers\n",
-                                     pSrvTx->pTransfer, pSrvTx->idSession, pSrvTx->idTransfer, pSrvTx->uGeneration,
+                                     pSrvTx->pTransfer, ShClTransferKeyGetSessionId(&pSrvTx->Key),
+                                     ShClTransferKeyGetTransferId(&pSrvTx->Key), pSrvTx->Key.uGeneration,
                                      pSrvTx->szPathVirtual, pSrv->cTransfers));
 
                             LogRel2(("Shared Clipboard: Registered HTTP transfer %RU16, now %RU32 HTTP transfers total\n",
                                      idTransfer, pSrv->cTransfers));
 
                             pSrvTx = NULL;
+                            pafRootCompleted = NULL;
                             fCritSectInitialized = false;
                             fDrainEventCreated   = false;
                         }
@@ -1388,6 +1503,8 @@ int ShClTransferHttpServerRegisterTransfer(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER p
 
     shClTransferHttpServerUnlock(pSrv);
 
+    RTMemFree(pafRootCompleted);
+
     LogFlowFuncLeaveRC(rc);
     return rc;
 }
@@ -1411,17 +1528,16 @@ int ShClTransferHttpServerUnregisterTransfer(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER
     AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
     AssertReturn(ASMAtomicReadBool(&pSrv->fInitialized), VERR_WRONG_ORDER);
 
-    SHCLSESSIONID const   idSession   = ShClTransferGetSessionId(pTransfer);
-    SHCLTRANSFERID const  idTransfer  = ShClTransferGetID(pTransfer);
-    SHCLTRANSFERGEN const uGeneration = ShClTransferGetGeneration(pTransfer);
-    AssertReturn(ShClTransferKeyIsValid(idSession, idTransfer, uGeneration), VERR_INVALID_PARAMETER);
+    SHCLTRANSFERKEY Key;
+    ShClTransferGetKey(pTransfer, &Key);
+    AssertReturn(ShClTransferKeyIsValid(&Key), VERR_INVALID_PARAMETER);
 
     shClTransferHttpServerLock(pSrv);
 
     int rc = VINF_SUCCESS;
 
     PSHCLHTTPSERVERTRANSFER pSrvTx;
-    while ((pSrvTx = shClTransferHttpServerGetTransferByKey(pSrv, idSession, idTransfer, uGeneration)) != NULL)
+    while ((pSrvTx = shClTransferHttpServerGetTransferByKey(pSrv, &Key)) != NULL)
     {
         rc = shClTransferHttpServerDestroyTransfer(pSrv, pSrvTx);
         if (RT_SUCCESS(rc))
@@ -1475,7 +1591,7 @@ bool ShClTransferHttpServerGetTransfer(PSHCLHTTPSERVER pSrv, SHCLTRANSFERID idTr
 
     shClTransferHttpServerUnlock(pSrv);
 
-    return pTransfer;
+    return pTransfer != NULL;
 }
 
 /**
@@ -1561,14 +1677,13 @@ static char *shClTransferHttpServerGetUrlLocked(PSHCLHTTPSERVER pSrv, PSHCLHTTPS
  */
 static char *shClTransferHttpServerGetUrlForTransferA(PSHCLHTTPSERVER pSrv, PSHCLTRANSFER pTransfer, uint64_t idxEntry)
 {
-    SHCLSESSIONID const   idSession   = ShClTransferGetSessionId(pTransfer);
-    SHCLTRANSFERID const  idTransfer  = ShClTransferGetID(pTransfer);
-    SHCLTRANSFERGEN const uGeneration = ShClTransferGetGeneration(pTransfer);
-    AssertReturn(ShClTransferKeyIsValid(idSession, idTransfer, uGeneration), NULL);
+    SHCLTRANSFERKEY Key;
+    ShClTransferGetKey(pTransfer, &Key);
+    AssertReturn(ShClTransferKeyIsValid(&Key), NULL);
 
     shClTransferHttpServerLock(pSrv);
 
-    PSHCLHTTPSERVERTRANSFER pSrvTx = shClTransferHttpServerGetTransferByKey(pSrv, idSession, idTransfer, uGeneration);
+    PSHCLHTTPSERVERTRANSFER pSrvTx = shClTransferHttpServerGetTransferByKey(pSrv, &Key);
     char *pszUrl = pSrvTx ? shClTransferHttpServerGetUrlLocked(pSrv, pSrvTx, idxEntry) : NULL;
 
     shClTransferHttpServerUnlock(pSrv);

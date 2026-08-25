@@ -1,4 +1,4 @@
-/* $Id: HMR3-x86.cpp 115085 2026-08-19 13:04:31Z alexander.eichner@oracle.com $ */
+/* $Id: HMR3-x86.cpp 115114 2026-08-25 10:12:12Z alexander.eichner@oracle.com $ */
 /** @file
  * HM - Intel/AMD VM Hardware Support Manager.
  */
@@ -232,6 +232,7 @@ static int hmR3CfgVmxApicvLvlStrToEnum(PVM pVM, const char *pszVmxApicvLvl)
 }
 
 
+#if defined(RT_ARCH_AMD64)
 /**
  * Returns the string variant of the given APICv level enum.
  *
@@ -255,6 +256,7 @@ static const char *hmR3CfgVmxApicvLvlEnumToStr(HMVMXAPICVLVL enmApicvLvl)
     AssertFailed();
     return "<UNKNOWN>";
 }
+#endif
 
 
 /**
@@ -3051,7 +3053,7 @@ VMMR3DECL(bool) HMR3IsAvicEnabled(PUVM pUVM)
     PVM pVM = pUVM->pVM;
     VM_ASSERT_VALID_EXT_RETURN(pVM, false);
     PCVMCPU pVCpu0 = pVM->apCpusR3[0];
-    return pVCpu0->hm.s.svm.fUseAvic;
+    return pVCpu0->hm.s.svm.fUseAvic || pVM->hm.s.fVirtApicRegs; /** @todo This API needs to be renamed. */
 }
 
 

@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transport.cpp 115055 2026-08-17 16:40:05Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transport.cpp 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Opaque Main transport implementation.
  */
@@ -76,190 +76,6 @@ static DECLCALLBACK(int) shClSvcOpReportFormatsToGuest(SHCLCLIENTHANDLE hClient,
     int const vrc = shClSvcClientMsgAddAndWakeupClient(pClient, pMsg);
     ShClSvcClientUnlock(pClient);
     return vrc;
-}
-
-
-/**
- * Validates and retains a pending guest-data event.
- *
- * @returns VBox status code. Stale replies for expired event IDs are ignored;
- *          in that case @a ppEvent is set to NULL and VINF_SUCCESS is returned.
- * @param   hClient             Opaque client the data was received from.
- * @param   uContextId          HGCM context ID identifying the pending event.
- * @param   uFormat             Clipboard format of data received.
- * @param   ppEvent             Where to return the retained event. Must be
- *                              released with ShClEventRelease().
- *
- * @thread  Backend thread.
- */
-static DECLCALLBACK(int) shClSvcOpRetainGuestDataEvent(SHCLCLIENTHANDLE hClient, uint64_t uContextId,
-                                                              SHCLFORMAT uFormat, PSHCLEVENT *ppEvent)
-{
-    PSHCLCLIENT const pClient = (PSHCLCLIENT)hClient;
-    LogFlowFuncEnter();
-
-    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
-    AssertPtrReturn(ppEvent, VERR_INVALID_POINTER);
-    *ppEvent = NULL;
-
-    if (!ShClFormatIsValid(uFormat))
-    {
-        LogRelMax(16, ("Shared Clipboard: Rejecting guest clipboard data with invalid format %#x\n", uFormat));
-        return VERR_INVALID_PARAMETER;
-    }
-
-    SHCLSESSIONID const idSession = VBOX_SHCL_CONTEXTID_GET_SESSION(uContextId);
-    SHCLEVENTSOURCEID const idEventSource = VBOX_SHCL_CONTEXTID_GET_TRANSFER(uContextId);
-    const SHCLEVENTID idEvent = VBOX_SHCL_CONTEXTID_GET_EVENT(uContextId);
-    if (   idEvent == 0
-        || idEvent == NIL_SHCLEVENTID)
-    {
-        LogRelMax(16, ("Shared Clipboard: Rejecting guest clipboard data with invalid event %#x in context ID %#RX64\n",
-                        idEvent, uContextId));
-        return VERR_WRONG_ORDER;
-    }
-    if (   idSession != pClient->State.uSessionID
-        || idEventSource != pClient->EventSrc.uID)
-    {
-        LogRelMax(16, ("Shared Clipboard: Rejecting guest clipboard data with mismatching context ID %#RX64"
-                        " (session %#x/%#x, event source %#x/%#x)\n",
-                        uContextId, idSession, pClient->State.uSessionID,
-                        idEventSource, pClient->EventSrc.uID));
-        return VERR_INVALID_CONTEXT;
-    }
-
-    PSHCLEVENT pEvent = ShClEventSourceRetainFromId(&pClient->EventSrc, idEvent);
-    if (!RT_VALID_PTR(pEvent))
-    {
-        LogRelMax(16, ("Shared Clipboard: Ignoring late guest clipboard data for expired event %#x\n", idEvent));
-        return VINF_SUCCESS;
-    }
-    if (pEvent->uUser != uFormat)
-    {
-        LogRelMax(16, ("Shared Clipboard: Rejecting guest clipboard data format %#x for event %#x, expected %#x\n",
-                        uFormat, idEvent, pEvent->uUser));
-        ShClEventRelease(pEvent);
-        return VERR_INVALID_CONTEXT;
-    }
-
-    *ppEvent = pEvent;
-    LogFlowFuncLeaveRC(VINF_SUCCESS);
-    return VINF_SUCCESS;
-}
-
-
-/**
- * Signals a retained guest-data event with clipboard data received from the guest.
- *
- * @returns VBox status code.
- * @param   hClient             Opaque handle of the connected client.
- * @param   pEvent              Retained event to signal.
- * @param   idEvent             Event ID to use for the optional payload wrapper.
- * @param   pvData              Pointer to clipboard data received.  This can be
- *                              NULL if @a cbData is zero.
- * @param   cbData              Size (in bytes) of clipboard data received.
- *                              This can be zero.
- *
- * @thread  Backend thread.
- */
-static DECLCALLBACK(int) shClSvcOpSignalGuestDataEvent(SHCLCLIENTHANDLE hClient, PSHCLEVENT pEvent,
-                                                              SHCLEVENTID idEvent, void *pvData, uint32_t cbData)
-{
-    RT_NOREF(hClient);
-    LogFlowFuncEnter();
-
-    AssertPtrReturn(pEvent, VERR_INVALID_POINTER);
-    if (cbData > 0)
-        AssertPtrReturn(pvData, VERR_INVALID_POINTER);
-
-    /*
-     * Make a copy of the data so we can attach it to the signal.
-     *
-     * Note! We still signal the waiter should we run out of memory,
-     *       because otherwise it will be stuck waiting.
-     */
-    int vrc = VINF_SUCCESS;
-    PSHCLEVENTPAYLOAD pPayload = NULL;
-    if (cbData > 0)
-        vrc = ShClPayloadCreateDupData(idEvent, pvData, cbData, &pPayload);
-
-    /*
-     * Signal the event.
-     */
-    int vrc2 = ShClEventSignalEx(pEvent, vrc, pPayload);
-    if (RT_FAILURE(vrc2))
-    {
-        vrc = vrc2;
-        ShClPayloadDestroy(pPayload);
-        LogRel(("Shared Clipboard: Signalling of guest clipboard data to the host failed: %Rrc\n", vrc));
-    }
-
-    LogFlowFuncLeaveRC(vrc);
-    return vrc;
-}
-
-
-/**
- * Validates a guest-data reply and retains its pending event as a token.
- *
- * @returns VBox status code.
- * @param   hClient             Opaque service client receiving the reply.
- * @param   pCmdCtx             Guest command context containing the reply context ID.
- * @param   uFormat             Clipboard format carried by the reply.
- * @param   phToken             Where to return the retained token.  On success,
- *                              pass it exactly once to shClSvcOpGuestDataComplete()
- *                              or shClSvcOpGuestDataCancel().
- */
-static DECLCALLBACK(int) shClSvcOpGuestDataBegin(SHCLCLIENTHANDLE hClient, PSHCLCLIENTCMDCTX pCmdCtx,
-                                                        SHCLFORMAT uFormat, PSHCLGUESTDATATOKEN phToken)
-{
-    AssertPtrReturn(pCmdCtx, VERR_INVALID_POINTER);
-    AssertPtrReturn(phToken, VERR_INVALID_POINTER);
-    *phToken = NULL;
-    PSHCLEVENT pEvent = NULL;
-    int vrc = shClSvcOpRetainGuestDataEvent(hClient, pCmdCtx->uContextID, uFormat, &pEvent);
-    if (RT_SUCCESS(vrc) && pEvent)
-        *phToken = (SHCLGUESTDATATOKEN)pEvent;
-    return vrc;
-}
-
-
-/**
- * Signals and releases a retained guest-data reply token.
- *
- * @returns VBox status code from signalling the pending event.
- * @param   hClient             Opaque service client owning the token.
- * @param   hToken              Token returned by shClSvcOpGuestDataBegin().
- * @param   pvData              Reply data.  Optional if @a cbData is zero.
- * @param   cbData              Reply data size in bytes.
- */
-static DECLCALLBACK(int) shClSvcOpGuestDataComplete(SHCLCLIENTHANDLE hClient,
-                                                           SHCLGUESTDATATOKEN hToken,
-                                                           void const *pvData, uint32_t cbData)
-{
-    PSHCLEVENT const pEvent = (PSHCLEVENT)hToken;
-    AssertPtrReturn(pEvent, VERR_INVALID_HANDLE);
-
-    int const vrc = shClSvcOpSignalGuestDataEvent(hClient, pEvent, pEvent->idEvent,
-                                                         (void *)pvData, cbData);
-    ShClEventRelease(pEvent);
-    return vrc;
-}
-
-
-/**
- * Releases a retained guest-data reply token without signalling its event.
- *
- * @param   hClient             Opaque service client owning the token.
- * @param   hToken              Token returned by shClSvcOpGuestDataBegin().
- */
-static DECLCALLBACK(void) shClSvcOpGuestDataCancel(SHCLCLIENTHANDLE hClient,
-                                                          SHCLGUESTDATATOKEN hToken)
-{
-    RT_NOREF(hClient);
-    PSHCLEVENT const pEvent = (PSHCLEVENT)hToken;
-    AssertPtrReturnVoid(pEvent);
-    ShClEventRelease(pEvent);
 }
 
 
@@ -546,20 +362,16 @@ static DECLCALLBACK(PSHCLTRANSFER) shClSvcOpTransferGetByIdRetained(SHCLCLIENTHA
  *
  * @returns Retained transfer, or NULL if the key is stale or unknown.
  * @param   hClient             Opaque service client owning the transfer.
- * @param   idSession           Service session ID.
- * @param   idTransfer          Transfer ID.
- * @param   uGeneration         Transfer generation.
+ * @param   pKey                Host-side transfer key.
  *
  * @note    The caller must release a returned transfer with ShClTransferRelease().
  */
 static DECLCALLBACK(PSHCLTRANSFER) shClSvcOpTransferGetByKeyRetained(SHCLCLIENTHANDLE hClient,
-                                                                           SHCLSESSIONID idSession,
-                                                                           SHCLTRANSFERID idTransfer,
-                                                                           SHCLTRANSFERGEN uGeneration)
+                                                                     PCSHCLTRANSFERKEY pKey)
 {
     PSHCLCLIENT const pClient = (PSHCLCLIENT)hClient;
     AssertPtrReturn(pClient, NULL);
-    return ShClTransferCtxGetTransferByKeyRetained(&pClient->Transfers.Ctx, idSession, idTransfer, uGeneration);
+    return ShClTransferCtxGetTransferByKeyRetained(&pClient->Transfers.Ctx, pKey);
 }
 
 
@@ -596,6 +408,22 @@ static DECLCALLBACK(int) shClSvcOpTransferInit(SHCLCLIENTHANDLE hClient, PSHCLTR
 
 
 /**
+ * Reports a host-side terminal transfer status.
+ *
+ * @returns VBox status code.
+ * @param   hClient             Opaque service client owning the transfer.
+ * @param   pTransfer           Transfer whose terminal state is being reported.
+ * @param   enmStatus           Terminal transfer status.
+ * @param   rcStatus            Status-specific result code.
+ */
+static DECLCALLBACK(int) shClSvcOpTransferReportStatus(SHCLCLIENTHANDLE hClient, PSHCLTRANSFER pTransfer,
+                                                       SHCLTRANSFERSTATUS enmStatus, int rcStatus)
+{
+    return ShClSvcTransferReportStatus((PSHCLCLIENT)hClient, pTransfer, enmStatus, rcStatus);
+}
+
+
+/**
  * Destroys a service-owned transfer selected by ID.
  *
  * @param   hClient             Opaque service client owning the transfer.
@@ -615,6 +443,30 @@ static DECLCALLBACK(void) shClSvcOpTransferDestroyById(SHCLCLIENTHANDLE hClient,
 static DECLCALLBACK(void) shClSvcOpTransferDestroyAll(SHCLCLIENTHANDLE hClient)
 {
     shClSvcTransferDestroyAll((PSHCLCLIENT)hClient);
+}
+
+
+/**
+ * Reads guest object payload and reports the successful byte count to Main.
+ *
+ * @copydoc SHCLTXPROVIDERIFACE::pfnObjRead
+ */
+static DECLCALLBACK(int) shClSvcOpTransferProviderGuestObjRead(PSHCLTXPROVIDERCTX pCtx, SHCLOBJHANDLE hObj,
+                                                               void *pvData, uint32_t cbData, uint32_t fFlags,
+                                                               uint32_t *pcbRead)
+{
+    uint32_t cbRead = 0;
+    int const vrc = ShClSvcTransferIfaceGHObjRead(pCtx, hObj, pvData, cbData, fFlags, &cbRead);
+    if (RT_SUCCESS(vrc))
+    {
+        if (pcbRead)
+            *pcbRead = cbRead;
+
+        PSHCLCLIENT const pClient = (PSHCLCLIENT)pCtx->pvUser;
+        AssertPtr(pClient);
+        ShClSvcTransferReportProgress(pClient, pCtx->pTransfer, hObj, cbRead);
+    }
+    return vrc;
 }
 
 
@@ -640,7 +492,7 @@ static DECLCALLBACK(int) shClSvcOpTransferProviderInitGuest(SHCLCLIENTHANDLE hCl
     pProvider->Interface.pfnListEntryRead = ShClSvcTransferIfaceGHListEntryRead;
     pProvider->Interface.pfnObjOpen       = ShClSvcTransferIfaceGHObjOpen;
     pProvider->Interface.pfnObjClose      = ShClSvcTransferIfaceGHObjClose;
-    pProvider->Interface.pfnObjRead       = ShClSvcTransferIfaceGHObjRead;
+    pProvider->Interface.pfnObjRead       = shClSvcOpTransferProviderGuestObjRead;
     pProvider->enmSource = SHCLSOURCE_REMOTE;
     pProvider->pvUser    = pClient;
     pProvider->cbUser    = sizeof(*pClient);
@@ -657,14 +509,12 @@ static SHCLSVCOPS const s_ShClSvcOps =
     shClSvcOpReportFormatsToGuest,
     shClSvcOpReadDataFromGuestAsync,
     shClSvcOpReadDataFromGuest,
-    shClSvcOpGuestDataBegin,
-    shClSvcOpGuestDataComplete,
-    shClSvcOpGuestDataCancel,
 #ifdef VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS
     shClSvcOpTransferGetByIdRetained,
     shClSvcOpTransferGetByKeyRetained,
     shClSvcOpTransferCreate,
     shClSvcOpTransferInit,
+    shClSvcOpTransferReportStatus,
     shClSvcOpTransferDestroyById,
     shClSvcOpTransferDestroyAll,
     shClSvcOpTransferProviderInitGuest,

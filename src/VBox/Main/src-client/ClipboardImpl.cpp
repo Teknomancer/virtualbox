@@ -1,4 +1,4 @@
-/* $Id: ClipboardImpl.cpp 115055 2026-08-17 16:40:05Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardImpl.cpp 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * VirtualBox Main - Console clipboard API.
  */
@@ -426,7 +426,11 @@ Clipboard::~Clipboard()
 /**
  * Completes construction of the console clipboard object.
  *
- * @returns COM status code.
+ * @retval  S_OK                if the transfer status was accepted or safely ignored.
+ * @retval  E_INVALIDARG        if the key, source, status, result, direction, or transition is invalid.
+ * @retval  E_FAIL              if clipboard state or required transfer state is unavailable.
+ * @retval  E_OUTOFMEMORY       if a transfer record or publication cannot be allocated.
+ * @returns                     A failure status from creating or initializing the transfer's Main objects.
  */
 HRESULT Clipboard::FinalConstruct()
 {
@@ -447,7 +451,9 @@ void Clipboard::FinalRelease()
 /**
  * Initializes the console clipboard object.
  *
- * @returns COM status code.
+ * @retval  S_OK                if progress was accepted or safely ignored.
+ * @retval  E_FAIL              if clipboard state or its transfer manager is unavailable.
+ * @retval  E_OUTOFMEMORY       if a progress publication cannot be allocated.
  * @param   aParent         Parent console.
  */
 HRESULT Clipboard::init(Console *aParent)
@@ -1860,7 +1866,14 @@ HRESULT Clipboard::i_readData(ClipboardAction_T aAction,
 /**
  * Reads raw data in the requested Shared Clipboard format.
  *
- * @returns COM status code.
+ * @retval  S_OK if the requested data was returned from the cache or guest.
+ * @retval  E_POINTER if @a aSource is invalid.
+ * @retval  E_FAIL if this clipboard object is not initialized or @a uFormat
+ *          has no supported MIME type.
+ * @retval  VBOX_E_SHCL_NO_DATA if the format, Shared Clipboard service, or
+ *          connected guest clipboard client is unavailable.
+ * @retval  VBOX_E_SHCL_TOO_MUCH_DATA if the guest payload exceeds the supported size.
+ * @retval  VBOX_E_SHCL_GUEST_ERROR if reading or converting guest data fails.
  * @param   aAction         Clipboard action to read for.
  * @param   uFormat         Shared Clipboard format to read.
  * @param   aSource         Where to return the clipboard source.
@@ -1906,7 +1919,7 @@ HRESULT Clipboard::i_readDataForFormat(ClipboardAction_T aAction,
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    GuestShCl *pShCl = GuestShCl::GetInst();
     if (!pShCl)
     {
         LogFunc(("Cannot read guest clipboard data without Shared Clipboard service\n"));
@@ -2382,7 +2395,16 @@ HRESULT Clipboard::i_fireSessionInitialState(VBOXSHCLMAINCLIENTID aClientId)
 /**
  * Writes raw data to the Shared Clipboard service.
  *
- * @returns COM status code.
+ * @retval  S_OK if the data was written.
+ * @retval  E_POINTER if @a aWrittenSource is invalid.
+ * @retval  E_FAIL if this clipboard object is not initialized.
+ * @retval  VBOX_E_SHCL_NO_DATA if @a aBuffer is empty.
+ * @retval  VBOX_E_SHCL_TOO_MUCH_DATA if the source or converted payload is too large.
+ * @retval  VBOX_E_SHCL_FORMAT_NOT_SUPPORTED if @a aMimeType is unsupported.
+ * @retval  VBOX_E_SHCL_GUEST_ERROR if VRDE owns the clipboard route, the
+ *          Shared Clipboard service is unavailable, or guest format publication fails.
+ * @retval  VBOX_E_SHCL_ERROR if the client is inactive, loses clipboard
+ *          ownership, or payload conversion fails.
  * @param   aClientId       Main clipboard client ID associated with the write.
  * @param   aAction         Clipboard action to write for.
  * @param   aSource         Clipboard source.
@@ -2470,6 +2492,11 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
+    GuestShCl *pRouteShCl = GuestShCl::GetInst();
+    if (pRouteShCl && !pRouteShCl->IsNativeBackendActive())
+        return mData->mParent->setErrorBoth(VBOX_E_SHCL_GUEST_ERROR, VERR_RESOURCE_BUSY,
+                                            Console::tr("Writing shared clipboard data is unavailable while the VRDE clipboard is active"));
+
     if (!i_reportFormats(aClientId, uFormat, aSource))
         return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
     if (!i_storeDataIfCurrentClient(aClientId, aAction, aSource, aMimeType, aBuffer, uFormat))
@@ -2489,7 +2516,7 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    GuestShCl *pShCl = GuestShCl::GetInst();
     if (!pShCl)
     {
         LogFunc(("Cannot report write format to guest without Shared Clipboard service: format=%#x\n", uFormat));
@@ -2517,7 +2544,12 @@ HRESULT Clipboard::i_writeData(VBOXSHCLMAINCLIENTID aClientId,
 /**
  * Writes raw format names to the Shared Clipboard service.
  *
- * @returns COM status code.
+ * @retval  S_OK if the formats were written.
+ * @retval  E_FAIL if this clipboard object is not initialized.
+ * @retval  VBOX_E_SHCL_FORMAT_NOT_SUPPORTED if one or more MIME types are unsupported.
+ * @retval  VBOX_E_SHCL_GUEST_ERROR if VRDE owns the clipboard route, the
+ *          Shared Clipboard service is unavailable, or guest format publication fails.
+ * @retval  VBOX_E_SHCL_ERROR if the client is inactive or loses clipboard ownership.
  * @param   aClientId       Main clipboard client ID associated with the write.
  * @param   aFormats        MIME formats to write.
  */
@@ -2554,6 +2586,11 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
 
+    GuestShCl *pRouteShCl = GuestShCl::GetInst();
+    if (pRouteShCl && !pRouteShCl->IsNativeBackendActive())
+        return mData->mParent->setErrorBoth(VBOX_E_SHCL_GUEST_ERROR, VERR_RESOURCE_BUSY,
+                                            Console::tr("Writing shared clipboard formats is unavailable while the VRDE clipboard is active"));
+
     if (!i_reportFormats(aClientId, fFormats, ClipboardSource_Host, true /* fForceNotify */))
         return setError(VBOX_E_SHCL_ERROR, tr("Clipboard session client ID %RU32 is no longer active"), aClientId);
 
@@ -2567,7 +2604,7 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    GuestShCl *pShCl = GuestShCl::GetInst();
     if (!pShCl)
     {
         LogFunc(("Cannot report formats to guest without Shared Clipboard service: fFormats=%#x\n", fFormats));
@@ -2592,7 +2629,14 @@ HRESULT Clipboard::i_writeFormats(VBOXSHCLMAINCLIENTID aClientId,
 /**
  * Reports guest-owned clipboard formats to the native host clipboard endpoint.
  *
- * @returns COM status code.
+ * @retval  S_OK if the formats were published to the native host clipboard.
+ * @retval  E_FAIL if clipboard state becomes unavailable while publishing.
+ * @retval  VBOX_E_SHCL_ERROR if an argument, format object, session, service,
+ *          mode query, ownership check, or native backend operation fails.
+ * @retval  VBOX_E_SHCL_ACCESS_DENIED if the source or Shared Clipboard mode
+ *          does not permit publication to the host.
+ * @retval  VBOX_E_SHCL_NO_DATA if no formats were supplied.
+ * @retval  VBOX_E_SHCL_FORMAT_NOT_SUPPORTED if a MIME type is empty or unsupported.
  * @param   aClientId       Main clipboard client ID associated with the report.
  * @param   aAction         Clipboard action associated with the formats.
  * @param   aSource         Clipboard source. Only ClipboardSource_Guest is accepted.
@@ -2704,7 +2748,7 @@ HRESULT Clipboard::i_hostClipboardReportFormats(VBOXSHCLMAINCLIENTID aClientId,
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    GuestShCl *pShCl = GuestShCl::GetInst();
     if (!pShCl)
     {
         LogFunc(("Cannot report formats to native host clipboard without Shared Clipboard service: fFormats=%#x\n",
@@ -2917,7 +2961,15 @@ HRESULT Clipboard::i_hostClipboardProvideData(VBOXSHCLMAINCLIENTID aClientId,
 /**
  * Sets guest-owned clipboard data on the native host clipboard endpoint.
  *
- * @returns COM status code.
+ * @retval  S_OK if the data was published to the native host clipboard.
+ * @retval  E_FAIL if clipboard state becomes unavailable while publishing.
+ * @retval  VBOX_E_SHCL_ERROR if an argument, session, service, mode query,
+ *          conversion, or native backend operation fails.
+ * @retval  VBOX_E_SHCL_ACCESS_DENIED if the source or Shared Clipboard mode
+ *          does not permit publication to the host.
+ * @retval  VBOX_E_SHCL_FORMAT_NOT_SUPPORTED if the MIME type is empty or unsupported.
+ * @retval  VBOX_E_SHCL_NO_DATA if the payload is empty.
+ * @retval  VBOX_E_SHCL_TOO_MUCH_DATA if the source or converted payload is too large.
  * @param   aClientId       Main clipboard client ID associated with the data.
  * @param   aAction         Clipboard action associated with the data.
  * @param   aSource         Clipboard source. Only ClipboardSource_Guest is accepted.
@@ -3033,7 +3085,7 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    GuestShCl *pShCl = GuestShCl::GetInst();
     if (!pShCl)
     {
         LogFunc(("Cannot set native host clipboard data without Shared Clipboard service: format=%#x\n", uFormat));
@@ -3072,7 +3124,9 @@ HRESULT Clipboard::i_hostClipboardSetData(VBOXSHCLMAINCLIENTID aClientId,
 /**
  * Clears the native host clipboard endpoint.
  *
- * @returns COM status code.
+ * @retval  S_OK if the native host clipboard was cleared or its service is unavailable.
+ * @retval  E_FAIL if clipboard state becomes unavailable while clearing.
+ * @retval  VBOX_E_SHCL_ERROR if the object, session, or native backend operation fails.
  * @param   aClientId       Main clipboard client ID associated with the endpoint.
  */
 HRESULT Clipboard::i_hostClipboardClear(VBOXSHCLMAINCLIENTID aClientId)
@@ -3107,7 +3161,7 @@ HRESULT Clipboard::i_hostClipboardClear(VBOXSHCLMAINCLIENTID aClientId)
         }
     }
 
-    GuestShCl *pShCl = GuestShCl::TryGetInst();
+    GuestShCl *pShCl = GuestShCl::GetInst();
     if (!pShCl)
     {
         Log2Func(("Skipping native host clipboard clear because Shared Clipboard service is no longer available\n"));
@@ -3194,18 +3248,20 @@ HRESULT Clipboard::i_transferCancel(ULONG aTransferId)
 /**
  * Cancels a Shared Clipboard transfer using its private service key.
  *
- * @returns COM status code.
- * @param   aServiceSessionId   Service session that owns the transfer.
- * @param   aTransferId         Transfer ID to cancel.
- * @param   aGeneration         Host-private transfer generation.
+ * @retval  E_POINTER           if @a pKey is NULL.
+ * @retval  E_INVALIDARG        if @a pKey is invalid.
+ * @retval  E_FAIL              if clipboard state is unavailable.
+ * @retval  VBOX_E_IPRT_ERROR   if the HGCM cancellation request fails.
+ * @returns                     COM status code from acquiring the parent console or VM.
+ * @param   pKey                Host-side transfer key to cancel.
  */
-HRESULT Clipboard::i_transferCancel(SHCLSESSIONID aServiceSessionId, SHCLTRANSFERID aTransferId, SHCLTRANSFERGEN aGeneration)
+HRESULT Clipboard::i_transferCancel(PCSHCLTRANSFERKEY pKey)
 {
-    LogFunc(("Canceling transfer session=%RU16 id=%RU16 generation=%RU64\n", aServiceSessionId, aTransferId, aGeneration));
+    AssertPtrReturn(pKey, E_POINTER);
+    AssertReturn(ShClTransferKeyIsValid(pKey), E_INVALIDARG);
     AssertPtrReturn(mData, E_FAIL);
-    AssertReturn(aServiceSessionId != 0 && aServiceSessionId != NIL_SHCLSESSIONID, E_INVALIDARG);
-    AssertReturn(aTransferId != NIL_SHCLTRANSFERID && aTransferId > 0 && aTransferId < VBOX_SHCL_MAX_TRANSFERS - 1, E_INVALIDARG);
-    AssertReturn(aGeneration != 0 && aGeneration != NIL_SHCLTRANSFERGEN, E_INVALIDARG);
+
+    LogFunc(("Canceling transfer session=%RU16 id=%RU16 generation=%RU64\n", ShClTransferKeyGetSessionId(pKey), ShClTransferKeyGetTransferId(pKey), pKey->uGeneration));
 
     AutoCaller autoCaller(mData->mParent);
     AssertComRCReturnRC(autoCaller.hrc());
@@ -3219,20 +3275,40 @@ HRESULT Clipboard::i_transferCancel(SHCLSESSIONID aServiceSessionId, SHCLTRANSFE
         return S_OK;
 
     VBOXHGCMSVCPARM aParms[2];
-    HGCMSvcSetU64(&aParms[0], VBOX_SHCL_CONTEXTID_MAKE(aServiceSessionId, aTransferId, 0));
-    HGCMSvcSetU64(&aParms[1], aGeneration);
+    HGCMSvcSetU64(&aParms[0], pKey->uContextId);
+    HGCMSvcSetU64(&aParms[1], pKey->uGeneration);
 
     int vrc = pVMMDev->hgcmHostCall("VBoxSharedClipboard", VBOX_SHCL_HOST_FN_CANCEL, RT_ELEMENTS(aParms), aParms);
     if (RT_FAILURE(vrc))
     {
-        LogFunc(("Cancel transfer HGCM host call failed: session=%RU16, id=%RU16, generation=%RU64, vrc=%Rrc\n",
-                 aServiceSessionId, aTransferId, aGeneration, vrc));
-        LogRelMax(16, ("Shared Clipboard: Failed to cancel transfer %RU16, vrc=%Rrc\n", aTransferId, vrc));
+        LogFunc(("Cancel transfer HGCM host call failed: session=%RU16, id=%RU16, generation=%RU64, vrc=%Rrc\n", ShClTransferKeyGetSessionId(pKey), ShClTransferKeyGetTransferId(pKey), pKey->uGeneration, vrc));
+        LogRelMax(16, ("Shared Clipboard: Failed to cancel transfer %RU16, vrc=%Rrc\n", ShClTransferKeyGetTransferId(pKey), vrc));
         return mData->mParent->setErrorBoth(VBOX_E_IPRT_ERROR, vrc,
                                             Console::tr("Canceling shared clipboard transfer failed with %Rrc"), vrc);
     }
-    Log2Func(("Canceled transfer session=%RU16 id=%RU16 generation=%RU64\n", aServiceSessionId, aTransferId, aGeneration));
+    Log2Func(("Canceled transfer session=%RU16 id=%RU16 generation=%RU64\n", ShClTransferKeyGetSessionId(pKey), ShClTransferKeyGetTransferId(pKey), pKey->uGeneration));
     return S_OK;
+}
+
+
+/**
+ * Queues local transfer teardown after a service reset or backend teardown.
+ *
+ * This deliberately does not make an HGCM host call; it is itself invoked from
+ * the service extension callback.  Publications are assigned to the manager's
+ * COM-MTA worker so active API listeners never run on the callback thread.
+ */
+void Clipboard::i_resetTransfersFromService()
+{
+    ComObjPtr<ClipboardTransferManager> ptrTransfers;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (mData)
+            ptrTransfers = mData->mTransfers;
+    }
+
+    if (ptrTransfers.isNotNull())
+        ptrTransfers->i_resetFromService();
 }
 
 
@@ -3240,17 +3316,13 @@ HRESULT Clipboard::i_transferCancel(SHCLSESSIONID aServiceSessionId, SHCLTRANSFE
  * Handles a Shared Clipboard transfer lifecycle status delivered by the host service.
  *
  * @returns COM status code.
- * @param   aServiceSessionId   Service session that owns the transfer.
- * @param   aTransferId         Transfer ID that produced the status.
- * @param   aGeneration         Host-private transfer generation.
+ * @param   pKey                Host-side transfer key.
  * @param   aTransfer           Borrowed service transfer backing the data plane.
  * @param   enmShClSource       Data source recorded by the backing transfer.
  * @param   enmStatus           Transfer lifecycle status.
  * @param   vrcTransfer         Transfer status result code.
  */
-HRESULT Clipboard::i_handleTransferStatus(SHCLSESSIONID aServiceSessionId,
-                                          SHCLTRANSFERID aTransferId,
-                                          SHCLTRANSFERGEN aGeneration,
+HRESULT Clipboard::i_handleTransferStatus(PCSHCLTRANSFERKEY pKey,
                                           PSHCLTRANSFER aTransfer,
                                           SHCLSOURCE enmShClSource,
                                           SHCLTRANSFERSTATUS enmStatus,
@@ -3267,8 +3339,34 @@ HRESULT Clipboard::i_handleTransferStatus(SHCLSESSIONID aServiceSessionId,
     if (ptrTransfers.isNull())
         return E_FAIL;
 
-    return ptrTransfers->i_handleTransferStatus(aServiceSessionId, aTransferId, aGeneration, aTransfer,
-                                                enmShClSource, enmStatus, vrcTransfer);
+    return ptrTransfers->i_handleTransferStatus(pKey, aTransfer, enmShClSource, enmStatus, vrcTransfer);
+}
+
+
+/**
+ * Updates a Shared Clipboard transfer's byte progress.
+ *
+ * @returns COM status code.
+ * @param   pKey                Host-side transfer key.
+ * @param   cbProcessed         Number of bytes processed so far.
+ * @param   cbTotal             Total number of bytes to process.
+ */
+HRESULT Clipboard::i_handleTransferProgress(PCSHCLTRANSFERKEY pKey,
+                                            uint64_t cbProcessed,
+                                            uint64_t cbTotal)
+{
+    ComObjPtr<ClipboardTransferManager> ptrTransfers;
+    {
+        AutoReadLock alock(this COMMA_LOCKVAL_SRC_POS);
+        if (!mData)
+            return E_FAIL;
+        ptrTransfers = mData->mTransfers;
+    }
+
+    if (ptrTransfers.isNull())
+        return E_FAIL;
+
+    return ptrTransfers->i_handleTransferProgress(pKey, cbProcessed, cbTotal);
 }
 # endif /* VBOX_WITH_SHARED_CLIPBOARD_TRANSFERS */
 
@@ -3276,8 +3374,12 @@ HRESULT Clipboard::i_handleTransferStatus(SHCLSESSIONID aServiceSessionId,
 /**
  * Reads cached Main API clipboard data for a service data request.
  *
- * @returns COM status code. E_FAIL means no matching data is available after
- *          notifying API clients about the request.
+ * @retval  S_OK if matching cached or native host data was returned.
+ * @retval  E_POINTER if @a pcbActual is invalid, or @a pvData is invalid for
+ *          a non-empty destination buffer.
+ * @retval  E_INVALIDARG if @a uFormat is unsupported.
+ * @retval  E_FAIL if clipboard state, advertised data, the native host
+ *          provider, conversion, or the resulting data size is unsuitable.
  * @param   uFormat         Requested Shared Clipboard format.
  * @param   pvData          Destination buffer.
  * @param   cbData          Size of destination buffer.
@@ -3357,7 +3459,7 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
         && fWantRequestPayload
         && cbData)
     {
-        pShCl = GuestShCl::TryGetInst();
+        pShCl = GuestShCl::GetInst();
         if (pShCl)
         {
             fHostReadAttempted = true;
@@ -3426,7 +3528,7 @@ HRESULT Clipboard::i_readDataForGuest(uint32_t uFormat, void *pvData, uint32_t c
         }
 
         if (!pShCl)
-            pShCl = GuestShCl::TryGetInst();
+            pShCl = GuestShCl::GetInst();
         if (!pShCl)
         {
             LogFunc(("Cannot read native host data for guest request without Shared Clipboard service: format=%#x\n",
@@ -3540,9 +3642,10 @@ HRESULT Clipboard::setTransferStatus(ULONG aServiceSessionId,
             return E_INVALIDARG;
     }
 
-    HRESULT const hrc = i_handleTransferStatus((SHCLSESSIONID)aServiceSessionId,
-                                               (SHCLTRANSFERID)aTransferId,
-                                               (SHCLTRANSFERGEN)aGeneration,
+    SHCLTRANSFERKEY Key;
+    ShClTransferKeyInit(&Key, (SHCLSESSIONID)aServiceSessionId, (SHCLTRANSFERID)aTransferId,
+                        (SHCLTRANSFERGEN)aGeneration);
+    HRESULT const hrc = i_handleTransferStatus(&Key,
                                                NULL /* pTransfer */,
                                                enmShClSource,
                                                (SHCLTRANSFERSTATUS)aStatus,
@@ -4167,22 +4270,36 @@ void Clipboard::i_fireClipboardTransferEvent(VBOXSHCLMAINCLIENTID aClientId,
                                              ClipboardError_T aError)
 {
     ComPtr<IEventSource> ptrEventSource;
-    HRESULT hrc = getEventSource(ptrEventSource);
-    if (FAILED(hrc) || ptrEventSource.isNull())
+    LONG64 i64Revision;
+    std::vector<SessionEventTarget> vecTargets;
     {
-        Log3Func(("No event source for transfer event: hrc=%#x\n", hrc));
-        return;
+        /* Only retain the parent call while snapshotting COM-owned event
+         * targets.  Active listener delivery may synchronously tear down the
+         * Clipboard and therefore must not hold an AutoCaller on it. */
+        AutoCaller autoCaller(this);
+        if (FAILED(autoCaller.hrc()))
+        {
+            Log3Func(("Cannot snapshot transfer event targets: hrc=%#x\n", autoCaller.hrc()));
+            return;
+        }
+
+        HRESULT const hrc = getEventSource(ptrEventSource);
+        if (FAILED(hrc) || ptrEventSource.isNull())
+        {
+            Log3Func(("No event source for transfer event: hrc=%#x\n", hrc));
+            return;
+        }
+
+        i64Revision = i_nextEventRevision();
+        i_getSessionEventTargets(vecTargets, aClientId, true /* fPassive */, false /* fCheckReflection */,
+                                 VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
     }
 
-    LONG64 const i64Revision = i_nextEventRevision();
     Log2Func(("Firing transfer event: transfer=%p, state=%RU32, revision=%RI64, clientId=%RU32\n",
               (void *)aTransfer, (uint32_t)aState, i64Revision, aClientId));
     ::FireClipboardTransferEvent(ptrEventSource, i64Revision, aClientId, aTransfer, aState, aInteraction,
                                  Bstr(aPath).raw(), aMessage, aError);
 
-    std::vector<SessionEventTarget> vecTargets;
-    i_getSessionEventTargets(vecTargets, aClientId, true /* fPassive */, false /* fCheckReflection */,
-                             VBOX_SHCL_FMT_NONE, ClipboardSource_Custom);
     for (std::vector<SessionEventTarget>::const_iterator it = vecTargets.begin(); it != vecTargets.end(); ++it)
         ::FireClipboardTransferEvent(it->mEventSource, i64Revision, aClientId, aTransfer, aState, aInteraction,
                                      Bstr(aPath).raw(), aMessage, aError);

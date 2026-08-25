@@ -1,4 +1,4 @@
-/* $Id: VBoxSharedClipboardSvc-transfers.cpp 115060 2026-08-17 17:28:06Z andreas.loeffler@oracle.com $ */
+/* $Id: VBoxSharedClipboardSvc-transfers.cpp 115109 2026-08-25 09:04:04Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Service - Internal code for transfer (list) handling.
  */
@@ -33,6 +33,7 @@
 #include <VBox/log.h>
 
 #include <VBox/err.h>
+#include <VBox/VMMDev.h>
 
 #include <VBox/GuestHost/clipboard-helper.h>
 #include <VBox/HostServices/VBoxClipboardSvc.h>
@@ -56,23 +57,107 @@
 static int shClSvcTransferModeSet(uint32_t fMode);
 
 
+/** Captures immutable transfer status metadata while the transfer is valid. */
+static void shClSvcTransferStatusCapture(PSHCLSVCEXTTRANSFERSTATUS pStatus, PSHCLTRANSFER pTransfer,
+                                         SHCLSOURCE enmReplySource, SHCLTRANSFERSTATUS enmStatus, int rcStatus)
+{
+    AssertPtrReturnVoid(pStatus);
+    AssertPtrReturnVoid(pTransfer);
+
+    ShClTransferGetKey(pTransfer, &pStatus->Key);
+    pStatus->enmDir            = ShClTransferGetDir(pTransfer);
+    pStatus->enmTransferSource = ShClTransferGetSource(pTransfer);
+    pStatus->enmReplySource    = enmReplySource;
+    pStatus->enmStatus         = enmStatus;
+    pStatus->rcStatus          = rcStatus;
+}
+
+
 /**
- * Looks up a transfer by service-session/transfer/generation key in the active client.
+ * Applies a terminal status reported by the guest without replacing a terminal
+ * status which already won locally.
  *
- * @returns VBox status code.
- * @param   idSession           Service session ID to look up.
- * @param   idTransfer          Transfer ID to look up.
- * @param   uGeneration         Host-private transfer generation to look up.
+ * @retval  VERR_INVALID_POINTER
+ *                              if @a pTransfer or @a pfAccepted is NULL.
+ * @retval  VERR_INVALID_PARAMETER
+ *                              if the terminal status or its result code is invalid.
+ * @returns                     Status code returned by the terminal transfer-state update.
+ * @param   pTransfer           Transfer to update.
+ * @param   enmStatus          Terminal status reported by the guest.
+ * @param   rcStatus           Status-specific result code.
+ * @param   pfAccepted         Where to return whether this status won the
+ *                            terminal transition and should be published.
+ */
+static int shClSvcTransferApplyGuestTerminalStatus(PSHCLTRANSFER pTransfer, SHCLTRANSFERSTATUS enmStatus,
+                                                    int rcStatus, bool *pfAccepted)
+{
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    AssertPtrReturn(pfAccepted, VERR_INVALID_POINTER);
+    AssertReturn(   enmStatus == SHCLTRANSFERSTATUS_COMPLETED
+                 || enmStatus == SHCLTRANSFERSTATUS_CANCELED
+                 || enmStatus == SHCLTRANSFERSTATUS_KILLED
+                 || enmStatus == SHCLTRANSFERSTATUS_ERROR, VERR_INVALID_PARAMETER);
+    AssertReturn(ShClTransferStatusResultIsValid(enmStatus, rcStatus), VERR_INVALID_PARAMETER);
+
+    *pfAccepted = false;
+
+    if (ShClTransferStatusIsTerminal(ShClTransferGetStatus(pTransfer)))
+        return VINF_SUCCESS;
+
+    SHCLTRANSFERSTATUS enmNativeStatus = enmStatus;
+    int rc;
+    switch (enmStatus)
+    {
+        case SHCLTRANSFERSTATUS_COMPLETED:
+            rc = ShClTransferComplete(pTransfer);
+            break;
+
+        case SHCLTRANSFERSTATUS_CANCELED:
+            rc = ShClTransferCancel(pTransfer);
+            break;
+
+        case SHCLTRANSFERSTATUS_KILLED:
+            rc = ShClTransferKill(pTransfer);
+            enmNativeStatus = SHCLTRANSFERSTATUS_CANCELED; /* ShClTransferKill currently maps to cancellation. */
+            break;
+
+        case SHCLTRANSFERSTATUS_ERROR:
+            rc = ShClTransferError(pTransfer, rcStatus);
+            break;
+
+        default:
+            AssertFailedReturn(VERR_INVALID_PARAMETER);
+    }
+
+    SHCLTRANSFERSTATUS const enmCurrentStatus = ShClTransferGetStatus(pTransfer);
+    if (RT_SUCCESS(rc) && enmCurrentStatus == enmNativeStatus)
+        *pfAccepted = true;
+    else if (ShClTransferStatusIsTerminal(enmCurrentStatus))
+        rc = VINF_SUCCESS; /* A concurrent terminal transition won. */
+
+    return rc;
+}
+
+
+/**
+ * Looks up a transfer by its host-side key in the active client.
+ *
+ * @retval  VERR_INVALID_POINTER
+ *                              if an output pointer is NULL.
+ * @retval  VERR_INVALID_CONTEXT
+ *                              if @a pKey is invalid.
+ * @retval  VERR_SHCLPB_TRANSFER_ID_NOT_FOUND
+ *                              if the keyed transfer is not registered.
+ * @param   pKey                Host-side transfer key to look up.
  * @param   ppClient            Where to return the owning client.
  * @param   ppTransfer          Where to return the retained transfer. The caller
  *                              must release it with ShClTransferRelease().
  */
-static int shClSvcTransferFindByKey(SHCLSESSIONID idSession, SHCLTRANSFERID idTransfer, SHCLTRANSFERGEN uGeneration,
-                                    PSHCLCLIENT *ppClient, PSHCLTRANSFER *ppTransfer)
+static int shClSvcTransferFindByKey(PCSHCLTRANSFERKEY pKey, PSHCLCLIENT *ppClient, PSHCLTRANSFER *ppTransfer)
 {
     AssertPtrReturn(ppClient, VERR_INVALID_POINTER);
     AssertPtrReturn(ppTransfer, VERR_INVALID_POINTER);
-    AssertReturn(ShClTransferKeyIsValid(idSession, idTransfer, uGeneration), VERR_INVALID_CONTEXT);
+    AssertReturn(ShClTransferKeyIsValid(pKey), VERR_INVALID_CONTEXT);
 
     *ppClient   = NULL;
     *ppTransfer = NULL;
@@ -81,10 +166,9 @@ static int shClSvcTransferFindByKey(SHCLSESSIONID idSession, SHCLTRANSFERID idTr
 
     PSHCLCLIENT pClient = g_ShClSvc.pActiveClient;
     if (   pClient
-        && pClient->State.uSessionID == idSession)
+        && pClient->State.uSessionID == ShClTransferKeyGetSessionId(pKey))
     {
-        PSHCLTRANSFER pTransfer = ShClTransferCtxGetTransferByKeyRetained(&pClient->Transfers.Ctx, idSession,
-                                                                           idTransfer, uGeneration);
+        PSHCLTRANSFER pTransfer = ShClTransferCtxGetTransferByKeyRetained(&pClient->Transfers.Ctx, pKey);
         if (pTransfer)
         {
             *ppClient   = pClient;
@@ -99,56 +183,125 @@ static int shClSvcTransferFindByKey(SHCLSESSIONID idSession, SHCLTRANSFERID idTr
 
 
 /**
+ * Accounts successfully read object payload and reports exact aggregate
+ * progress to Main when an exact total is available.
+ *
+ * Progress reporting is best-effort and never changes the data-path result.
+ *
+ * @param   pClient            Service client owning the transfer.
+ * @param   pTransfer          Transfer whose payload was read.
+ * @param   hObj                Object handle whose sequential stream advanced.
+ * @param   cbDelta             Number of successfully read payload bytes.
+ */
+void ShClSvcTransferReportProgress(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer,
+                                   SHCLOBJHANDLE hObj, uint32_t cbDelta)
+{
+    AssertPtrReturnVoid(pClient);
+    AssertPtrReturnVoid(pTransfer);
+    if (!cbDelta)
+        return;
+
+    uint64_t cbProcessed;
+    uint64_t cbTotal;
+    bool fNotify;
+    int const rc = ShClTransferProgressObjAdd(pTransfer, hObj, cbDelta, &cbProcessed, &cbTotal, &fNotify);
+    if (   RT_SUCCESS(rc)
+        && fNotify
+        && cbTotal > 0)
+    {
+        SHCLSVCEXTTRANSFERPROGRESS Progress;
+        ShClTransferGetKey(pTransfer, &Progress.Key);
+        Progress.cbProcessed = cbProcessed;
+        Progress.cbTotal     = cbTotal;
+        int const rc2 = shClSvcExtNotifyTransferProgress(pClient, &Progress);
+        if (RT_FAILURE(rc2))
+            LogFlowFunc(("Reporting transfer progress failed with %Rrc\n", rc2));
+    }
+}
+
+
+/**
  * Aborts a transfer from a host request and tears it down locally.
  *
- * @returns VBox status code.
- * @param   uContextId          Context ID containing service session and transfer IDs.
- * @param   uGeneration         Host-private transfer generation to abort.
+ * Native unregistration and destruction can wait for active data consumers,
+ * so they are performed only after all service, client and transfer locks have
+ * been released.  Host cancellation itself is dispatched by Main on its
+ * existing worker pool and therefore does not block the GUI event thread.
+ *
+ * @retval  VERR_INVALID_PARAMETER
+ *                              if @a enmStatus is not a supported host abort status.
+ * @retval  VERR_INVALID_CONTEXT
+ *                              if @a pKey is invalid.
+ * @retval  VERR_SHCLPB_TRANSFER_ID_NOT_FOUND
+ *                              if the keyed transfer is not registered.
+ * @retval  VERR_WRONG_ORDER    if the transfer cannot enter the requested terminal state.
+ * @returns                     Status code returned by updating or reporting the terminal transfer state.
+ * @param   pKey                Host-side transfer key to abort.
  * @param   enmStatus           Terminal abort status to report.
  * @param   rcTransfer          Transfer result code to report.
  */
-static int shClSvcTransferAbortByHostKey(uint64_t uContextId, SHCLTRANSFERGEN uGeneration,
+static int shClSvcTransferAbortByHostKey(PCSHCLTRANSFERKEY pKey,
                                          SHCLTRANSFERSTATUS enmStatus, int rcTransfer)
 {
     AssertReturn(   enmStatus == SHCLTRANSFERSTATUS_CANCELED
                  || enmStatus == SHCLTRANSFERSTATUS_ERROR, VERR_INVALID_PARAMETER);
-    AssertReturn(VBOX_SHCL_CONTEXTID_GET_EVENT(uContextId) == 0, VERR_INVALID_CONTEXT);
-
-    SHCLSESSIONID const idSession  = VBOX_SHCL_CONTEXTID_GET_SESSION(uContextId);
-    SHCLTRANSFERID const idTransfer = VBOX_SHCL_CONTEXTID_GET_TRANSFER(uContextId);
+    AssertReturn(ShClTransferKeyIsValid(pKey), VERR_INVALID_CONTEXT);
 
     PSHCLCLIENT   pClient;
     PSHCLTRANSFER pTransfer;
-    int rc = shClSvcTransferFindByKey(idSession, idTransfer, uGeneration, &pClient, &pTransfer);
+    int rc = shClSvcTransferFindByKey(pKey, &pClient, &pTransfer);
     if (RT_FAILURE(rc))
         return rc;
-
-    ShClSvcClientLock(pClient);
 
     int rcState;
     if (enmStatus == SHCLTRANSFERSTATUS_CANCELED)
         rcState = ShClTransferCancel(pTransfer);
     else
         rcState = ShClTransferError(pTransfer, rcTransfer);
+    if (   RT_SUCCESS(rcState)
+        && ShClTransferGetStatus(pTransfer) != enmStatus)
+        rcState = VERR_WRONG_ORDER;
+
+    SHCLSVCEXTTRANSFERSTATUS Status;
+    if (RT_SUCCESS(rcState))
+        shClSvcTransferStatusCapture(&Status, pTransfer, SHCLSOURCE_LOCAL, enmStatus, rcTransfer);
 
     int rcStatus = VINF_SUCCESS;
     if (RT_SUCCESS(rcState))
+    {
+        ShClSvcClientLock(pClient);
         rcStatus = shClSvcTransferSendStatusAsync(pClient, pTransfer, enmStatus, rcTransfer, NULL /* ppEvent */);
+        ShClSvcClientUnlock(pClient);
+    }
 
-    ShClSvcClientUnlock(pClient);
+    if (   RT_SUCCESS(rcState)
+        && shClSvcExtIsRegistered())
+    {
+        int const rc2 = shClSvcExtNotifyTransferStatus(pClient, &Status);
+        if (RT_FAILURE(rc2))
+            LogFlowFunc(("Reporting host transfer abort to Main failed with %Rrc\n", rc2));
+    }
 
-    /* Drop the lookup retain before the consuming destroy waits for all users. */
+    /* Detach the exact object only after Main has synchronously consumed the
+     * pointer-free terminal snapshot. */
+    PSHCLTRANSFER pTransferDetached = NULL;
+    if (RT_SUCCESS(rcState))
+        pTransferDetached = shClSvcTransferDetach(pClient, pTransfer);
+
+    /* A consuming destroy must not wait for this lookup retain. */
     ShClTransferRelease(pTransfer);
 
-    /* The terminal status was already reported above. */
-    ShClSvcTransferDestroyByIdEx(pClient, idTransfer, false /* fNotifyGuest */);
+    if (pTransferDetached)
+        shClSvcTransferDestroyDetached(pTransferDetached);
 
-    if (RT_SUCCESS(rc))
-        rc = rcState;
-    if (RT_SUCCESS(rc))
-        rc = rcStatus;
+    if (RT_FAILURE(rcState))
+        return rcState;
 
-    return rc;
+    /* The terminal state is committed.  Guest notification is best-effort and
+     * must not make the synchronous host cancellation appear to have failed. */
+    if (RT_FAILURE(rcStatus))
+        LogFlowFunc(("Queueing transfer abort for the guest failed with %Rrc\n", rcStatus));
+    return VINF_SUCCESS;
 }
 
 
@@ -644,6 +797,44 @@ static int shClSvcTransferGetObjDataChunk(uint32_t cParms, VBOXHGCMSVCPARM aParm
 }
 
 /**
+ * Creates an event payload containing a private copy of an object data chunk.
+ *
+ * The chunk descriptor and its data are kept in one allocation so that the
+ * generic event payload destructor owns and releases the complete chunk.
+ *
+ * @returns VBox status code.
+ * @param   idEvent             Event ID to assign to the payload.
+ * @param   pDataChunk          Object data chunk to copy.
+ * @param   ppPayload           Where to return the allocated event payload.
+ */
+static int shClSvcTransferObjDataChunkPayloadCreate(SHCLEVENTID idEvent, PSHCLOBJDATACHUNK pDataChunk,
+                                                     PSHCLEVENTPAYLOAD *ppPayload)
+{
+    AssertPtrReturn(pDataChunk, VERR_INVALID_POINTER);
+    AssertPtrReturn(ppPayload, VERR_INVALID_POINTER);
+#if ARCH_BITS == 32
+    AssertReturn(pDataChunk->cbData <= SIZE_MAX - sizeof(*pDataChunk), VERR_OUT_OF_RANGE);
+#endif
+    AssertReturn(pDataChunk->cbData == 0 || pDataChunk->pvData != NULL, VERR_INVALID_POINTER);
+
+    size_t const cbPayloadData = sizeof(*pDataChunk) + pDataChunk->cbData;
+    PSHCLOBJDATACHUNK pDataChunkCopy = (PSHCLOBJDATACHUNK)RTMemAlloc(cbPayloadData);
+    if (!pDataChunkCopy)
+        return VERR_NO_MEMORY;
+
+    pDataChunkCopy->uHandle = pDataChunk->uHandle;
+    pDataChunkCopy->cbData  = pDataChunk->cbData;
+    pDataChunkCopy->pvData  = pDataChunk->cbData ? pDataChunkCopy + 1 : NULL;
+    if (pDataChunk->cbData)
+        memcpy(pDataChunkCopy->pvData, pDataChunk->pvData, pDataChunk->cbData);
+
+    int const rc = ShClPayloadCreate(idEvent, pDataChunkCopy, (uint32_t)sizeof(*pDataChunkCopy), ppPayload);
+    if (RT_FAILURE(rc))
+        RTMemFree(pDataChunkCopy);
+    return rc;
+}
+
+/**
  * Handles a guest reply (VBOX_SHCL_GUEST_FN_REPLY) message.
  *
  * @returns VBox status code.
@@ -654,12 +845,17 @@ static int shClSvcTransferGetObjDataChunk(uint32_t cParms, VBOXHGCMSVCPARM aParm
  * @param   fZeroContext        Whether the guest supplied the special zero context ID.
  * @param   pfDestroyTransfer   Where to return whether the caller must destroy
  *                              the retained transfer after releasing it.
+ * @param   pStatus             Where to return a status snapshot for subsequent
+ *                              Main delivery, or NONE when there is none.
  */
 static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer, uint32_t cParms,
-                                         VBOXHGCMSVCPARM aParms[], bool fZeroContext, bool *pfDestroyTransfer)
+                                         VBOXHGCMSVCPARM aParms[], bool fZeroContext, bool *pfDestroyTransfer,
+                                         PSHCLSVCEXTTRANSFERSTATUS pStatus)
 {
     AssertPtrReturn(pfDestroyTransfer, VERR_INVALID_POINTER);
+    AssertPtrReturn(pStatus, VERR_INVALID_POINTER);
     *pfDestroyTransfer = false;
+    RT_ZERO(*pStatus);
 
     LogFlowFunc(("pTransfer=%p\n", pTransfer));
 
@@ -711,6 +907,8 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                 {
                     case VBOX_SHCL_TX_REPLYMSGTYPE_TRANSFER_STATUS:
                     {
+                        bool fCaptureTransferStatus = true;
+
                         LogRel2(("Shared Clipboard: Guest reported status %s for transfer %RU16\n",
                                  ShClTransferStatusToStr(pReply->u.TransferStatus.uStatus), idTransfer));
 
@@ -804,56 +1002,37 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                             }
 
                             case SHCLTRANSFERSTATUS_CANCELED:
-                                RT_FALL_THROUGH();
                             case SHCLTRANSFERSTATUS_KILLED:
-                            {
-                                LogRel2(("Shared Clipboard: Guest has %s transfer %RU16\n",
-                                         pReply->u.TransferStatus.uStatus == SHCLTRANSFERSTATUS_CANCELED ? "canceled" : "killed", idTransfer));
-
-                                switch (pReply->u.TransferStatus.uStatus)
-                                {
-                                    case SHCLTRANSFERSTATUS_CANCELED:
-                                        rc = ShClTransferCancel(pTransfer);
-                                        break;
-
-                                    case SHCLTRANSFERSTATUS_KILLED:
-                                        rc = ShClTransferKill(pTransfer);
-                                        break;
-
-                                    default:
-                                        AssertFailed();
-                                        break;
-                                }
-
-                                break;
-                            }
-
                             case SHCLTRANSFERSTATUS_COMPLETED:
-                            {
-                                LogRel2(("Shared Clipboard: Guest has completed transfer %RU16\n", idTransfer));
-
-                                rc = ShClTransferComplete(pTransfer);
-                                break;
-                            }
-
                             case SHCLTRANSFERSTATUS_ERROR:
                             {
-                                LogRelMax(16, ("Shared Clipboard: Guest reported error %Rrc for transfer %RU16\n",
-                                               pReply->rc, pTransfer->State.uID));
-
-                                if (shClSvcExtIsRegistered())
+                                bool fAccepted = false;
+                                rc = shClSvcTransferApplyGuestTerminalStatus(pTransfer,
+                                                                             pReply->u.TransferStatus.uStatus,
+                                                                             pReply->rc, &fAccepted);
+                                fCaptureTransferStatus = fAccepted;
+                                if (fAccepted)
                                 {
-                                    char *pszMsg = RTStrAPrintf2("Guest reported error %Rrc for transfer %RU16", /** @todo Make the error messages more fine-grained based on rc. */
-                                                                 pReply->rc, pTransfer->State.uID);
-                                    AssertPtrBreakStmt(pszMsg, rc = VERR_NO_MEMORY);
+                                    if (pReply->u.TransferStatus.uStatus == SHCLTRANSFERSTATUS_ERROR)
+                                    {
+                                        LogRelMax(16, ("Shared Clipboard: Guest reported error %Rrc for transfer %RU16\n",
+                                                       pReply->rc, ShClTransferKeyGetTransferId(&pTransfer->State.Key)));
 
-                                    (void) shClSvcExtReportError(NULL, pszMsg, pReply->rc);
+                                        if (shClSvcExtIsRegistered())
+                                        {
+                                            char *pszMsg = RTStrAPrintf2("Guest reported error %Rrc for transfer %RU16", /** @todo Make the error messages more fine-grained based on rc. */
+                                                                         pReply->rc, ShClTransferKeyGetTransferId(&pTransfer->State.Key));
+                                            AssertPtrBreakStmt(pszMsg, rc = VERR_NO_MEMORY);
 
-                                    RTStrFree(pszMsg);
-                                    pszMsg = NULL;
+                                            shClSvcExtReportError(NULL, pszMsg, pReply->rc);
+
+                                            RTStrFree(pszMsg);
+                                        }
+                                    }
+                                    else
+                                        LogRel2(("Shared Clipboard: Guest has %s transfer %RU16\n",
+                                                 ShClTransferStatusToStr(pReply->u.TransferStatus.uStatus), idTransfer));
                                 }
-
-                                rc = ShClTransferError(pTransfer, pReply->rc);
                                 break;
                             }
 
@@ -866,13 +1045,12 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                             }
                         }
 
-                        /* Notify the service extension. */
-                        if (shClSvcExtIsRegistered())
-                        {
-                            int rc2 = shClSvcExtNotifyTransferStatus(pClient, pTransfer, SHCLSOURCE_REMOTE, pReply);
-                            if (RT_SUCCESS(rc))
-                                rc = rc2;
-                        }
+                        if (   pTransfer
+                            && fCaptureTransferStatus
+                            && pReply->u.TransferStatus.uStatus != SHCLTRANSFERSTATUS_NONE
+                            && ShClTransferStatusResultIsValid(pReply->u.TransferStatus.uStatus, (int)pReply->rc))
+                            shClSvcTransferStatusCapture(pStatus, pTransfer, SHCLSOURCE_REMOTE,
+                                                         pReply->u.TransferStatus.uStatus, (int)pReply->rc);
                         RT_FALL_THROUGH(); /* Make sure to also signal any waiters by using the block down below. */
                     }
                     case VBOX_SHCL_TX_REPLYMSGTYPE_LIST_OPEN:
@@ -887,8 +1065,8 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                         rc = HGCMSvcGetU64(&aParms[0], &uCID);
                         if (RT_SUCCESS(rc))
                         {
-                            const PSHCLEVENT pEvent
-                                = ShClEventSourceGetFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
+                            PSHCLEVENT pEvent
+                                = ShClEventSourceRetainFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
                             if (pEvent)
                             {
                                 LogFlowFunc(("uCID=%RU64 -> idEvent=%RU32, rcReply=%Rrc\n", uCID, pEvent->idEvent, pReply->rc));
@@ -899,6 +1077,8 @@ static int shClSvcTransferMsgHandleReply(PSHCLCLIENT pClient, PSHCLTRANSFER pTra
                                     pPayload = NULL; /* The event owns the payload now. */
                                     pReply   = NULL; /* The payload owns the reply now. */
                                 }
+
+                                ShClEventRelease(pEvent);
                             }
                         }
                         break;
@@ -1048,12 +1228,15 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
 
     rc = VERR_INVALID_PARAMETER; /* Play safe. */
     bool fDestroyTransfer = false;
+    SHCLSVCEXTTRANSFERSTATUS Status;
+    RT_ZERO(Status);
 
     switch (u32Function)
     {
         case VBOX_SHCL_GUEST_FN_REPLY:
         {
-            rc = shClSvcTransferMsgHandleReply(pClient, pTransfer, cParms, aParms, fZeroContext, &fDestroyTransfer);
+            rc = shClSvcTransferMsgHandleReply(pClient, pTransfer, cParms, aParms, fZeroContext,
+                                                &fDestroyTransfer, &Status);
             break;
         }
 
@@ -1088,7 +1271,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                 void    *pvData = ShClTransferListHdrDup(&lstHdr);
                 uint32_t cbData = sizeof(SHCLLISTHDR);
 
-                const PSHCLEVENT pEvent = ShClEventSourceGetFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
+                PSHCLEVENT pEvent
+                    = ShClEventSourceRetainFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
                 if (pEvent)
                 {
                     PSHCLEVENTPAYLOAD pPayload;
@@ -1099,6 +1283,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                         if (RT_FAILURE(rc))
                             ShClPayloadDestroy(pPayload);
                     }
+
+                    ShClEventRelease(pEvent);
                 }
                 else
                     rc = VERR_SHCLPB_EVENT_ID_NOT_FOUND;
@@ -1158,7 +1344,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                 void    *pvData = ShClTransferListEntryDup(&lstEntry);
                 uint32_t cbData = sizeof(SHCLLISTENTRY);
 
-                const PSHCLEVENT pEvent = ShClEventSourceGetFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
+                PSHCLEVENT pEvent
+                    = ShClEventSourceRetainFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
                 if (pEvent)
                 {
                     PSHCLEVENTPAYLOAD pPayload;
@@ -1169,6 +1356,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                         if (RT_FAILURE(rc))
                             ShClPayloadDestroy(pPayload);
                     }
+
+                    ShClEventRelease(pEvent);
                 }
                 else
                     rc = VERR_SHCLPB_EVENT_ID_NOT_FOUND;
@@ -1240,7 +1429,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                     void    *pvData = ShClTransferListHdrDup(&hdrList);
                     uint32_t cbData = sizeof(SHCLLISTHDR);
 
-                    const PSHCLEVENT pEvent = ShClEventSourceGetFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
+                    PSHCLEVENT pEvent
+                        = ShClEventSourceRetainFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
                     if (pEvent)
                     {
                         PSHCLEVENTPAYLOAD pPayload;
@@ -1251,6 +1441,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                             if (RT_FAILURE(rc))
                                 ShClPayloadDestroy(pPayload);
                         }
+
+                        ShClEventRelease(pEvent);
                     }
                     else
                         rc = VERR_SHCLPB_EVENT_ID_NOT_FOUND;
@@ -1293,7 +1485,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                     void    *pvData = ShClTransferListEntryDup(&entryList);
                     uint32_t cbData = sizeof(SHCLLISTENTRY);
 
-                    const PSHCLEVENT pEvent = ShClEventSourceGetFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
+                    PSHCLEVENT pEvent
+                        = ShClEventSourceRetainFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
                     if (pEvent)
                     {
                         PSHCLEVENTPAYLOAD pPayload;
@@ -1304,6 +1497,8 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                             if (RT_FAILURE(rc))
                                 ShClPayloadDestroy(pPayload);
                         }
+
+                        ShClEventRelease(pEvent);
                     }
                     else
                         rc = VERR_SHCLPB_EVENT_ID_NOT_FOUND;
@@ -1376,11 +1571,15 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
 
             LogFlowFunc(("hObj=%RU64, cbBuf=%RU32, cbToRead=%RU32, rc=%Rrc\n", hObj, cbBuf, cbToRead, rc));
 
+            /* Windows Guest Additions through 7.2.16 forward a complete
+             * IStream::Read as one OBJ_READ.  Permit it only within the HGCM
+             * limit and split it into provider-sized chunks. */
             if (   RT_SUCCESS(rc)
-                && (   !cbBuf
+                && (   !pvBuf
+                    || !cbBuf
                     || !cbToRead
                     ||  cbBuf < cbToRead
-                    ||  cbToRead > pTransfer->cbMaxChunkSize
+                    ||  cbToRead > VBOX_SHCL_MAX_CHUNK_SIZE
                    )
                )
             {
@@ -1389,11 +1588,27 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
 
             if (RT_SUCCESS(rc))
             {
-                uint32_t cbRead;
-                rc = ShClTransferObjRead(pTransfer, hObj, pvBuf, cbToRead, 0 /* fFlags */, &cbRead);
+                uint32_t cbRead = 0;
+                while (cbRead < cbToRead)
+                {
+                    uint32_t const cbToReadChunk = RT_MIN(cbToRead - cbRead, pTransfer->cbMaxChunkSize);
+                    uint32_t       cbReadChunk   = 0;
+                    rc = ShClTransferObjRead(pTransfer, hObj, (uint8_t *)pvBuf + cbRead, cbToReadChunk,
+                                             0 /* fFlags */, &cbReadChunk);
+                    if (RT_FAILURE(rc))
+                        break;
+
+                    AssertBreakStmt(cbReadChunk <= cbToReadChunk, rc = VERR_TOO_MUCH_DATA);
+
+                    cbRead += cbReadChunk;
+                    if (cbReadChunk < cbToReadChunk)
+                        break;
+                }
+
                 if (RT_SUCCESS(rc))
                 {
                     HGCMSvcSetU32(&aParms[2], cbRead);
+                    ShClSvcTransferReportProgress(pClient, pTransfer, hObj, cbRead);
 
                     /** @todo Implement checksum support. */
                 }
@@ -1411,20 +1626,20 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
                 rc = VERR_BUFFER_OVERFLOW;
             if (RT_SUCCESS(rc))
             {
-                void    *pvData = ShClTransferObjDataChunkDup(&dataChunk);
-                uint32_t cbData = sizeof(SHCLOBJDATACHUNK);
-
-                const PSHCLEVENT pEvent = ShClEventSourceGetFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
+                PSHCLEVENT pEvent
+                    = ShClEventSourceRetainFromId(&pTransfer->Events, VBOX_SHCL_CONTEXTID_GET_EVENT(uCID));
                 if (pEvent)
                 {
                     PSHCLEVENTPAYLOAD pPayload;
-                    rc = ShClPayloadCreateDupData(pEvent->idEvent, pvData, cbData, &pPayload);
+                    rc = shClSvcTransferObjDataChunkPayloadCreate(pEvent->idEvent, &dataChunk, &pPayload);
                     if (RT_SUCCESS(rc))
                     {
                         rc = ShClEventSignal(pEvent, pPayload);
                         if (RT_FAILURE(rc))
                             ShClPayloadDestroy(pPayload);
                     }
+
+                    ShClEventRelease(pEvent);
                 }
                 else
                     rc = VERR_SHCLPB_EVENT_ID_NOT_FOUND;
@@ -1437,6 +1652,15 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
             rc = VERR_NOT_IMPLEMENTED;
             break;
     }
+
+    /* Cancellation may signal and retire a transfer event before the guest's
+     * in-flight producer reaches us.  The terminal status already won in that
+     * case, so a late reply must not synthesize a second ERROR transition. */
+    if (   pTransfer
+        && (   rc == VERR_WRONG_ORDER
+            || rc == VERR_SHCLPB_EVENT_ID_NOT_FOUND)
+        && ShClTransferStatusIsTerminal(ShClTransferGetStatus(pTransfer)))
+        rc = VINF_SUCCESS;
 
     /* If anything wrong has happened, make sure to unregister the transfer again (if not done already) and tell the guest. */
     if (   RT_FAILURE(rc)
@@ -1451,6 +1675,10 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
 
         ShClSvcClientUnlock(pClient);
 
+        /* Replace a previously captured non-terminal reply with the terminal
+         * failure which actually ends this transfer. */
+        shClSvcTransferStatusCapture(&Status, pTransfer, SHCLSOURCE_LOCAL,
+                                     SHCLTRANSFERSTATUS_ERROR, rc);
         fDestroyTransfer = true;
     }
 
@@ -1459,6 +1687,13 @@ int ShClSvcTransferMsgClientHandler(PSHCLCLIENT pClient,
         /* A consuming destroy cannot wait while this handler retains the transfer. */
         ShClTransferRelease(pTransfer);
         pTransfer = NULL;
+    }
+    if (   Status.enmStatus != SHCLTRANSFERSTATUS_NONE
+        && shClSvcExtIsRegistered())
+    {
+        int const rc2 = shClSvcExtNotifyTransferStatus(pClient, &Status);
+        if (RT_FAILURE(rc2))
+            LogFlowFunc(("Reporting guest transfer status to Main failed with %Rrc\n", rc2));
     }
     if (fDestroyTransfer)
         ShClSvcTransferDestroyById(pClient, idTransfer);
@@ -1503,14 +1738,13 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
                 rc = VERR_INVALID_PARAMETER;
             else
             {
-                uint64_t uContextId;
-                rc = HGCMSvcGetU64(&aParms[0], &uContextId);
+                SHCLTRANSFERKEY Key = SHCLTRANSFERKEY_INITIALIZER;
+                rc = HGCMSvcGetU64(&aParms[0], &Key.uContextId);
                 if (RT_SUCCESS(rc))
                 {
-                    uint64_t uGeneration;
-                    rc = HGCMSvcGetU64(&aParms[1], &uGeneration);
+                    rc = HGCMSvcGetU64(&aParms[1], &Key.uGeneration);
                     if (RT_SUCCESS(rc))
-                        rc = shClSvcTransferAbortByHostKey(uContextId, uGeneration,
+                        rc = shClSvcTransferAbortByHostKey(&Key,
                                                            SHCLTRANSFERSTATUS_CANCELED, VERR_CANCELLED);
                 }
             }
@@ -1523,12 +1757,11 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
                 rc = VERR_INVALID_PARAMETER;
             else
             {
-                uint64_t uContextId;
-                rc = HGCMSvcGetU64(&aParms[0], &uContextId);
+                SHCLTRANSFERKEY Key = SHCLTRANSFERKEY_INITIALIZER;
+                rc = HGCMSvcGetU64(&aParms[0], &Key.uContextId);
                 if (RT_SUCCESS(rc))
                 {
-                    uint64_t uGeneration;
-                    rc = HGCMSvcGetU64(&aParms[1], &uGeneration);
+                    rc = HGCMSvcGetU64(&aParms[1], &Key.uGeneration);
                     if (RT_SUCCESS(rc))
                     {
                         uint32_t uRcTransfer;
@@ -1538,7 +1771,7 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
                             int const rcTransfer = (int32_t)uRcTransfer;
                             if (   RT_FAILURE(rcTransfer)
                                 && rcTransfer != VERR_CANCELLED)
-                                rc = shClSvcTransferAbortByHostKey(uContextId, uGeneration,
+                                rc = shClSvcTransferAbortByHostKey(&Key,
                                                                    SHCLTRANSFERSTATUS_ERROR, rcTransfer);
                             else
                                 rc = VERR_INVALID_PARAMETER;
@@ -1567,7 +1800,7 @@ int ShClSvcTransferMsgHostHandler(uint32_t u32Function,
  */
 int ShClSvcTransferStart(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
 {
-    LogRel2(("Shared Clipboard: Starting transfer %RU16 ...\n", pTransfer->State.uID));
+    LogRel2(("Shared Clipboard: Starting transfer %RU16 ...\n", ShClTransferKeyGetTransferId(&pTransfer->State.Key)));
 
     ShClSvcClientLock(pClient);
 
@@ -1586,6 +1819,91 @@ int ShClSvcTransferStart(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
     return rc;
 }
 
+
+/**
+ * Reports a host-side terminal transfer status to the guest and Main.
+ *
+ * The transfer has already entered the terminal state.  This function only
+ * publishes that state and deliberately leaves transfer destruction to the
+ * normal lifecycle owner.
+ *
+ * @returns VBox status code from queuing the guest status.
+ * @param   pClient            Service client owning the transfer.
+ * @param   pTransfer          Transfer whose terminal state is being reported.
+ * @param   enmStatus          Terminal transfer status.
+ * @param   rcStatus           Status-specific result code.
+ */
+int ShClSvcTransferReportStatus(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer,
+                                SHCLTRANSFERSTATUS enmStatus, int rcStatus)
+{
+    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    AssertReturn(ShClTransferStatusIsTerminal(enmStatus), VERR_INVALID_PARAMETER);
+    AssertReturn(ShClTransferStatusResultIsValid(enmStatus, rcStatus), VERR_INVALID_PARAMETER);
+    AssertReturn(ShClTransferGetStatus(pTransfer) == enmStatus, VERR_WRONG_ORDER);
+
+    SHCLTRANSFERKEY Key;
+    ShClTransferGetKey(pTransfer, &Key);
+    PSHCLTRANSFER const pRegisteredTransfer = ShClTransferCtxGetTransferByKeyRetained(&pClient->Transfers.Ctx, &Key);
+    if (pRegisteredTransfer != pTransfer)
+    {
+        if (pRegisteredTransfer)
+            ShClTransferRelease(pRegisteredTransfer);
+        return VERR_INVALID_CONTEXT;
+    }
+
+    SHCLSVCEXTTRANSFERSTATUS Status;
+    shClSvcTransferStatusCapture(&Status, pTransfer, SHCLSOURCE_LOCAL, enmStatus, rcStatus);
+
+    /* Main owns the user-visible lifecycle record, so publish there before
+     * making the terminal status visible to the guest.  Otherwise the guest
+     * can acknowledge the terminal message on the HGCM service thread and
+     * detach this transfer before the native backend thread reaches Main. */
+    if (shClSvcExtIsRegistered())
+    {
+        int const rc2 = shClSvcExtNotifyTransferStatus(pClient, &Status);
+        if (RT_FAILURE(rc2))
+            LogFlowFunc(("Reporting host transfer status to Main failed with %Rrc\n", rc2));
+    }
+
+    ShClSvcClientLock(pClient);
+    int const rc = shClSvcTransferSendStatusAsync(pClient, pTransfer, enmStatus, rcStatus, NULL /* ppEvent */);
+    ShClSvcClientUnlock(pClient);
+
+    ShClTransferRelease(pRegisteredTransfer);
+    return rc;
+}
+
+
+/**
+ * Reports a terminal transfer status to Main after the native transfer was detached.
+ *
+ * The caller owns the detached transfer until this function returns.  The
+ * immutable generation key prevents a delayed detached status from matching a
+ * newer Main record which reuses the transfer ID.
+ *
+ * @returns VBox status code from reporting the status to Main.
+ * @param   pClient            Service client which owned the transfer.
+ * @param   pTransfer          Detached transfer whose metadata remains valid.
+ * @param   enmStatus          Terminal transfer status.
+ * @param   rcStatus           Status-specific result code.
+ */
+int ShClSvcTransferReportDetachedStatus(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer,
+                                        SHCLTRANSFERSTATUS enmStatus, int rcStatus)
+{
+    AssertPtrReturn(pClient, VERR_INVALID_POINTER);
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+    AssertReturn(ShClTransferStatusIsTerminal(enmStatus), VERR_INVALID_PARAMETER);
+    AssertReturn(ShClTransferStatusResultIsValid(enmStatus, rcStatus), VERR_INVALID_PARAMETER);
+
+    if (!shClSvcExtIsRegistered())
+        return VINF_SUCCESS;
+
+    SHCLSVCEXTTRANSFERSTATUS Status;
+    shClSvcTransferStatusCapture(&Status, pTransfer, SHCLSOURCE_LOCAL, enmStatus, rcStatus);
+    return shClSvcExtNotifyTransferDetachedStatus(pClient, &Status);
+}
+
 /**
  * Returns the current host service file transfer mode.
  *
@@ -1594,6 +1912,28 @@ int ShClSvcTransferStart(PSHCLCLIENT pClient, PSHCLTRANSFER pTransfer)
 uint32_t shClSvcTransferModeGet(void)
 {
     return ASMAtomicReadU32(&g_ShClSvc.fTransferMode);
+}
+
+
+/**
+ * Detaches all native transfers while the client pointer is stable.
+ *
+ * Potentially blocking native unregistration remains deferred to
+ * shClSvcTransferDestroyDetachedAll() after the caller releases the service lock.
+ *
+ * @param   pClient             Stable active client to reset.
+ * @param   pList               Destination list for detached transfers.
+ *
+ * @note    The service lock must be held by the caller.
+ * @note    The caller must notify Main of the reset after releasing the service lock.
+ */
+void shClSvcTransferResetAllLocked(PSHCLCLIENT pClient, PRTLISTANCHOR pList)
+{
+    Assert(RTCritSectIsOwner(&g_ShClSvc.CritSect));
+    AssertPtrReturnVoid(pClient);
+    AssertPtrReturnVoid(pList);
+
+    shClSvcTransferDetachAll(pClient, pList);
 }
 
 /**
@@ -1623,18 +1963,29 @@ static int shClSvcTransferModeSet(uint32_t fMode)
 
     RTLISTANCHOR ListDestroy;
     RTListInit(&ListDestroy);
+    bool fNotifyReset = false;
 
     /* If file transfers are being disabled, detach all pending transfers from
      * the active client while its weak pointer is stable. */
     if (!(fMode & VBOX_SHCL_TRANSFER_MODE_F_ENABLED))
     {
         if (pClient)
-            shClSvcTransferDetachAll(pClient, &ListDestroy);
+        {
+            shClSvcTransferResetAllLocked(pClient, &ListDestroy);
+            fNotifyReset = true;
+        }
     }
 
     LogFlowFuncLeaveRC(VINF_SUCCESS);
     shClSvcUnlock();
 
+    if (   fNotifyReset
+        && shClSvcExtIsRegistered())
+    {
+        int const rc2 = shClSvcExtNotifyTransferReset(pClient);
+        if (RT_FAILURE(rc2))
+            LogFlowFunc(("Reporting the transfer reset to Main failed with %Rrc\n", rc2));
+    }
     shClSvcTransferDestroyDetachedAll(&ListDestroy);
 
     return VINF_SUCCESS;

@@ -1,4 +1,4 @@
-/* $Id: ClipboardDataObjectImpl-win.cpp 115055 2026-08-17 16:40:05Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardDataObjectImpl-win.cpp 115103 2026-08-21 11:25:07Z andreas.loeffler@oracle.com $ */
 /** @file
  * ClipboardDataObjectImpl-win.cpp - Shared Clipboard IDataObject implementation.
  */
@@ -66,9 +66,11 @@ ShClWinDataObject::ShClWinDataObject(void)
     , m_pFormatEtc(NULL)
     , m_pStgMedium(NULL)
     , m_pTransfer(NULL)
-    , m_uObjIdx(0)
+    , m_cFileEntries(0)
+    , m_cFileEntriesCompleted(0)
     , m_fCritSectInitialized(false)
     , m_fCallbacksEnabled(false)
+    , m_fTransferEndReported(false)
     , m_cCallbacks(0)
     , m_hCallbackThread(NIL_RTNATIVETHREAD)
     , m_EventCallbacksDrained(NIL_RTSEMEVENTMULTI)
@@ -77,6 +79,7 @@ ShClWinDataObject::ShClWinDataObject(void)
     , m_cfFileDescriptorA(0)
     , m_cfFileDescriptorW(0)
     , m_cfFileContents(0)
+    , m_cfPreferredDropEffect(0)
     , m_cfPerformedDropEffect(0)
 {
 #ifdef VBOX_SHARED_CLIPBOARD_DEBUG_OBJECT_COUNTS
@@ -127,7 +130,7 @@ int ShClWinDataObject::Init(PSHCLCONTEXT pCtx, ShClWinDataObject::PCALLBACKS pCa
     /*
      * Set up / register handled formats.
      */
-    const ULONG cFixedFormats = 5; /* CF_UNICODETEXT + CFSTR_FILEDESCRIPTORA + CFSTR_FILEDESCRIPTORW + CFSTR_FILECONTENTS + CFSTR_PERFORMEDDROPEFFECT */
+    const ULONG cFixedFormats = 5; /* CF_UNICODETEXT + CFSTR_FILEDESCRIPTORA + CFSTR_FILEDESCRIPTORW + CFSTR_FILECONTENTS + CFSTR_PREFERREDDROPEFFECT */
     const ULONG cAllFormats   = cFormats + cFixedFormats;
 
     m_pFormatEtc = new FORMATETC[cAllFormats];
@@ -159,10 +162,14 @@ int ShClWinDataObject::Init(PSHCLCONTEXT pCtx, ShClWinDataObject::PCALLBACKS pCa
     m_cfFileContents = RegisterClipboardFormat(CFSTR_FILECONTENTS);
     registerFormat(&m_pFormatEtc[uIdx++], m_cfFileContents, TYMED_ISTREAM, 0 /* lIndex */);
 
-    /* We want to know from the target what the outcome of the operation was to react accordingly (e.g. abort a transfer). */
+    /* Tell the target that the source offers a copy operation. */
+    LogFlowFunc(("Registering CFSTR_PREFERREDDROPEFFECT ...\n"));
+    m_cfPreferredDropEffect = RegisterClipboardFormat(CFSTR_PREFERREDDROPEFFECT);
+    registerFormat(&m_pFormatEtc[uIdx++], m_cfPreferredDropEffect, TYMED_HGLOBAL, -1 /* lIndex */, DVASPECT_CONTENT);
+
+    /* The target uses SetData with this format to report the operation it actually performed. */
     LogFlowFunc(("Registering CFSTR_PERFORMEDDROPEFFECT ...\n"));
     m_cfPerformedDropEffect = RegisterClipboardFormat(CFSTR_PERFORMEDDROPEFFECT);
-    registerFormat(&m_pFormatEtc[uIdx++], m_cfPerformedDropEffect, TYMED_HGLOBAL, -1 /* lIndex */, DVASPECT_CONTENT);
 
     /*
      * Registration of dynamic formats needed?
@@ -349,6 +356,9 @@ void ShClWinDataObject::Destroy(void)
         ++itRoot;
     }
     m_lstEntries.clear();
+    m_afObjCompleted.clear();
+    m_cFileEntries          = 0;
+    m_cFileEntriesCompleted = 0;
 }
 
 
@@ -424,7 +434,7 @@ int ShClWinDataObject::copyToHGlobal(const void *pvData, size_t cbData, UINT fFl
     return VERR_ACCESS_DENIED;
 }
 
-inline int ShClWinDataObject::lock(void)
+int ShClWinDataObject::lock(void)
 {
     int rc = RTCritSectEnter(&m_CritSect);
     AssertRCReturn(rc, rc);
@@ -432,7 +442,7 @@ inline int ShClWinDataObject::lock(void)
     return rc;
 }
 
-inline int ShClWinDataObject::unlock(void)
+int ShClWinDataObject::unlock(void)
 {
     int rc = RTCritSectLeave(&m_CritSect);
     AssertRCReturn(rc, rc);
@@ -554,6 +564,7 @@ DECLCALLBACK(int) ShClWinDataObject::readThread(PSHCLTRANSFER pTransfer, void *p
 
     LogRel2(("Shared Clipboard: Calculating transfer ...\n"));
 
+    bool fTransferEndCalled = false;
     int rc = ShClTransferRootListRead(pTransfer);
     if (RT_SUCCESS(rc))
     {
@@ -611,6 +622,56 @@ DECLCALLBACK(int) ShClWinDataObject::readThread(PSHCLTRANSFER pTransfer, void *p
 
             if (RT_FAILURE(rc))
                 break;
+        }
+
+        if (   RT_SUCCESS(rc)
+            && !ASMAtomicReadBool(&pTransfer->Thread.fStop))
+        {
+            uint64_t cbTotal = 0;
+            size_t cFileEntries = 0;
+
+            pThis->lock();
+            FsObjEntryList::const_iterator itEntry = pThis->m_lstEntries.cbegin();
+            while (itEntry != pThis->m_lstEntries.end())
+            {
+                if (RTFS_IS_FILE(itEntry->objInfo.Attr.fMode))
+                {
+                    if (itEntry->objInfo.cbObject < 0)
+                    {
+                        rc = VERR_OUT_OF_RANGE;
+                        break;
+                    }
+
+                    uint64_t const cbObject = (uint64_t)itEntry->objInfo.cbObject;
+                    if (cbTotal > UINT64_MAX - cbObject)
+                    {
+                        rc = VERR_OUT_OF_RANGE;
+                        break;
+                    }
+
+                    cbTotal += cbObject;
+                    cFileEntries++;
+                }
+                ++itEntry;
+            }
+
+            if (RT_SUCCESS(rc))
+            {
+                pThis->m_afObjCompleted.clear();
+                pThis->m_afObjCompleted.reserve(pThis->m_lstEntries.size());
+                for (size_t i = 0; i < pThis->m_lstEntries.size(); ++i)
+                    pThis->m_afObjCompleted.push_back(false);
+                pThis->m_cFileEntries          = cFileEntries;
+                pThis->m_cFileEntriesCompleted = 0;
+            }
+            pThis->unlock();
+
+            if (RT_SUCCESS(rc))
+            {
+                int rc2 = ShClTransferProgressSetTotal(pTransfer, cbTotal);
+                if (RT_FAILURE(rc2))
+                    LogRel2(("Shared Clipboard: Setting transfer total to %RU64 bytes failed with %Rrc\n", cbTotal, rc2));
+            }
         }
 
         if (   RT_SUCCESS(rc)
@@ -678,39 +739,49 @@ DECLCALLBACK(int) ShClWinDataObject::readThread(PSHCLTRANSFER pTransfer, void *p
                             break;
                     }
 
-                    pThis->lock();
-                    PFNTRANSFEREND const pfnTransferEnd = pThis->m_fCallbacksEnabled
-                                                       ? pThis->m_Callbacks.pfnTransferEnd : NULL;
-                    CALLBACKCTX CallbackCtx = pThis->m_CallbackCtx;
-                    if (pfnTransferEnd)
-                    {
-                        Assert(pThis->m_cCallbacks == 0);
-                        pThis->m_cCallbacks = 1;
-                        pThis->m_hCallbackThread = RTThreadNativeSelf();
-                        int rc2 = RTSemEventMultiReset(pThis->m_EventCallbacksDrained);
-                        AssertFatalMsgRC(rc2, ("Resetting the Windows clipboard callback-drain event failed with %Rrc\n", rc2));
-                    }
-                    pThis->unlock();
-
-                    if (pfnTransferEnd)
-                    {
-                        int rc2 = pfnTransferEnd(&CallbackCtx, pTransfer, rcStatus);
-                        if (RT_SUCCESS(rc))
-                            rc = rc2;
-
-                        pThis->lock();
-                        Assert(pThis->m_cCallbacks == 1);
-                        pThis->m_cCallbacks = 0;
-                        pThis->m_hCallbackThread = NIL_RTNATIVETHREAD;
-                        rc2 = RTSemEventMultiSignal(pThis->m_EventCallbacksDrained);
-                        AssertFatalMsgRC(rc2, ("Signalling the Windows clipboard callback-drain event failed with %Rrc\n", rc2));
-                        pThis->unlock();
-                    }
+                    int const rc2 = pThis->reportTransferEnd(pTransfer, rcStatus);
+                    fTransferEndCalled = rc2 != VINF_NO_CHANGE;
+                    if (   RT_SUCCESS(rc)
+                        && rc2 != VINF_NO_CHANGE)
+                        rc = rc2;
 
                     break;
                 } /* for */
             }
         }
+    }
+
+    /*
+     * Failures before the normal status-wait loop (for example while reading
+     * roots, calculating the exact total, or signalling the completed list)
+     * must terminate the native transfer too.  Otherwise GetData() eventually
+     * times out while Main keeps its IProgress alive forever.
+     */
+    if (   RT_FAILURE(rc)
+        && !fTransferEndCalled)
+    {
+        int const rcTransfer = rc;
+        SHCLTRANSFERSTATUS const enmTransferStatus = ShClTransferGetStatus(pTransfer);
+        bool const fTerminalize =    enmTransferStatus == SHCLTRANSFERSTATUS_INITIALIZED
+                                  || enmTransferStatus == SHCLTRANSFERSTATUS_STARTED;
+
+        pThis->lock();
+        if (   fTerminalize
+            && pThis->m_enmStatus != Error)
+        {
+            int const rc2 = pThis->setStatusLocked(Error, rcTransfer);
+            AssertRC(rc2);
+        }
+        int const rcList = RTSemEventSignal(pThis->m_EventListComplete);
+        AssertRC(rcList);
+
+        pThis->unlock();
+
+        if (fTerminalize)
+            ShClTransferError(pTransfer, rcTransfer);
+
+        if (fTerminalize)
+            (void)pThis->reportTransferEnd(pTransfer, rcTransfer);
     }
 
     if (RT_FAILURE(rc))
@@ -1225,41 +1296,59 @@ STDMETHODIMP ShClWinDataObject::GetData(LPFORMATETC pFormatEtc, LPSTGMEDIUM pMed
             if (          pFormatEtc->lindex >= 0
                 && (ULONG)pFormatEtc->lindex <  m_lstEntries.size())
             {
-                m_uObjIdx = pFormatEtc->lindex; /* lIndex of FormatEtc contains the actual index to the object being handled. */
+                ULONG const uObjIdx = (ULONG)pFormatEtc->lindex; /* lIndex contains the object being handled. */
 
-                FSOBJENTRY &fsObjEntry = m_lstEntries.at(m_uObjIdx);
+                FSOBJENTRY &fsObjEntry = m_lstEntries.at(uObjIdx);
 
-                LogFlowFunc(("FormatIndex_FileContents: m_uObjIdx=%u (entry '%s')\n", m_uObjIdx, fsObjEntry.pszPath));
+                LogFlowFunc(("FormatIndex_FileContents: uObjIdx=%u (entry '%s')\n", uObjIdx, fsObjEntry.pszPath));
 
-                LogRel2(("Shared Clipboard: Receiving object '%s' ...\n", fsObjEntry.pszPath));
-
-                /* Hand-in the provider so that our IStream implementation can continue working with it. */
-                IStream *pStream = NULL;
-                hr = ShClWinStreamImpl::Create(this /* pParent */, m_pTransfer,
-                                               fsObjEntry.pszPath /* File name */, &fsObjEntry.objInfo /* PSHCLFSOBJINFO */,
-                                               &pStream);
-                if (SUCCEEDED(hr))
+                if (RTFS_IS_FILE(fsObjEntry.objInfo.Attr.fMode))
                 {
-                    /* Hand over the stream to the caller. */
-                    pMedium->tymed = TYMED_ISTREAM;
-                    pMedium->pstm  = pStream;
+                    LogRel2(("Shared Clipboard: Receiving object '%s' ...\n", fsObjEntry.pszPath));
 
-                    registerStreamLocked((ShClWinStreamImpl *)pStream);
+                    /* Hand-in the provider so that our IStream implementation can continue working with it. */
+                    IStream *pStream = NULL;
+                    hr = ShClWinStreamImpl::Create(this /* pParent */, m_pTransfer, uObjIdx,
+                                                   fsObjEntry.pszPath /* File name */,
+                                                   &fsObjEntry.objInfo /* PSHCLFSOBJINFO */, &pStream);
+                    if (SUCCEEDED(hr))
+                    {
+                        /* Hand over the stream to the caller. */
+                        pMedium->tymed = TYMED_ISTREAM;
+                        pMedium->pstm  = pStream;
+
+                        registerStreamLocked((ShClWinStreamImpl *)pStream);
+                    }
+                }
+                else
+                {
+                    LogRel2(("Shared Clipboard: FileContents requested for non-file object '%s'\n", fsObjEntry.pszPath));
+                    hr = DV_E_LINDEX;
                 }
             }
         }
-        else if (pFormatEtc->cfFormat == m_cfPerformedDropEffect)
+        else if (pFormatEtc->cfFormat == m_cfPreferredDropEffect)
         {
             HGLOBAL hGlobal = GlobalAlloc(GHND, sizeof(DWORD));
+            if (hGlobal)
+            {
+                DWORD *pdwDropEffect = (DWORD *)GlobalLock(hGlobal);
+                if (pdwDropEffect)
+                {
+                    *pdwDropEffect = DROPEFFECT_COPY;
+                    GlobalUnlock(hGlobal);
 
-            DWORD* pdwDropEffect = (DWORD*)GlobalLock(hGlobal);
-            *pdwDropEffect = DROPEFFECT_COPY;
+                    pMedium->tymed          = TYMED_HGLOBAL;
+                    pMedium->hGlobal        = hGlobal;
+                    pMedium->pUnkForRelease = NULL;
+                    hr = S_OK;
+                }
+                else
+                    GlobalFree(hGlobal);
+            }
 
-            GlobalUnlock(hGlobal);
-
-            pMedium->tymed          = TYMED_HGLOBAL;
-            pMedium->hGlobal        = hGlobal;
-            pMedium->pUnkForRelease = NULL;
+            if (FAILED(hr))
+                hr = E_OUTOFMEMORY;
         }
 
         if (   FAILED(hr)
@@ -1336,7 +1425,14 @@ STDMETHODIMP ShClWinDataObject::SetData(LPFORMATETC pFormatEtc, LPSTGMEDIUM pMed
     if (   pFormatEtc->cfFormat == m_cfPerformedDropEffect
         && pMedium->tymed       == TYMED_HGLOBAL)
     {
-        DWORD dwEffect = *(DWORD *)GlobalLock(pMedium->hGlobal);
+        if (   pMedium->hGlobal == NULL
+            || GlobalSize(pMedium->hGlobal) < sizeof(DWORD))
+            return DV_E_STGMEDIUM;
+
+        DWORD const *pdwEffect = (DWORD const *)GlobalLock(pMedium->hGlobal);
+        if (!pdwEffect)
+            return DV_E_STGMEDIUM;
+        DWORD const dwEffect = *pdwEffect;
         GlobalUnlock(pMedium->hGlobal);
 
         LogFlowFunc(("dwEffect=%RI32\n", dwEffect));
@@ -1347,7 +1443,47 @@ STDMETHODIMP ShClWinDataObject::SetData(LPFORMATETC pFormatEtc, LPSTGMEDIUM pMed
         {
             LogRel2(("Shared Clipboard: Transfer canceled by user interaction\n"));
 
-            SetStatus(Canceled);
+            int rc2 = SetStatus(Canceled);
+            AssertRC(rc2);
+
+            /* Commit native Explorer cancellation immediately.  The transfer
+             * worker may still be blocked in a guest metadata or data request,
+             * so merely waking its status event can leave Main's lifecycle
+             * record active indefinitely. */
+            PSHCLTRANSFER pTransfer = NULL;
+            lock();
+            if (m_pTransfer)
+            {
+                pTransfer = m_pTransfer;
+                ShClTransferAcquire(pTransfer);
+            }
+            unlock();
+
+            if (pTransfer)
+            {
+                if (!ShClTransferStatusIsTerminal(ShClTransferGetStatus(pTransfer)))
+                {
+                    rc2 = ShClTransferCancel(pTransfer);
+                    if (RT_SUCCESS(rc2))
+                        reportTransferEnd(pTransfer, VERR_CANCELLED);
+                    else
+                        LogFlowFunc(("Canceling the native transfer failed with %Rrc\n", rc2));
+                }
+                ShClTransferRelease(pTransfer);
+            }
+        }
+        else if (dwEffect & DROPEFFECT_COPY)
+        {
+            /* The target's successful performed effect is authoritative for
+             * the overall operation, including directories and empty files
+             * for which no FileContents stream may ever be requested. */
+            lock();
+            if (m_enmStatus == Running)
+            {
+                int const rc2 = setStatusLocked(Completed);
+                AssertRC(rc2);
+            }
+            unlock();
         }
         /** @todo Detect move / overwrite actions here. */
 
@@ -1466,6 +1602,7 @@ int ShClWinDataObject::setTransferLocked(PSHCLTRANSFER pTransfer, ShClWinDataObj
                     AddRef();
                     pWinURITransferCtx->pDataObj = this;
                     m_pTransfer = pTransfer;
+                    m_fTransferEndReported = false;
                     ShClTransferAcquire(pTransfer);
                 }
                 else
@@ -1591,6 +1728,76 @@ int ShClWinDataObject::SetStatus(Status enmStatus, int rcSts /* = VINF_SUCCESS *
     return rc;
 }
 
+/**
+ * Reports the terminal native transfer status to the Windows backend exactly
+ * once for the currently assigned transfer.
+ *
+ * @returns VBox status code, or VINF_NO_CHANGE if the terminal callback was
+ *          already reported or callbacks have been disabled.
+ * @param   pTransfer           Transfer which reached a terminal state.
+ * @param   rcTransfer          Terminal transfer result.
+ */
+int ShClWinDataObject::reportTransferEnd(PSHCLTRANSFER pTransfer, int rcTransfer)
+{
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+
+    PFNTRANSFEREND pfnTransferEnd = NULL;
+    CALLBACKCTX CallbackCtx;
+    RT_ZERO(CallbackCtx);
+
+    lock();
+    if (   !m_fTransferEndReported
+        && m_fCallbacksEnabled
+        && m_Callbacks.pfnTransferEnd)
+    {
+        if (m_cCallbacks != 0)
+        {
+            unlock();
+            return VERR_TRY_AGAIN;
+        }
+
+        m_fTransferEndReported = true;
+        pfnTransferEnd = m_Callbacks.pfnTransferEnd;
+        CallbackCtx = m_CallbackCtx;
+        m_cCallbacks = 1;
+        m_hCallbackThread = RTThreadNativeSelf();
+        int const rc2 = RTSemEventMultiReset(m_EventCallbacksDrained);
+        AssertFatalMsgRC(rc2, ("Resetting the Windows clipboard callback-drain event failed with %Rrc\n", rc2));
+    }
+    unlock();
+
+    if (!pfnTransferEnd)
+        return VINF_NO_CHANGE;
+
+    int const rc = pfnTransferEnd(&CallbackCtx, pTransfer, rcTransfer);
+
+    lock();
+    Assert(m_cCallbacks == 1);
+    m_cCallbacks = 0;
+    m_hCallbackThread = NIL_RTNATIVETHREAD;
+    int const rc2 = RTSemEventMultiSignal(m_EventCallbacksDrained);
+    AssertFatalMsgRC(rc2, ("Signalling the Windows clipboard callback-drain event failed with %Rrc\n", rc2));
+    unlock();
+
+    return rc;
+}
+
+/**
+ * Reports that a regular-file stream reached its exact object size.
+ *
+ * @returns VBox status code.
+ * @param   uObjIdx             Index in the published FILEGROUPDESCRIPTOR.
+ */
+int ShClWinDataObject::SetFileCompleted(ULONG uObjIdx)
+{
+    lock();
+
+    int rc = setFileCompletedLocked(uObjIdx);
+
+    unlock();
+    return rc;
+}
+
 /* static */
 void ShClWinDataObject::logFormat(CLIPFORMAT fmt)
 {
@@ -1665,34 +1872,62 @@ int ShClWinDataObject::setStatusLocked(Status enmStatus, int rc /* = VINF_SUCCES
 
     LogFlowFunc(("enmStatus=%#x, rc=%Rrc (current is: %#x)\n", enmStatus, rc, m_enmStatus));
 
-    int rc2 = VINF_SUCCESS;
+    /* Terminal states are final until teardown.  In particular, a late stream
+     * failure must not turn an acknowledged cancellation into an error. */
+    if (   (   m_enmStatus == Completed
+            || m_enmStatus == Canceled
+            || m_enmStatus == Error)
+        && enmStatus != Uninitialized)
+        return VINF_SUCCESS;
+    if (   m_enmStatus == Uninitialized
+        && enmStatus != Uninitialized
+        && enmStatus != Initialized)
+        return VINF_SUCCESS;
 
     m_rcStatus = rc;
 
-    switch (enmStatus)
-    {
-        case Completed:
-        {
-            LogFlowFunc(("m_uObjIdx=%RU32 (total: %zu)\n", m_uObjIdx, m_lstEntries.size()));
-
-            const bool fComplete = m_uObjIdx == m_lstEntries.size() - 1 /* Object index is zero-based */;
-            if (fComplete)
-                m_enmStatus = Completed;
-            break;
-        }
-
-        default:
-        {
-            m_enmStatus = enmStatus;
-            break;
-        }
-    }
+    m_enmStatus = enmStatus;
 
     if (RT_FAILURE(rc))
         LogRel(("Shared Clipboard: Data object received error %Rrc (status %#x)\n", rc, enmStatus));
 
-    rc2 = RTSemEventSignal(m_EventStatusChanged);
+    int const rc2 = RTSemEventSignal(m_EventStatusChanged);
 
     LogFlowFuncLeaveRC(rc2);
     return rc2;
+}
+
+/**
+ * Marks a regular-file descriptor complete while the data-object lock is held.
+ * Duplicate streams for the same descriptor are counted exactly once.
+ *
+ * @returns VBox status code.
+ * @param   uObjIdx             Index in the published FILEGROUPDESCRIPTOR.
+ */
+int ShClWinDataObject::setFileCompletedLocked(ULONG uObjIdx)
+{
+    AssertReturn(RTCritSectIsOwned(&m_CritSect), VERR_WRONG_ORDER);
+    if (uObjIdx >= m_lstEntries.size())
+        return VERR_OUT_OF_RANGE;
+    if (m_afObjCompleted.size() != m_lstEntries.size())
+        return VERR_WRONG_ORDER;
+    if (!RTFS_IS_FILE(m_lstEntries.at(uObjIdx).objInfo.Attr.fMode))
+        return VERR_INVALID_PARAMETER;
+
+    if (m_afObjCompleted.at(uObjIdx))
+        return VINF_SUCCESS;
+    if (m_enmStatus != Running)
+        return VERR_STATE_CHANGED;
+
+    m_afObjCompleted.at(uObjIdx) = true;
+    m_cFileEntriesCompleted++;
+    AssertReturn(m_cFileEntriesCompleted <= m_cFileEntries, VERR_INTERNAL_ERROR);
+
+    LogFlowFunc(("uObjIdx=%RU32, completed=%zu/%zu\n",
+                 uObjIdx, m_cFileEntriesCompleted, m_cFileEntries));
+
+    if (m_cFileEntriesCompleted == m_cFileEntries)
+        return setStatusLocked(Completed);
+
+    return VINF_SUCCESS;
 }

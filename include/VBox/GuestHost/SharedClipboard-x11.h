@@ -113,8 +113,8 @@ typedef unsigned SHCLX11FMTIDX;
  *
  * The backend which embeds this structure supplies the synchronization.  The
  * offer generation rejects work completed for an old clipboard offer, while
- * the transfer ID and generation identify the exact transfer associated with
- * the preparation or currently advertised URI-list data.
+ * the transfer keys identify the exact transfer associated with the
+ * preparation or currently advertised URI-list data.
  */
 typedef struct SHCLX11TRANSFERSTATE
 {
@@ -124,14 +124,10 @@ typedef struct SHCLX11TRANSFERSTATE
     uint64_t          uOfferGeneration;
     /** Offer generation for which a transfer is currently being prepared. */
     uint64_t          uPreparingOfferGeneration;
-    /** ID of the transfer bound to the current preparation request. */
-    SHCLTRANSFERID    idTransfer;
-    /** Generation of the transfer bound to the current request. */
-    SHCLTRANSFERGEN   uTransferGeneration;
-    /** ID of the transfer backing the currently advertised URI-list data. */
-    SHCLTRANSFERID    idPublishedTransfer;
-    /** Generation of the transfer backing the advertised URI-list data. */
-    SHCLTRANSFERGEN   uPublishedTransferGeneration;
+    /** Exact identity of the transfer bound to the current preparation request. */
+    SHCLTRANSFERKEY   TransferKey;
+    /** Exact identity of the transfer backing the currently advertised URI-list data. */
+    SHCLTRANSFERKEY   PublishedTransferKey;
     /** Whether a transfer preparation request is outstanding. */
     bool              fPreparing;
 } SHCLX11TRANSFERSTATE;
@@ -303,6 +299,7 @@ int ShClX11Term(PSHCLX11CTX pCtx);
 int ShClX11ThreadStart(PSHCLX11CTX pCtx, bool grab);
 int ShClX11ThreadStartEx(PSHCLX11CTX pCtx, const char *pszName, bool fGrab);
 int ShClX11ThreadStop(PSHCLX11CTX pCtx);
+int ShClX11ReportCurrentFormatsToVBoxAsync(PSHCLX11CTX pCtx);
 int ShClX11ReportFormatsToX11Async(PSHCLX11CTX pCtx, SHCLFORMATS fFormats);
 /** Reports formats after atomically seeding one X11 clipboard cache entry. */
 int ShClX11ReportFormatsToX11AsyncEx(PSHCLX11CTX pCtx, SHCLFORMATS fFormats, SHCLFORMAT uFmtCache,
