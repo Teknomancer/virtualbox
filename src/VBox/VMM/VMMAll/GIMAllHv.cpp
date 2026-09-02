@@ -909,34 +909,35 @@ VMM_INT_DECL(VBOXSTRICTRC) gimHvWriteMsr(PVMCPUCC pVCpu, uint32_t idMsr, PCCPUMM
 #endif /* IN_RING3 */
         }
 
-        case MSR_GIM_HV_APIC_ASSIST_PAGE:
+        case MSR_GIM_HV_VP_ASSIST:
         {
 #ifndef IN_RING3
             return VINF_CPUM_R3_MSR_WRITE;
 #else  /* IN_RING3 */
             PGIMHVCPU pHvCpu = &pVCpu->gim.s.u.HvCpu;
-            pHvCpu->uApicAssistPageMsr = uRawValue;
+            pHvCpu->uVpAssistMsr = uRawValue;
 
-            if (MSR_GIM_HV_APICASSIST_PAGE_IS_ENABLED(uRawValue))
+            if (MSR_GIM_HV_VP_ASSIST_PAGE_IS_ENABLED(uRawValue))
             {
-                RTGCPHYS GCPhysApicAssistPage = MSR_GIM_HV_APICASSIST_GUEST_PFN(uRawValue) << GUEST_PAGE_SHIFT;
-                if (PGMPhysIsGCPhysNormal(pVM, GCPhysApicAssistPage))
+                RTGCPHYS GCPhysVpAssistPage = MSR_GIM_HV_VP_ASSIST_GUEST_PFN(uRawValue) << GUEST_PAGE_SHIFT;
+                if (PGMPhysIsGCPhysNormal(pVM, GCPhysVpAssistPage))
                 {
-                    int rc = gimR3HvEnableApicAssistPage(pVCpu, GCPhysApicAssistPage);
+                    int rc = gimR3HvEnableVpAssistPage(pVCpu, GCPhysVpAssistPage);
                     if (RT_SUCCESS(rc))
                     {
-                        pHvCpu->uApicAssistPageMsr = uRawValue;
+                        pHvCpu->uVpAssistMsr = uRawValue;
+                        LogRel(("GIM%u: HyperV: Enabled VP Assist page at %#RGp\n", pVCpu->idCpu, GCPhysVpAssistPage));
                         return VINF_SUCCESS;
                     }
                 }
                 else
                 {
-                    LogRelMax(5, ("GIM%u: HyperV: APIC-assist page address %#RGp invalid!\n", pVCpu->idCpu,
-                                  GCPhysApicAssistPage));
+                    LogRelMax(10, ("GIM%u: HyperV: VP Assist page address %#RGp invalid!\n", pVCpu->idCpu,
+                              GCPhysVpAssistPage));
                 }
             }
             else
-                gimR3HvDisableApicAssistPage(pVCpu);
+                gimR3HvDisableVpAssistPage(pVCpu);
 
             return VERR_CPUM_RAISE_GP_0;
 #endif /* IN_RING3 */

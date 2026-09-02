@@ -701,7 +701,7 @@ VMMR3_INT_DECL(void) gimR3HvReset(PVM pVM)
         pHvCpu->uSControlMsr = 0;
         pHvCpu->uSimpMsr  = 0;
         pHvCpu->uSiefpMsr = 0;
-        pHvCpu->uApicAssistPageMsr = 0;
+        pHvCpu->uVpAssistMsr = 0;
 
         for (uint8_t idxSint = 0; idxSint < RT_ELEMENTS(pHvCpu->auSintMsrs); idxSint++)
             pHvCpu->auSintMsrs[idxSint] = MSR_GIM_HV_SINT_MASKED;
@@ -1046,30 +1046,29 @@ VMMR3_INT_DECL(int) gimR3HvLoadDone(PVM pVM, PSSMHANDLE pSSM)
 
 
 /**
- * Enables the Hyper-V APIC-assist page.
+ * Enables the Hyper-V VP Assist page.
  *
  * @returns VBox status code.
  * @param   pVCpu                   The cross context virtual CPU structure.
- * @param   GCPhysApicAssistPage    Where to map the APIC-assist page.
+ * @param   GCPhysVpAssistPage    Where to map the VP ssist page.
  */
-VMMR3_INT_DECL(int) gimR3HvEnableApicAssistPage(PVMCPU pVCpu, RTGCPHYS GCPhysApicAssistPage)
+VMMR3_INT_DECL(int) gimR3HvEnableVpAssistPage(PVMCPU pVCpu, RTGCPHYS GCPhysVpAssistPage)
 {
     PVM             pVM     = pVCpu->CTX_SUFF(pVM);
     PPDMDEVINSR3    pDevIns = pVM->gim.s.pDevInsR3;
     AssertPtrReturn(pDevIns, VERR_GIM_DEVICE_NOT_REGISTERED);
 
     /*
-     * Map the APIC-assist-page at the specified address.
+     * Map the VP Assist page at the specified address.
      */
     /** @todo this is buggy when large pages are used due to a PGM limitation, see
      *        @bugref{7532}. Instead of the overlay style mapping, we just
      *        rewrite guest memory directly. */
-    AssertCompile(sizeof(g_abRTZero64K) >= GUEST_PAGE_SIZE);
-    int rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysApicAssistPage, g_abRTZero64K, GUEST_PAGE_SIZE);
+    int rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysVpAssistPage, g_abRTZero64K, GUEST_PAGE_SIZE);
     if (RT_SUCCESS(rc))
     {
         /** @todo Inform APIC. */
-        LogRel(("GIM%u: HyperV: Enabled APIC-assist page at %#RGp\n", pVCpu->idCpu, GCPhysApicAssistPage));
+        LogRel(("GIM%u: HyperV: Enabled VP Assist page at %#RGp\n", pVCpu->idCpu, GCPhysVpAssistPage));
     }
     else
     {
@@ -1081,20 +1080,20 @@ VMMR3_INT_DECL(int) gimR3HvEnableApicAssistPage(PVMCPU pVCpu, RTGCPHYS GCPhysApi
 
 
 /**
- * Disables the Hyper-V APIC-assist page.
+ * Disables the Hyper-V VP Assist page.
  *
  * @returns VBox status code.
  * @param   pVCpu   The cross context virtual CPU structure.
  */
-VMMR3_INT_DECL(int) gimR3HvDisableApicAssistPage(PVMCPU pVCpu)
+VMMR3_INT_DECL(int) gimR3HvDisableVpAssistPage(PVMCPU pVCpu)
 {
-    LogRel(("GIM%u: HyperV: Disabled APIC-assist page\n", pVCpu->idCpu));
+    LogRel(("GIM%u: HyperV: Disabled VP Assist page\n", pVCpu->idCpu));
     /** @todo inform APIC */
     return VINF_SUCCESS;
 }
 
 
-static void gimR3HvTryDeliverTimerMsg(PVMCPU pVCpu, PGIMHVSTIMER pHvStimer)
+static void gimR3HvDeliverTimerMsg(PVMCPU pVCpu, PGIMHVSTIMER pHvStimer)
 {
     VMCPU_ASSERT_EMT_OR_NOT_RUNNING(pVCpu);
     Assert(pHvStimer->idCpu == pVCpu->idCpu);
@@ -1195,7 +1194,7 @@ static DECLCALLBACK(void) gimR3HvTimerCallback(PVM pVM, TMTIMERHANDLE hTimer, vo
     RT_NOREF(hTimer);
 
     PVMCPU pVCpu = pVM->apCpusR3[pHvStimer->idCpu];
-    gimR3HvTryDeliverTimerMsg(pVCpu, pHvStimer);
+    gimR3HvDeliverTimerMsg(pVCpu, pHvStimer);
 
     /* Re-arm the timer if it's periodic. Disable the timer if it's one-shot. */
     uint64_t const uStimerConfig = pHvStimer->uStimerConfigMsr;

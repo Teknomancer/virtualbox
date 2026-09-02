@@ -277,9 +277,9 @@
 /** Access to APIC TPR (Task Priority) register (R/W) */
 #define MSR_GIM_HV_TPR                            UINT32_C(0x40000072)
 /** Enables lazy EOI processing (R/W) */
-#define MSR_GIM_HV_APIC_ASSIST_PAGE               UINT32_C(0x40000073)
+#define MSR_GIM_HV_VP_ASSIST                      UINT32_C(0x40000073)
 /** End of range 3. */
-#define MSR_GIM_HV_RANGE3_LAST                    MSR_GIM_HV_APIC_ASSIST_PAGE
+#define MSR_GIM_HV_RANGE3_LAST                    MSR_GIM_HV_VP_ASSIST
 
 /** Start of range 4. */
 #define MSR_GIM_HV_RANGE4_FIRST                   UINT32_C(0x40000080)
@@ -501,15 +501,15 @@ AssertCompile(MSR_GIM_HV_RANGE11_FIRST <= MSR_GIM_HV_RANGE11_LAST);
 #define MSR_GIM_HV_GUEST_OS_ID_BUILD(a)           (uint32_t)((a) & 0xffff)
 /** @} */
 
-/** @name Hyper-V MSR - APIC-assist page (MSR_GIM_HV_APIC_ASSIST_PAGE).
+/** @name Hyper-V MSR - VP assist (MSR_GIM_HV_VP_ASSIST).
  * @{
  */
 /** Guest-physical page frame number of the APIC-assist page. */
-#define MSR_GIM_HV_APICASSIST_GUEST_PFN(a)        ((a) >> 12)
+#define MSR_GIM_HV_VP_ASSIST_GUEST_PFN(a)         ((a) >> 12)
 /** The APIC-assist page enable mask. */
-#define MSR_GIM_HV_APICASSIST_PAGE_ENABLE         RT_BIT_64(0)
+#define MSR_GIM_HV_VP_ASSIST_PAGE_ENABLE          RT_BIT_64(0)
 /** Whether the APIC-assist page is enabled or not. */
-#define MSR_GIM_HV_APICASSIST_PAGE_IS_ENABLED(a)  RT_BOOL((a) & MSR_GIM_HV_APICASSIST_PAGE_ENABLE)
+#define MSR_GIM_HV_VP_ASSIST_PAGE_IS_ENABLED(a)   RT_BOOL((a) & MSR_GIM_HV_VP_ASSIST_PAGE_ENABLE)
 /** @} */
 
 /** @name Hyper-V MSR - Synthetic Interrupt Event Flags page
@@ -582,19 +582,18 @@ AssertCompile(MSR_GIM_HV_RANGE11_FIRST <= MSR_GIM_HV_RANGE11_LAST);
 #define GIM_HV_VENDOR_MICROSOFT                   "Microsoft Hv"
 
 /**
- * Hyper-V APIC-assist (HV_REFERENCE_TSC_PAGE) structure placed in the TSC
- * reference page.
+ * Hyper-V EOI Assist structure in the VP Assist page.
  */
-typedef struct GIMHVAPICASSIST
+typedef struct GIMHVEOIASSIST
 {
     uint32_t fNoEoiRequired : 1;
     uint32_t u31Reserved0   : 31;
-} GIMHVAPICASSIST;
+} GIMHVEOIASSIST;
 /** Pointer to Hyper-V reference TSC. */
-typedef GIMHVAPICASSIST *PGIMHVAPICASSIST;
+typedef GIMHVEOIASSIST *PGIMHVEOIASSIST;
 /** Pointer to a const Hyper-V reference TSC. */
-typedef GIMHVAPICASSIST const *PCGIMHVAPICASSIST;
-AssertCompileSize(GIMHVAPICASSIST, 4);
+typedef GIMHVEOIASSIST const *PCGIMHVEOIASSIST;
+AssertCompileSize(GIMHVEOIASSIST, 4);
 
 /**
  * Hypercall parameter type.
@@ -1029,7 +1028,6 @@ typedef GIMHVMSG *PGIMHVMSG;
 AssertCompileSize(GIMHVMSG, GIM_HV_MSG_SIZE);
 /** @} */
 
-
 /** @name Hyper-V hypercall parameters.
  * @{ */
 /**
@@ -1355,8 +1353,8 @@ typedef struct GIMHVCPU
     uint64_t                    auSintMsrs[GIM_HV_SINT_COUNT];
     /** Synethtic interrupt events flag page MSR. */
     uint64_t                    uSiefpMsr;
-    /** APIC-assist page MSR. */
-    uint64_t                    uApicAssistPageMsr;
+    /** VP assist MSR. */
+    uint64_t                    uVpAssistMsr;
     /** Synthetic interrupt control MSR. */
     uint64_t                    uSControlMsr;
     /** Synthetic timers. */
@@ -1397,8 +1395,8 @@ VMMR3_INT_DECL(int)             gimR3HvDisableSiefPage(PVMCPU pVCpu);
 VMMR3_INT_DECL(int)             gimR3HvEnableSiefPage(PVMCPU pVCpu, RTGCPHYS GCPhysSiefPage);
 VMMR3_INT_DECL(int)             gimR3HvEnableSimPage(PVMCPU pVCpu, RTGCPHYS GCPhysSimPage);
 VMMR3_INT_DECL(int)             gimR3HvDisableSimPage(PVMCPU pVCpu);
-VMMR3_INT_DECL(int)             gimR3HvDisableApicAssistPage(PVMCPU pVCpu);
-VMMR3_INT_DECL(int)             gimR3HvEnableApicAssistPage(PVMCPU pVCpu, RTGCPHYS GCPhysTscPage);
+VMMR3_INT_DECL(int)             gimR3HvDisableVpAssistPage(PVMCPU pVCpu);
+VMMR3_INT_DECL(int)             gimR3HvEnableVpAssistPage(PVMCPU pVCpu, RTGCPHYS GCPhysTscPage);
 VMMR3_INT_DECL(int)             gimR3HvDisableTscPage(PVM pVM);
 VMMR3_INT_DECL(int)             gimR3HvEnableTscPage(PVM pVM, RTGCPHYS GCPhysTscPage, bool fUseThisTscSeq, uint32_t uTscSeq);
 VMMR3_INT_DECL(int)             gimR3HvDisableHypercallPage(PVM pVM);
