@@ -1094,19 +1094,10 @@ VMMR3_INT_DECL(int) gimR3HvDisableApicAssistPage(PVMCPU pVCpu)
 }
 
 
-/**
- * @callback_method_impl{FNTMTIMERINT, Hyper-V synthetic timer callback.}
- */
-static DECLCALLBACK(void) gimR3HvTimerCallback(PVM pVM, TMTIMERHANDLE hTimer, void *pvUser)
+static void gimR3HvTryDeliverTimerMsg(PVMCPU pVCpu, PGIMHVSTIMER pHvStimer)
 {
-    PGIMHVSTIMER pHvStimer = (PGIMHVSTIMER)pvUser;
-    Assert(pHvStimer);
-    Assert(TMTimerIsLockOwner(pVM, hTimer));
-    Assert(pHvStimer->idCpu < pVM->cCpus);
-    Assert(pHvStimer->hTimer == hTimer);
-    RT_NOREF(hTimer);
-
-    PVMCPU    pVCpu  = pVM->apCpusR3[pHvStimer->idCpu];
+    VMCPU_ASSERT_EMT_OR_NOT_RUNNING(pVCpu);
+    Assert(pHvStimer->idCpu == pVCpu->idCpu);
     PGIMHVCPU pHvCpu = &pVCpu->gim.s.u.HvCpu;
 
     /* Get the VCPU's synthetic timer config and timer index.  */
@@ -1121,69 +1112,93 @@ static DECLCALLBACK(void) gimR3HvTimerCallback(PVM pVM, TMTIMERHANDLE hTimer, vo
 
     STAM_COUNTER_INC(&pHvCpu->aStatStimerFired[idxStimer]);
 
-    /* Get the interrupt details from the SINT MSR corresponding to the SINT index. */
-    uint8_t const  idxSint = MSR_GIM_HV_STIMER_GET_SINTX(uStimerConfig);
-    uint64_t const uSint   = pHvCpu->auSintMsrs[idxSint];
-
-    LogRelMax(200, ("GIM%u: HyperV: uSint%u=%#RX64\n", pVCpu->idCpu, pVCpu->idCpu, uSint));
-
-    if (!MSR_GIM_HV_SINT_IS_MASKED(uSint))
+    /* For direct mode, send the interrupt directly, no messing with the SIM page. */
+    if (MSR_GIM_HV_STIMER_IS_DIRECT_MODE(uStimerConfig))
     {
-        /* For direct mode, send the interrupt directly, no messing with the SIM page. */
-        if (MSR_GIM_HV_STIMER_IS_DIRECT_MODE(uStimerConfig))
+        uint8_t const uVector = MSR_GIM_HV_STIMER_GET_VECTOR(uStimerConfig);
+        PDMApicHvSendInterrupt(pVCpu, uVector, false /* fAutoEoi */, XAPICTRIGGERMODE_EDGE);
+    }
+    else if (MSR_GIM_HV_SIMP_IS_ENABLED(pHvCpu->uSimpMsr))
+    {
+        /* For indirect mode, send the interrupt via a message slot in the SIM page. */
+        uint8_t const  idxSint    = MSR_GIM_HV_STIMER_GET_SINTX(uStimerConfig);
+        RTGCPHYS const GCPhysSimp = MSR_GIM_HV_SIMP_GPA(pHvCpu->uSimpMsr);
+        RTGCPHYS const GCPhysMsg  = GCPhysSimp + idxSint * GIM_HV_MSG_SIZE;
+        GIMHVMSG Msg;
+        PVM pVM = pVCpu->CTX_SUFF(pVM);
+        int rc = PGMPhysSimpleReadGCPhys(pVM, &Msg, GCPhysMsg, sizeof(Msg));
+        if (RT_SUCCESS(rc))
         {
-            uint8_t const uVector = MSR_GIM_HV_STIMER_GET_VECTOR(uStimerConfig);
-            PDMApicHvSendInterrupt(pVCpu, uVector, false /* fAutoEoi */, XAPICTRIGGERMODE_EDGE);
-        }
-        else if (MSR_GIM_HV_SIMP_IS_ENABLED(pHvCpu->uSimpMsr))
-        {
-            /* For indirect mode, send the interrupt via a message slot in the SIM page. */
-            RTGCPHYS const GCPhysSimp = MSR_GIM_HV_SIMP_GPA(pHvCpu->uSimpMsr);
-            RTGCPHYS const GCPhysMsg  = GCPhysSimp + idxSint * GIM_HV_MSG_SIZE;
-            GIMHVMSG Msg;
-            int rc = PGMPhysSimpleReadGCPhys(pVM, &Msg, GCPhysMsg, sizeof(Msg));
-            if (RT_SUCCESS(rc))
+            if (Msg.Header.enmMessageType == GIMHVMSGTYPE_NONE)
             {
-                if (Msg.Header.enmMessageType == GIMHVMSGTYPE_NONE)
+                /* The SINT message slot is free, update the timer message in the slot. */
+                RT_ZERO(Msg);
+                Msg.Header.enmMessageType   = GIMHVMSGTYPE_TIMEREXPIRED;
+                Msg.Header.cbPayload        = sizeof(Msg.u.timer);
+                Msg.u.timer.idxStimer       = pHvStimer->idxStimer;
+                Msg.u.timer.uExpirationTime = pHvStimer->uExpirationTime;
+                /** @todo We cannot call gimHvGetTimeRefCount(pVCpu) as we're not on the EMT corresponding to the timer */
+                Msg.u.timer.uDeliveryTime   = pHvStimer->uExpirationTime; /* Not really correct but see todo above. */
+                rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysMsg, &Msg, sizeof(Msg));
+                if (RT_SUCCESS(rc))
                 {
-                    /* The SINT message slot is free, update the timer message in the slot. */
-                    RT_ZERO(Msg);
-                    Msg.Header.enmMessageType   = GIMHVMSGTYPE_TIMEREXPIRED;
-                    Msg.Header.cbPayload        = sizeof(Msg.u.timer);
-                    Msg.u.timer.idxStimer       = pHvStimer->idxStimer;
-                    Msg.u.timer.uExpirationTime = pHvStimer->uExpirationTime;
-                    /** @todo We cannot call gimHvGetTimeRefCount(pVCpu) as we're not on the EMT corresponding to the timer */
-                    Msg.u.timer.uDeliveryTime   = pHvStimer->uExpirationTime; /* Not really correct but see todo above. */
-                    rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysMsg, &Msg, sizeof(Msg));
-                    if (RT_SUCCESS(rc))
+                    pHvStimer->fMsgPending = false;
+                    uint64_t const uSint = pHvCpu->auSintMsrs[idxSint];
+                    if (!MSR_GIM_HV_SINT_IS_MASKED(uSint))
                     {
                         uint8_t const uVector  = MSR_GIM_HV_SINT_GET_VECTOR(uSint);
                         bool const    fAutoEoi = MSR_GIM_HV_SINT_IS_AUTOEOI(uSint);
                         PDMApicHvSendInterrupt(pVCpu, uVector, fAutoEoi, XAPICTRIGGERMODE_EDGE);
                     }
-                    else
-                    {
-                        LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to write STIMER%u in SIM page. rc=%Rrc\n",
-                                  pVCpu->idCpu, pHvStimer->idxStimer, rc));
-                    }
                 }
                 else
                 {
-                    /* The SINT message slot is not free, queue the timer as pending. */
-                    /** @todo Implement message queue, u1MessagePending=1. */
-                    AssertReleaseMsgFailed(("TODO: SINT slot not free. enmMessageType=%#x\n", Msg.Header.enmMessageType));
+                    LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to write STIMER%u in SIM page. rc=%Rrc\n",
+                              pVCpu->idCpu, pHvStimer->idxStimer, rc));
                 }
             }
             else
             {
-                LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to read STIMER%u in SIM page. rc=%Rrc\n",
-                          pVCpu->idCpu, pHvStimer->idxStimer, rc));
+                /* The SINT message slot is not free, queue the timer as pending. */
+                if (!Msg.Header.MessageFlags.n.u1Pending)
+                {
+                    pHvStimer->fMsgPending = true;
+                    Msg.Header.MessageFlags.n.u1Pending = 1;
+                    rc = PGMPhysSimpleWriteGCPhys(pVM, GCPhysMsg, &Msg, sizeof(Msg));
+                    if (RT_FAILURE(rc))
+                        LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to update STIMER%u in SIM page. rc=%Rrc\n",
+                                    pVCpu->idCpu, pHvStimer->idxStimer, rc));
+                }
             }
         }
-        /** @todo else: Should we disable timers here? */
+        else
+        {
+            LogRelMax(10, ("GIM%u: HyperV: WARNING! Failed to read STIMER%u in SIM page. rc=%Rrc\n",
+                        pVCpu->idCpu, pHvStimer->idxStimer, rc));
+        }
     }
+    else
+        pHvStimer->fMsgPending = true;
+}
+
+
+/**
+ * @callback_method_impl{FNTMTIMERINT, Hyper-V synthetic timer callback.}
+ */
+static DECLCALLBACK(void) gimR3HvTimerCallback(PVM pVM, TMTIMERHANDLE hTimer, void *pvUser)
+{
+    PGIMHVSTIMER pHvStimer = (PGIMHVSTIMER)pvUser;
+    Assert(pHvStimer);
+    Assert(TMTimerIsLockOwner(pVM, hTimer));
+    Assert(pHvStimer->idCpu < pVM->cCpus);
+    Assert(pHvStimer->hTimer == hTimer);
+    RT_NOREF(hTimer);
+
+    PVMCPU pVCpu = pVM->apCpusR3[pHvStimer->idCpu];
+    gimR3HvTryDeliverTimerMsg(pVCpu, pHvStimer);
 
     /* Re-arm the timer if it's periodic. Disable the timer if it's one-shot. */
+    uint64_t const uStimerConfig = pHvStimer->uStimerConfigMsr;
     if (MSR_GIM_HV_STIMER_IS_PERIODIC(uStimerConfig))
     {
         uint64_t const uTimerCount  = pHvStimer->uStimerCountMsr;    /* in 100-ns units. */

@@ -1330,6 +1330,10 @@ typedef struct GIMHVSTIMER
     uint64_t                    uStimerCountMsr;
     /** The absolute expiration time in 100-ns units. */
     uint64_t                    uExpirationTime;
+    /** Whether a message is pending for delivery. */
+    bool                        fMsgPending;
+    /** Padding. */
+    bool                        afAlignment0[7];
 } GIMHVSTIMER;
 /** Pointer to per-VCPU Hyper-V synthetic timer. */
 typedef GIMHVSTIMER *PGIMHVSTIMER;
