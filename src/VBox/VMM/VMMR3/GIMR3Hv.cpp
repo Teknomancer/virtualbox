@@ -279,8 +279,8 @@ VMMR3_INT_DECL(int) gimR3HvInit(PVM pVM, PCFGMNODE pGimCfg)
         pHv->uBaseFeat = 0
                      //| GIM_HV_BASE_FEAT_VP_RUNTIME_MSR
                        | GIM_HV_BASE_FEAT_PART_TIME_REF_COUNT_MSR
-                       | GIM_HV_BASE_FEAT_BASIC_SYNIC_MSRS          // Both required for synethetic timers
-                       | GIM_HV_BASE_FEAT_STIMER_MSRS               // Both required for synethetic timers
+                     //| GIM_HV_BASE_FEAT_BASIC_SYNIC_MSRS          // Both required for synethetic timers
+                     //| GIM_HV_BASE_FEAT_STIMER_MSRS               // Both required for synethetic timers
                        | GIM_HV_BASE_FEAT_APIC_ACCESS_MSRS
                        | GIM_HV_BASE_FEAT_HYPERCALL_MSRS
                        | GIM_HV_BASE_FEAT_VP_ID_MSR
@@ -299,7 +299,7 @@ VMMR3_INT_DECL(int) gimR3HvInit(PVM pVM, PCFGMNODE pGimCfg)
                          | GIM_HV_MISC_FEAT_TIMER_FREQ
                          | GIM_HV_MISC_FEAT_GUEST_CRASH_MSRS
                        //| GIM_HV_MISC_FEAT_DEBUG_MSRS
-                         | GIM_HV_MISC_FEAT_USE_DIRECT_SYNTH_MSRS
+                       //| GIM_HV_MISC_FEAT_USE_DIRECT_SYNTH_MSRS
                          ;
 
         /* Hypervisor recommendations to the guest. */
