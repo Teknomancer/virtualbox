@@ -1,4 +1,4 @@
-/* $Id: ClipboardDataObjectImpl-win.cpp 115103 2026-08-21 11:25:07Z andreas.loeffler@oracle.com $ */
+/* $Id: ClipboardDataObjectImpl-win.cpp 115134 2026-08-27 15:09:45Z andreas.loeffler@oracle.com $ */
 /** @file
  * ClipboardDataObjectImpl-win.cpp - Shared Clipboard IDataObject implementation.
  */
@@ -50,6 +50,11 @@
 #include <iprt/errcore.h>
 #include <VBox/log.h>
 
+#ifdef RT_EXCEPTIONS_ENABLED
+# include <new>
+# include <stdexcept>
+#endif
+
 /** Enable this to track the current counts of the data / stream / enum object we create + supply to the Windows clipboard.
  *  Helps finding refcount issues or tracking down memory leaks. */
 #ifdef VBOX_SHARED_CLIPBOARD_DEBUG_OBJECT_COUNTS
@@ -61,6 +66,7 @@
 ShClWinDataObject::ShClWinDataObject(void)
     : m_enmStatus(Uninitialized)
     , m_rcStatus(VERR_IPE_UNINITIALIZED_STATUS)
+    , m_uErrorObjIdx(UINT32_MAX)
     , m_lRefCount(0)
     , m_cFormats(0)
     , m_pFormatEtc(NULL)
@@ -451,39 +457,77 @@ int ShClWinDataObject::unlock(void)
 }
 
 /**
- * Reads (handles) a specific directory reursively and inserts its entry into the
- * objects's entry list.
+ * Recursively reads a directory and inserts its descendants into the object's
+ * entry list.
  *
- * @returns VBox status code.
+ * @retval  VERR_INVALID_POINTER
+ *                              if @a pTransfer is NULL.
+ * @retval  VERR_NO_MEMORY      if allocating traversal state or an entry fails.
+ * @retval  VERR_BUFFER_OVERFLOW
+ *                              if a descendant path exceeds the transfer path limit.
+ * @retval  VERR_INVALID_PARAMETER
+ *                              if the provider returns malformed file-system information or an invalid path.
+ * @retval  VERR_INVALID_UTF8_ENCODING
+ *                              if a directory path is not valid UTF-8.
+ * @retval  VERR_PATH_IS_NOT_RELATIVE
+ *                              if a directory path is not relative to the transfer root.
+ * @retval  VERR_SHCLPB_MAX_LISTS_REACHED
+ *                              if no transfer-list handle is available.
+ * @retval  VERR_NO_MORE_FILES  if the provider returns fewer entries than advertised in the list header.
+ * @retval  VERR_NOT_SUPPORTED  if the provider does not implement a required transfer-list operation.
+ * @retval  VERR_OUT_OF_RANGE   if the entry count cannot be represented by a Windows file group descriptor.
+ * @returns                     Status returned by ShClTransferListOpen(), ShClTransferListGetHeader(),
+ *                              ShClTransferListRead(), or ShClTransferListClose().
  * @param   pTransfer           Shared Clipboard transfer object to handle.
  * @param   strDir              Directory path to handle.
  */
 int ShClWinDataObject::readDir(PSHCLTRANSFER pTransfer, const Utf8Str &strDir)
 {
+    AssertPtrReturn(pTransfer, VERR_INVALID_POINTER);
+
     LogFlowFunc(("strDir=%s\n", strDir.c_str()));
+
+    lock();
+    size_t iEntryNext = m_lstEntries.size();
+    unlock();
 
     SHCLLISTOPENPARMS openParmsList;
     int rc = ShClTransferListOpenParmsInit(&openParmsList);
     if (RT_SUCCESS(rc))
     {
-        rc = RTStrCopy(openParmsList.pszPath, openParmsList.cbPath, strDir.c_str());
-        if (RT_SUCCESS(rc))
+        char *pszDirCur = RTStrDup(strDir.c_str());
+        if (!pszDirCur)
+            rc = VERR_NO_MEMORY;
+
+        while (   pszDirCur
+               && RT_SUCCESS(rc))
         {
-            SHCLLISTHANDLE hList;
+            if (ASMAtomicReadBool(&pTransfer->Thread.fStop))
+                break;
+
+            rc = RTStrCopy(openParmsList.pszPath, openParmsList.cbPath, pszDirCur);
+            if (RT_SUCCESS(rc))
+                rc = ShClTransferTransformPath(openParmsList.pszPath, openParmsList.cbPath);
+            if (RT_FAILURE(rc))
+                break;
+
+            SHCLLISTHANDLE hList = NIL_SHCLLISTHANDLE;
             rc = ShClTransferListOpen(pTransfer, &openParmsList, &hList);
             if (RT_SUCCESS(rc))
             {
-                LogFlowFunc(("strDir=%s -> hList=%RU64\n", strDir.c_str(), hList));
+                LogFlowFunc(("strDir=%s -> hList=%RU64\n", pszDirCur, hList));
 
                 SHCLLISTHDR hdrList;
                 rc = ShClTransferListGetHeader(pTransfer, hList, &hdrList);
                 if (RT_SUCCESS(rc))
                 {
-                    LogFlowFunc(("cTotalObjects=%RU64, cbTotalSize=%RU64\n\n",
-                                 hdrList.cEntries, hdrList.cbTotalSize));
+                    LogFlowFunc(("cTotalObjects=%RU64, cbTotalSize=%RU64\n\n", hdrList.cEntries, hdrList.cbTotalSize));
 
                     for (uint64_t o = 0; o < hdrList.cEntries; o++)
                     {
+                        if (ASMAtomicReadBool(&pTransfer->Thread.fStop))
+                            break;
+
                         SHCLLISTENTRY entryList;
                         rc = ShClTransferListEntryInit(&entryList);
                         if (RT_SUCCESS(rc))
@@ -491,31 +535,76 @@ int ShClWinDataObject::readDir(PSHCLTRANSFER pTransfer, const Utf8Str &strDir)
                             rc = ShClTransferListRead(pTransfer, hList, &entryList);
                             if (RT_SUCCESS(rc))
                             {
-                                if (ShClTransferListEntryIsValid(&entryList))
+                                if (   ShClTransferListEntryIsValid(&entryList)
+                                    && entryList.fInfo == VBOX_SHCL_INFO_F_FSOBJINFO
+                                    && entryList.pvInfo
+                                    && entryList.cbInfo == sizeof(SHCLFSOBJINFO))
                                 {
                                     PSHCLFSOBJINFO pFsObjInfo = (PSHCLFSOBJINFO)entryList.pvInfo;
-                                    Assert(entryList.cbInfo == sizeof(SHCLFSOBJINFO));
 
-                                    Utf8Str strPath = strDir + Utf8Str("\\") + Utf8Str(entryList.pszName);
-
-                                    LogFlowFunc(("\t%s (%RU64 bytes) -> %s\n",
-                                                 entryList.pszName, pFsObjInfo->cbObject, strPath.c_str()));
-
-                                    if (   RTFS_IS_DIRECTORY(pFsObjInfo->Attr.fMode)
-                                        || RTFS_IS_FILE     (pFsObjInfo->Attr.fMode))
+                                    char szPath[SHCL_TRANSFER_PATH_MAX];
+                                    rc = RTStrCopy(szPath, sizeof(szPath), pszDirCur);
+                                    if (RT_SUCCESS(rc))
+                                        rc = RTStrCat(szPath, sizeof(szPath), "\\");
+                                    if (RT_SUCCESS(rc))
+                                        rc = RTStrCat(szPath, sizeof(szPath), entryList.pszName);
+                                    if (RT_SUCCESS(rc))
                                     {
-                                        FSOBJENTRY objEntry;
-                                        objEntry.pszPath = RTStrDup(strPath.c_str());
-                                        AssertPtrBreakStmt(objEntry.pszPath, rc = VERR_NO_MEMORY);
-                                        objEntry.objInfo = *pFsObjInfo;
-
-                                        lock();
-                                        m_lstEntries.push_back(objEntry); /** @todo Can this throw? */
-                                        unlock();
+                                        char szPathTransfer[SHCL_TRANSFER_PATH_MAX];
+                                        rc = RTStrCopy(szPathTransfer, sizeof(szPathTransfer), szPath);
+                                        if (RT_SUCCESS(rc))
+                                            rc = ShClTransferTransformPath(szPathTransfer, sizeof(szPathTransfer));
+                                        if (RT_SUCCESS(rc))
+                                            rc = ShClTransferValidatePath(szPathTransfer, false /* fMustExist */);
                                     }
-                                    else /* Not fatal, just skip. */
-                                        LogRel(("Shared Clipboard: Warning: File system object '%s' of type %#x not supported, skipping\n",
-                                                strPath.c_str(), pFsObjInfo->Attr.fMode & RTFS_TYPE_MASK));
+                                    if (RT_SUCCESS(rc))
+                                    {
+                                        LogFlowFunc(("\t%s (%RU64 bytes) -> %s\n", entryList.pszName, pFsObjInfo->cbObject, szPath));
+
+                                        if (   RTFS_IS_DIRECTORY(pFsObjInfo->Attr.fMode)
+                                            || RTFS_IS_FILE     (pFsObjInfo->Attr.fMode))
+                                        {
+                                            FSOBJENTRY objEntry;
+                                            objEntry.pszPath = RTStrDup(szPath);
+                                            if (objEntry.pszPath)
+                                            {
+                                                objEntry.objInfo = *pFsObjInfo;
+                                                bool fAppended = false;
+
+                                                lock();
+                                                if (m_lstEntries.size() < UINT32_MAX)
+                                                {
+#ifdef RT_EXCEPTIONS_ENABLED
+                                                    try
+                                                    {
+#endif
+                                                        m_lstEntries.push_back(objEntry);
+                                                        fAppended = true;
+#ifdef RT_EXCEPTIONS_ENABLED
+                                                    }
+                                                    catch (std::bad_alloc &)
+                                                    {
+                                                        rc = VERR_NO_MEMORY;
+                                                    }
+                                                    catch (std::length_error &)
+                                                    {
+                                                        rc = VERR_OUT_OF_RANGE;
+                                                    }
+#endif
+                                                }
+                                                else
+                                                    rc = VERR_OUT_OF_RANGE;
+                                                unlock();
+
+                                                if (!fAppended)
+                                                    RTStrFree(objEntry.pszPath);
+                                            }
+                                            else
+                                                rc = VERR_NO_MEMORY;
+                                        }
+                                        else /* Not fatal, just skip. */
+                                            LogRelMax(16, ("Shared Clipboard: File system object '%.*s' of type %#x is not supported by the Windows data object, skipping\n", 128, szPath, pFsObjInfo->Attr.fMode & RTFS_TYPE_MASK));
+                                    }
 
                                     /** @todo Handle symlinks. */
                                 }
@@ -527,20 +616,47 @@ int ShClWinDataObject::readDir(PSHCLTRANSFER pTransfer, const Utf8Str &strDir)
                         }
 
                         if (   RT_FAILURE(rc)
-                            && pTransfer->Thread.fStop)
+                            || ASMAtomicReadBool(&pTransfer->Thread.fStop))
                             break;
                     }
                 }
 
-                ShClTransferListClose(pTransfer, hList);
+                int const rc2 = ShClTransferListClose(pTransfer, hList);
+                if (RT_SUCCESS(rc))
+                    rc = rc2;
             }
+
+            if (   RT_FAILURE(rc)
+                || ASMAtomicReadBool(&pTransfer->Thread.fStop))
+                break;
+
+            char *pszDirNext = NULL;
+            lock();
+            while (iEntryNext < m_lstEntries.size())
+            {
+                FSOBJENTRY const &objEntry = m_lstEntries[iEntryNext++];
+                if (RTFS_IS_DIRECTORY(objEntry.objInfo.Attr.fMode))
+                {
+                    pszDirNext = RTStrDup(objEntry.pszPath);
+                    if (!pszDirNext)
+                        rc = VERR_NO_MEMORY;
+                    break;
+                }
+            }
+            unlock();
+
+            RTStrFree(pszDirCur);
+            pszDirCur = pszDirNext;
         }
 
+        RTStrFree(pszDirCur);
         ShClTransferListOpenParmsDestroy(&openParmsList);
     }
 
     if (RT_FAILURE(rc))
-        LogRel(("Shared Clipboard: Reading directory '%s' failed with %Rrc\n", strDir.c_str(), rc));
+        LogRelMax(16, ("Shared Clipboard: Reading directory '%.*s' for transfer %RU16/%RU64 in session %RU16 failed with %Rrc\n",
+                       128, strDir.c_str(), ShClTransferKeyGetTransferId(&pTransfer->State.Key),
+                       pTransfer->State.Key.uGeneration, ShClTransferKeyGetSessionId(&pTransfer->State.Key), rc));
 
     LogFlowFuncLeaveRC(rc);
     return rc;
@@ -609,8 +725,10 @@ DECLCALLBACK(int) ShClWinDataObject::readThread(PSHCLTRANSFER pTransfer, void *p
             }
             else
             {
-                LogRel(("Shared Clipboard: Root entry '%s': File type %#x not supported\n",
-                        pRootEntry->pszName, (pFsObjInfo->Attr.fMode & RTFS_TYPE_MASK)));
+                LogRelMax(16, ("Shared Clipboard: Root entry '%.*s' of transfer %RU16/%RU64 in session %RU16 has unsupported file type %#x\n",
+                               128, pRootEntry->pszName, ShClTransferKeyGetTransferId(&pTransfer->State.Key),
+                               pTransfer->State.Key.uGeneration, ShClTransferKeyGetSessionId(&pTransfer->State.Key),
+                               pFsObjInfo->Attr.fMode & RTFS_TYPE_MASK));
                 rc = VERR_NOT_SUPPORTED;
             }
 
@@ -730,7 +848,7 @@ DECLCALLBACK(int) ShClWinDataObject::readThread(PSHCLTRANSFER pTransfer, void *p
                             break;
 
                         case Error:
-                            LogRel(("Shared Clipboard: Data object: Transfer error %Rrc occurred\n", rcStatus));
+                            Log2(("Shared Clipboard: Windows data object observed transfer error %Rrc\n", rcStatus));
                             rc = ShClTransferError(pTransfer, rcStatus);
                             break;
 
@@ -785,7 +903,9 @@ DECLCALLBACK(int) ShClWinDataObject::readThread(PSHCLTRANSFER pTransfer, void *p
     }
 
     if (RT_FAILURE(rc))
-        LogRel(("Shared Clipboard: Transfer read thread failed with %Rrc\n", rc));
+        LogRelMax(16, ("Shared Clipboard: Windows data-object read thread for transfer %RU16/%RU64 in session %RU16 failed with %Rrc\n",
+                       ShClTransferKeyGetTransferId(&pTransfer->State.Key), pTransfer->State.Key.uGeneration,
+                       ShClTransferKeyGetSessionId(&pTransfer->State.Key), rc));
 
     LogFlowFuncLeaveRC(rc);
     pThis->Release();
@@ -982,8 +1102,7 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
         rc = RTStrCalcUtf16LenEx(pRootEntry->pszName, RTSTR_MAX, &cwcRoot);
         if (RT_FAILURE(rc))
         {
-            LogRelMax(16, ("Shared Clipboard: Cannot convert transfer root '%s' to UTF-16 length for CF_UNICODETEXT, rc=%Rrc\n",
-                            pRootEntry->pszName, rc));
+            LogRelMax(16, ("Shared Clipboard: Calculating the UTF-16 length of transfer root '%.*s' for CF_UNICODETEXT failed with %Rrc\n", 128, pRootEntry->pszName, rc));
             break;
         }
 
@@ -1035,8 +1154,7 @@ int ShClWinDataObject::createUnicodeTextFromTransferRoots(PSHCLTRANSFER pTransfe
         rc = RTStrToUtf16Ex(pRootEntry->pszName, RTSTR_MAX, &pwszDst, cwcLeft, &cwcWritten);
         if (RT_FAILURE(rc))
         {
-            LogRelMax(16, ("Shared Clipboard: Converting transfer root '%s' to CF_UNICODETEXT failed with %Rrc\n",
-                           pRootEntry->pszName, rc));
+            LogRelMax(16, ("Shared Clipboard: Converting transfer root '%.*s' to CF_UNICODETEXT failed with %Rrc\n", 128, pRootEntry->pszName, rc));
             break;
         }
 
@@ -1354,7 +1472,8 @@ STDMETHODIMP ShClWinDataObject::GetData(LPFORMATETC pFormatEtc, LPSTGMEDIUM pMed
         if (   FAILED(hr)
             && hr != DV_E_FORMATETC) /* Can happen if the caller queries unknown / unhandled formats. */
         {
-            LogRel(("Shared Clipboard: Error returning data from data object (%Rhrc)\n", hr));
+            LogRelMax(16, ("Shared Clipboard: Returning Windows data-object format %#x (index %RI32, tymed %#x) failed with %Rhrc\n",
+                           (uint32_t)pFormatEtc->cfFormat, pFormatEtc->lindex, (uint32_t)pFormatEtc->tymed, hr));
         }
     }
 
@@ -1571,9 +1690,13 @@ STDMETHODIMP ShClWinDataObject::StartOperation(IBindCtx *pbcReserved)
 /**
  * Assigns a transfer object for the data object, internal version.
  *
- * @returns VBox status code.
- * @param   pTransfer           Transfer to assign.
- *                              When set to NULL, the transfer will be released from the object.
+ * @retval  VERR_INVALID_PARAMETER  if @a ppObjToRelease already contains an object.
+ * @retval  VERR_WRONG_ORDER        if the critical section is not owned, the data object is not initialized, or a transfer is
+ *                                  already assigned.
+ * @returns                         Status from entering the transfer-context critical section or signaling the list-complete event.
+ * @param   pTransfer               Transfer to assign.
+ *                                  When set to NULL, the transfer will be released from the object.
+ * @param   ppObjToRelease          Where to return the data-object reference to release after unlocking. Optional.
  */
 int ShClWinDataObject::setTransferLocked(PSHCLTRANSFER pTransfer, ShClWinDataObject **ppObjToRelease /* = NULL */)
 {
@@ -1603,6 +1726,7 @@ int ShClWinDataObject::setTransferLocked(PSHCLTRANSFER pTransfer, ShClWinDataObj
                     pWinURITransferCtx->pDataObj = this;
                     m_pTransfer = pTransfer;
                     m_fTransferEndReported = false;
+                    m_uErrorObjIdx = UINT32_MAX;
                     ShClTransferAcquire(pTransfer);
                 }
                 else
@@ -1712,17 +1836,21 @@ void ShClWinDataObject::invalidateStreams(void)
 /**
  * Sets a new status to the data object and signals its waiter.
  *
- * @returns VBox status code.
- * @param   enmStatus           New status to signal.
- * @param   rcSts               Result code. Optional.
+ * @retval  VERR_INVALID_PARAMETER  if @a rcSts is an error and @a enmStatus is not Error.
+ * @retval  VERR_WRONG_ORDER        if the data-object critical section is not owned.
+ * @returns                         Status returned by RTSemEventSignal().
+ * @param   enmStatus               New status to signal.
+ * @param   rcSts                   Result code. Optional.
+ * @param   uObjIdx                 Index of the object which supplied @a rcSts when @a enmStatus is Error, or UINT32_MAX if not
+ *                                  known.
  *
- * @note    Called by the main clipboard thread + ShClWinStreamImpl.
+ * @note                            Called by the main clipboard thread + ShClWinStreamImpl.
  */
-int ShClWinDataObject::SetStatus(Status enmStatus, int rcSts /* = VINF_SUCCESS */)
+int ShClWinDataObject::SetStatus(Status enmStatus, int rcSts /* = VINF_SUCCESS */, ULONG uObjIdx /* = UINT32_MAX */)
 {
     lock();
 
-    int rc = setStatusLocked(enmStatus, rcSts);
+    int rc = setStatusLocked(enmStatus, rcSts, uObjIdx);
 
     unlock();
     return rc;
@@ -1732,10 +1860,12 @@ int ShClWinDataObject::SetStatus(Status enmStatus, int rcSts /* = VINF_SUCCESS *
  * Reports the terminal native transfer status to the Windows backend exactly
  * once for the currently assigned transfer.
  *
- * @returns VBox status code, or VINF_NO_CHANGE if the terminal callback was
- *          already reported or callbacks have been disabled.
- * @param   pTransfer           Transfer which reached a terminal state.
- * @param   rcTransfer          Terminal transfer result.
+ * @retval  VINF_NO_CHANGE          if the terminal callback was already reported or callbacks have been disabled.
+ * @retval  VERR_INVALID_POINTER    if @a pTransfer is NULL.
+ * @retval  VERR_TRY_AGAIN          if another callback is active.
+ * @returns                         Status returned by the transfer-end callback.
+ * @param   pTransfer               Transfer which reached a terminal state.
+ * @param   rcTransfer              Terminal transfer result.
  */
 int ShClWinDataObject::reportTransferEnd(PSHCLTRANSFER pTransfer, int rcTransfer)
 {
@@ -1744,6 +1874,8 @@ int ShClWinDataObject::reportTransferEnd(PSHCLTRANSFER pTransfer, int rcTransfer
     PFNTRANSFEREND pfnTransferEnd = NULL;
     CALLBACKCTX CallbackCtx;
     RT_ZERO(CallbackCtx);
+    char szPath[SHCL_TRANSFER_PATH_MAX];
+    szPath[0] = '\0';
 
     lock();
     if (   !m_fTransferEndReported
@@ -1763,13 +1895,34 @@ int ShClWinDataObject::reportTransferEnd(PSHCLTRANSFER pTransfer, int rcTransfer
         m_hCallbackThread = RTThreadNativeSelf();
         int const rc2 = RTSemEventMultiReset(m_EventCallbacksDrained);
         AssertFatalMsgRC(rc2, ("Resetting the Windows clipboard callback-drain event failed with %Rrc\n", rc2));
+
+        if (   m_enmStatus == Error
+            && m_uErrorObjIdx < m_lstEntries.size()
+            && m_lstEntries[m_uErrorObjIdx].pszPath)
+        {
+            int const rcPath = RTStrCopy(szPath, sizeof(szPath), m_lstEntries[m_uErrorObjIdx].pszPath);
+            if (RT_FAILURE(rcPath))
+                szPath[0] = '\0';
+        }
     }
     unlock();
 
     if (!pfnTransferEnd)
         return VINF_NO_CHANGE;
 
-    int const rc = pfnTransferEnd(&CallbackCtx, pTransfer, rcTransfer);
+    if (szPath[0])
+    {
+        int rcPath = ShClTransferTransformPath(szPath, sizeof(szPath));
+        if (   RT_SUCCESS(rcPath)
+            && RTPathStartsWithRoot(szPath))
+            rcPath = VERR_PATH_IS_NOT_RELATIVE;
+        if (RT_SUCCESS(rcPath))
+            rcPath = ShClTransferValidatePath(szPath, false /* fMustExist */);
+        if (RT_FAILURE(rcPath))
+            szPath[0] = '\0';
+    }
+
+    int const rc = pfnTransferEnd(&CallbackCtx, pTransfer, rcTransfer, szPath[0] ? szPath : NULL);
 
     lock();
     Assert(m_cCallbacks == 1);
@@ -1858,14 +2011,18 @@ void ShClWinDataObject::registerFormat(LPFORMATETC pFormatEtc, CLIPFORMAT clipFo
 /**
  * Sets a new status to the data object and signals its waiter.
  *
- * @returns VBox status code.
- * @param   enmStatus           New status to signal.
- * @param   rc                  Result code. Optional.
- *                              Errors only accepted when status also is 'Error'.
+ * @retval  VERR_INVALID_PARAMETER  if @a rc is an error and @a enmStatus is not Error.
+ * @retval  VERR_WRONG_ORDER        if the data-object critical section is not owned.
+ * @returns                         Status returned by RTSemEventSignal().
+ * @param   enmStatus               New status to signal.
+ * @param   rc                      Result code. Optional.
+ *                                  Errors only accepted when status also is 'Error'.
+ * @param   uObjIdx                 Index of the object which supplied @a rc when @a enmStatus is Error, or UINT32_MAX if not
+ *                                  known.
  *
- * @note    Caller must have taken the critical section.
+ * @note                            Caller must have taken the critical section.
  */
-int ShClWinDataObject::setStatusLocked(Status enmStatus, int rc /* = VINF_SUCCESS */)
+int ShClWinDataObject::setStatusLocked(Status enmStatus, int rc /* = VINF_SUCCESS */, ULONG uObjIdx /* = UINT32_MAX */)
 {
     AssertReturn(enmStatus == Error || RT_SUCCESS(rc), VERR_INVALID_PARAMETER);
     AssertReturn(RTCritSectIsOwned(&m_CritSect), VERR_WRONG_ORDER);
@@ -1884,12 +2041,12 @@ int ShClWinDataObject::setStatusLocked(Status enmStatus, int rc /* = VINF_SUCCES
         && enmStatus != Initialized)
         return VINF_SUCCESS;
 
-    m_rcStatus = rc;
-
-    m_enmStatus = enmStatus;
+    m_rcStatus     = rc;
+    m_enmStatus    = enmStatus;
+    m_uErrorObjIdx = enmStatus == Error ? uObjIdx : UINT32_MAX;
 
     if (RT_FAILURE(rc))
-        LogRel(("Shared Clipboard: Data object received error %Rrc (status %#x)\n", rc, enmStatus));
+        LogRelMax(16, ("Shared Clipboard: Windows data object entered status %#x with error %Rrc\n", enmStatus, rc));
 
     int const rc2 = RTSemEventSignal(m_EventStatusChanged);
 

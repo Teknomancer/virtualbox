@@ -1,4 +1,4 @@
-/* $Id: tstClipboardWinStream.cpp 115102 2026-08-21 11:14:19Z andreas.loeffler@oracle.com $ */
+/* $Id: tstClipboardWinStream.cpp 115134 2026-08-27 15:09:45Z andreas.loeffler@oracle.com $ */
 /** @file
  * Shared Clipboard Windows stream testcase.
  */
@@ -31,17 +31,22 @@
 *********************************************************************************************************************************/
 #include <VBox/GuestHost/SharedClipboard-win.h>
 
+#include <iprt/dir.h>
+#include <iprt/file.h>
 #include <iprt/mem.h>
+#include <iprt/path.h>
 #include <iprt/rand.h>
 #include <iprt/string.h>
 #include <iprt/test.h>
+#include <iprt/utf16.h>
 
 
 /** @page pg_tstClipboardWinStream  Shared Clipboard Windows stream testcase
  *
- * This testcase exercises the Windows IStream adapter with a mock transfer
- * provider.  It verifies exact boundary cases and deterministic randomized
- * reads crossing the default 64 KiB transfer-chunk boundary.
+ * This testcase exercises the Windows data object and IStream adapter.  It
+ * verifies recursive directory enumeration, exact stream boundary cases, and
+ * deterministic randomized reads crossing the default 64 KiB transfer-chunk
+ * boundary.
  */
 
 
@@ -128,6 +133,8 @@ typedef struct TSTWINDATAOBJECTEND
     PSHCLTRANSFER               pTransfer;
     /** Transfer result supplied to the callback. */
     int                         rcTransfer;
+    /** Failing transfer-relative path supplied to the callback, if any. */
+    char                        szPath[SHCL_TRANSFER_PATH_MAX];
 } TSTWINDATAOBJECTEND;
 /** Pointer to native data-object transfer-end callback state. */
 typedef TSTWINDATAOBJECTEND *PTSTWINDATAOBJECTEND;
@@ -136,6 +143,10 @@ typedef TSTWINDATAOBJECTEND *PTSTWINDATAOBJECTEND;
 class TstWinDataObject : public ShClWinDataObject
 {
 public:
+    using ShClWinDataObject::createFileGroupDescriptorFromTransfer;
+    using ShClWinDataObject::readDir;
+    using ShClWinDataObject::reportTransferEnd;
+
     /** Adds a synthetic descriptor entry. */
     int addEntry(const char *pszPath, RTFMODE fMode, RTFOFF cbObject)
     {
@@ -229,14 +240,201 @@ public:
 /*********************************************************************************************************************************
 *   Internal Functions                                                                                                           *
 *********************************************************************************************************************************/
-/** Records a native data-object transfer-end callback. */
+/** Tests recursive enumeration of a directory containing only a nested directory. */
+static void tstWinDataObjectNestedDirectoryEnumeration(void)
+{
+    RTTestISub("Nested directory enumeration");
+
+    char szTempDir[RTPATH_MAX] = "";
+    char szRootDir[RTPATH_MAX] = "";
+    char szChildDir[RTPATH_MAX] = "";
+    char szNestedFile[RTPATH_MAX] = "";
+    bool fTempDirCreated = false;
+    bool fRootDirCreated = false;
+    bool fChildDirCreated = false;
+    bool fNestedFileCreated = false;
+    bool fDataObjectInitialized = false;
+    RTFILE hFile = NIL_RTFILE;
+    HGLOBAL hGlobal = NULL;
+    PSHCLTRANSFER pTransfer = NULL;
+
+    uint8_t bFrontendCtx = 0;
+    TstWinDataObject DataObject;
+    ShClWinDataObject::CALLBACKS Callbacks;
+    RT_ZERO(Callbacks);
+
+    SHCLTXPROVIDER Provider;
+    RT_ZERO(Provider);
+
+    int rc;
+    do
+    {
+        rc = RTPathTemp(szTempDir, sizeof(szTempDir));
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        rc = RTPathAppend(szTempDir, sizeof(szTempDir), "tstClipboardWinStream-XXXXXX");
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        rc = RTDirCreateTemp(szTempDir, 0700);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        fTempDirCreated = true;
+
+        rc = RTStrCopy(szRootDir, sizeof(szRootDir), szTempDir);
+        if (RT_SUCCESS(rc))
+            rc = RTPathAppend(szRootDir, sizeof(szRootDir), "root");
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        rc = RTDirCreate(szRootDir, 0700, 0);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        fRootDirCreated = true;
+
+        rc = RTStrCopy(szChildDir, sizeof(szChildDir), szRootDir);
+        if (RT_SUCCESS(rc))
+            rc = RTPathAppend(szChildDir, sizeof(szChildDir), "child");
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        rc = RTDirCreate(szChildDir, 0700, 0);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        fChildDirCreated = true;
+
+        rc = RTStrCopy(szNestedFile, sizeof(szNestedFile), szChildDir);
+        if (RT_SUCCESS(rc))
+            rc = RTPathAppend(szNestedFile, sizeof(szNestedFile), "nested.bin");
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        rc = RTFileOpen(&hFile, szNestedFile, RTFILE_O_WRITE | RTFILE_O_CREATE_REPLACE | RTFILE_O_DENY_NONE);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        fNestedFileCreated = true;
+
+        uint8_t const abContents[] = { 0x42, 0x69, 0x6e };
+        rc = RTFileWrite(hFile, abContents, sizeof(abContents), NULL);
+        int rc2 = RTFileClose(hFile);
+        hFile = NIL_RTFILE;
+        if (RT_SUCCESS(rc))
+            rc = rc2;
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+
+        RTTESTI_CHECK(ShClTransferProviderLocalQueryInterface(&Provider) != NULL);
+        if (!Provider.Interface.pfnListOpen)
+            break;
+        rc = ShClTransferCreate(SHCLTRANSFERDIR_HOST_TO_GUEST, SHCLSOURCE_LOCAL, NULL, &pTransfer);
+        if (RT_SUCCESS(rc))
+            rc = ShClTransferSetProvider(pTransfer, &Provider);
+        if (RT_SUCCESS(rc))
+            rc = ShClTransferRootsSetFromPath(pTransfer, szRootDir);
+        if (RT_SUCCESS(rc))
+            rc = ShClTransferInit(pTransfer);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+
+        rc = DataObject.Init((PSHCLCONTEXT)&bFrontendCtx, &Callbacks);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+        fDataObjectInitialized = true;
+
+        PCSHCLLISTENTRY pRootEntry = ShClTransferRootsEntryGet(pTransfer, 0);
+        RTTESTI_CHECK(pRootEntry != NULL);
+        if (!pRootEntry)
+            break;
+        bool const fRootEntryValid =    pRootEntry->pszName
+                                    && pRootEntry->fInfo == VBOX_SHCL_INFO_F_FSOBJINFO
+                                    && pRootEntry->pvInfo
+                                    && pRootEntry->cbInfo == sizeof(SHCLFSOBJINFO);
+        RTTESTI_CHECK(fRootEntryValid);
+        if (!fRootEntryValid)
+            break;
+
+        PCSHCLFSOBJINFO pRootInfo = (PCSHCLFSOBJINFO)pRootEntry->pvInfo;
+        rc = DataObject.addEntry(pRootEntry->pszName, pRootInfo->Attr.fMode, pRootInfo->cbObject);
+        if (RT_SUCCESS(rc))
+            rc = DataObject.readDir(pTransfer, Utf8Str(pRootEntry->pszName));
+        if (RT_SUCCESS(rc))
+            rc = DataObject.createFileGroupDescriptorFromTransfer(pTransfer, true /* fUnicode */, &hGlobal);
+        RTTESTI_CHECK_RC_OK(rc);
+        if (RT_FAILURE(rc))
+            break;
+
+        FILEGROUPDESCRIPTORW const *pDescriptor = (FILEGROUPDESCRIPTORW const *)GlobalLock(hGlobal);
+        RTTESTI_CHECK(pDescriptor != NULL);
+        if (!pDescriptor)
+            break;
+
+        Utf8Str const strRoot(pRootEntry->pszName);
+        Utf8Str const strChild = strRoot + Utf8Str("\\child");
+        Utf8Str const strNested = strChild + Utf8Str("\\nested.bin");
+        bool fFoundRoot = false;
+        bool fFoundChild = false;
+        bool fFoundNested = false;
+        for (UINT i = 0; i < pDescriptor->cItems; ++i)
+        {
+            PCRTUTF16 const pwszName = (PCRTUTF16)pDescriptor->fgd[i].cFileName;
+            fFoundRoot   |= RTUtf16CmpUtf8(pwszName, strRoot.c_str()) == 0;
+            fFoundChild  |= RTUtf16CmpUtf8(pwszName, strChild.c_str()) == 0;
+            fFoundNested |= RTUtf16CmpUtf8(pwszName, strNested.c_str()) == 0;
+        }
+
+        RTTESTI_CHECK_MSG(pDescriptor->cItems == 3, ("cItems=%RU32, expected 3\n", pDescriptor->cItems));
+        RTTESTI_CHECK_MSG(fFoundRoot, ("Missing root descriptor '%s'\n", strRoot.c_str()));
+        RTTESTI_CHECK_MSG(fFoundChild, ("Missing child directory descriptor '%s'\n", strChild.c_str()));
+        RTTESTI_CHECK_MSG(fFoundNested, ("Missing nested file descriptor '%s'\n", strNested.c_str()));
+        GlobalUnlock(hGlobal);
+    } while (0);
+
+    if (hGlobal)
+        GlobalFree(hGlobal);
+    if (fDataObjectInitialized)
+        DataObject.Uninit();
+    if (pTransfer)
+        RTTESTI_CHECK_RC_OK(ShClTransferDestroy(pTransfer));
+    if (hFile != NIL_RTFILE)
+        RTTESTI_CHECK_RC_OK(RTFileClose(hFile));
+    if (fNestedFileCreated)
+        RTTESTI_CHECK_RC_OK(RTFileDelete(szNestedFile));
+    if (fChildDirCreated)
+        RTTESTI_CHECK_RC_OK(RTDirRemove(szChildDir));
+    if (fRootDirCreated)
+        RTTESTI_CHECK_RC_OK(RTDirRemove(szRootDir));
+    if (fTempDirCreated)
+        RTTESTI_CHECK_RC_OK(RTDirRemove(szTempDir));
+}
+
+
+/**
+ * Records a native data-object transfer-end callback.
+ *
+ * @retval  VERR_BUFFER_OVERFLOW    if @a pszPath exceeds the transfer path limit.
+ * @param   pCallbackCtx            Callback context containing TSTWINDATAOBJECTEND.
+ * @param   pTransfer               Transfer supplied by the data object.
+ * @param   rcTransfer              Transfer result supplied by the data object.
+ * @param   pszPath                 Failing transfer-relative path, or NULL if not known.
+ */
 static DECLCALLBACK(int) tstWinDataObjectTransferEnd(ShClWinDataObject::PCALLBACKCTX pCallbackCtx,
-                                                     PSHCLTRANSFER pTransfer, int rcTransfer)
+                                                     PSHCLTRANSFER pTransfer, int rcTransfer, const char *pszPath)
 {
     PTSTWINDATAOBJECTEND pEnd = (PTSTWINDATAOBJECTEND)pCallbackCtx->pvUser;
     pEnd->cCalls++;
     pEnd->pTransfer  = pTransfer;
     pEnd->rcTransfer = rcTransfer;
+    pEnd->szPath[0]  = '\0';
+    if (pszPath)
+        return RTStrCopy(pEnd->szPath, sizeof(pEnd->szPath), pszPath);
     return VINF_SUCCESS;
 }
 
@@ -779,6 +977,7 @@ static void tstWinDataObjectNativeCancellation(void)
         RTTESTI_CHECK(EndCtx.cCalls == 1);
         RTTESTI_CHECK(EndCtx.pTransfer == pTransfer);
         RTTESTI_CHECK_RC(EndCtx.rcTransfer, VERR_CANCELLED);
+        RTTESTI_CHECK(EndCtx.szPath[0] == '\0');
 
         size_t cCompleted = 0;
         RTTESTI_CHECK(pDataObject->queryCompletionStatus(&cCompleted) == ShClWinDataObject::Canceled);
@@ -805,6 +1004,123 @@ static void tstWinDataObjectNativeCancellation(void)
         }
         RTTESTI_CHECK_RC_OK(ShClTransferDestroy(pTransfer));
     }
+}
+
+
+/** Tests that a failed stream reports the first failing descriptor path. */
+static void tstWinStreamErrorPath(void)
+{
+    RTTestISub("Failed stream error path");
+
+    uint8_t abData[] = { 0x42 };
+    TSTWINSTREAMPROVIDER ProviderCtx;
+    RT_ZERO(ProviderCtx);
+    ProviderCtx.pbData         = abData;
+    ProviderCtx.cbData         = sizeof(abData);
+    ProviderCtx.cbMaxChunkSize = _64K;
+    ProviderCtx.rcRead         = VERR_ACCESS_DENIED;
+
+    SHCLTXPROVIDER Provider;
+    RT_ZERO(Provider);
+    Provider.Interface.pfnRootListRead = tstWinStreamProviderRootListRead;
+    Provider.Interface.pfnObjOpen      = tstWinStreamProviderObjOpen;
+    Provider.Interface.pfnObjRead      = tstWinStreamProviderObjRead;
+    Provider.Interface.pfnObjClose     = tstWinStreamProviderObjClose;
+    Provider.pvUser                    = &ProviderCtx;
+    Provider.cbUser                    = sizeof(ProviderCtx);
+
+    TSTWINDATAOBJECTEND EndCtx;
+    RT_ZERO(EndCtx);
+    ShClWinDataObject::CALLBACKS Callbacks;
+    RT_ZERO(Callbacks);
+    Callbacks.pfnTransferEnd = tstWinDataObjectTransferEnd;
+
+    PSHCLTRANSFER pTransfer = NULL;
+    TstWinDataObject *pParent = NULL;
+    IStream *pStream = NULL;
+
+    int rc = ShClTransferCreate(SHCLTRANSFERDIR_GUEST_TO_HOST, SHCLSOURCE_REMOTE,
+                                NULL /* pCallbacks */, &pTransfer);
+    if (RT_SUCCESS(rc))
+        rc = ShClTransferSetProvider(pTransfer, &Provider);
+    if (RT_SUCCESS(rc))
+        rc = ShClTransferRootListRead(pTransfer);
+    if (RT_SUCCESS(rc))
+        rc = ShClTransferInit(pTransfer);
+    if (RT_SUCCESS(rc))
+        rc = ShClTransferStart(pTransfer);
+    RTTESTI_CHECK_RC_OK(rc);
+
+    if (RT_SUCCESS(rc))
+    {
+        pParent = new TstWinDataObject();
+        RTTESTI_CHECK(pParent != NULL);
+        if (pParent)
+        {
+            pParent->AddRef();
+            rc = pParent->Init((PSHCLCONTEXT)&EndCtx, &Callbacks);
+            if (RT_SUCCESS(rc))
+                rc = pParent->addEntry("directory\\other.bin", RTFS_TYPE_FILE, sizeof(abData));
+            if (RT_SUCCESS(rc))
+                rc = pParent->addEntry("directory\\denied.bin", RTFS_TYPE_FILE, sizeof(abData));
+            if (RT_SUCCESS(rc))
+                rc = pParent->startCompletionTracking();
+        }
+        else
+            rc = VERR_NO_MEMORY;
+        RTTESTI_CHECK_RC_OK(rc);
+    }
+
+    if (RT_SUCCESS(rc))
+    {
+        SHCLFSOBJINFO ObjInfo;
+        RT_ZERO(ObjInfo);
+        ObjInfo.Attr.fMode = RTFS_TYPE_FILE;
+        ObjInfo.cbObject   = sizeof(abData);
+        HRESULT const hrc = ShClWinStreamImpl::Create(pParent, pTransfer, 1 /* uObjIdx */,
+                                                       Utf8Str("directory\\denied.bin"), &ObjInfo, &pStream);
+        RTTESTI_CHECK_MSG(hrc == S_OK, ("creating failed stream failed: %Rhrc\n", hrc));
+        if (FAILED(hrc))
+            rc = VERR_GENERAL_FAILURE;
+    }
+
+    if (RT_SUCCESS(rc))
+    {
+        uint8_t bRead = 0;
+        ULONG cbRead = UINT32_MAX;
+        HRESULT const hrc = pStream->Read(&bRead, 1, &cbRead);
+        RTTESTI_CHECK_MSG(hrc == S_FALSE, ("failed stream read returned %Rhrc\n", hrc));
+        RTTESTI_CHECK(cbRead == 0);
+
+        size_t cCompleted = UINT32_MAX;
+        int rcStatus = VINF_SUCCESS;
+        RTTESTI_CHECK(pParent->queryCompletionStatus(&cCompleted, &rcStatus) == ShClWinDataObject::Error);
+        RTTESTI_CHECK_RC(rcStatus, VERR_ACCESS_DENIED);
+        RTTESTI_CHECK(cCompleted == 0);
+
+        RTTESTI_CHECK_RC_OK(pParent->SetStatus(ShClWinDataObject::Error, VERR_WRITE_ERROR, 0 /* uObjIdx */));
+        RTTESTI_CHECK(pParent->queryCompletionStatus(&cCompleted, &rcStatus) == ShClWinDataObject::Error);
+        RTTESTI_CHECK_RC(rcStatus, VERR_ACCESS_DENIED);
+
+        RTTESTI_CHECK_RC_OK(ShClTransferError(pTransfer, VERR_ACCESS_DENIED));
+        RTTESTI_CHECK_RC_OK(pParent->reportTransferEnd(pTransfer, VERR_ACCESS_DENIED));
+        RTTESTI_CHECK(EndCtx.cCalls == 1);
+        RTTESTI_CHECK(EndCtx.pTransfer == pTransfer);
+        RTTESTI_CHECK_RC(EndCtx.rcTransfer, VERR_ACCESS_DENIED);
+        RTTESTI_CHECK_MSG(!strcmp(EndCtx.szPath, "directory/denied.bin"), ("pszPath='%s'\n", EndCtx.szPath));
+        RTTESTI_CHECK_RC(pParent->reportTransferEnd(pTransfer, VERR_ACCESS_DENIED), VINF_NO_CHANGE);
+        RTTESTI_CHECK(EndCtx.cCalls == 1);
+    }
+
+    if (pStream)
+    {
+        static_cast<ShClWinStreamImpl *>(pStream)->Invalidate();
+        pStream->Release();
+    }
+    if (pParent)
+        pParent->Release();
+    if (pTransfer)
+        RTTESTI_CHECK_RC_OK(ShClTransferDestroy(pTransfer));
 }
 
 
@@ -1115,6 +1431,12 @@ static void tstWinStreamReadsAcrossChunkBoundaries(void)
         RTTESTI_CHECK_MSG(ProviderCtx.cCloses == 1, ("cCloses=%RU32\n", ProviderCtx.cCloses));
         RTTESTI_CHECK_MSG(!ProviderCtx.fReadLogOverflow, ("Provider read trace overflowed\n"));
 
+        RTTestISub("Completed stream invalidation");
+
+        /* Simulate the terminal-status acknowledgement racing Explorer's
+         * additional read to observe EOF. */
+        static_cast<ShClWinStreamImpl *>(pStream)->Invalidate();
+
         uint32_t const cProviderReadsBefore = ProviderCtx.cReads;
         memset(pbBuffer, TST_WIN_STREAM_BUFFER_FILL, 2);
         ULONG cbRead = UINT32_MAX;
@@ -1215,8 +1537,10 @@ int main(void)
 
     tstWinPathSanitizeFilename();
     tstTransferListEntryNameValidation();
+    tstWinDataObjectNestedDirectoryEnumeration();
     tstWinDataObjectCompletionOrder();
     tstWinDataObjectNativeCancellation();
+    tstWinStreamErrorPath();
     tstWinStreamCanceledInvalidate();
     tstWinStreamReadsAcrossChunkBoundaries();
 
