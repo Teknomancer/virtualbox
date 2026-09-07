@@ -184,6 +184,49 @@ DECLINLINE(void) apicSetVectorInPib(volatile void *pvPib, uint8_t uVector)
     ASMAtomicBitSet(pvPib, uVector);
 }
 
+
+/**
+ * Tests and sets the vector in an APIC Pending-Interrupt Bitmap (PIB).
+ *
+ * @returns @c true if the vector was already set, @c false otherwise.
+ * @param   pvPib           Opaque pointer to the PIB.
+ * @param   uVector         The vector to set.
+ */
+DECLINLINE(bool) apicTestAndSetVectorInPib(volatile void *pvPib, uint8_t uVector)
+{
+    return ASMAtomicBitTestAndSet(pvPib, uVector);
+}
+
+
+/**
+ * Sets the vector as an AutoEOI vector.
+ *
+ * @param   pVCpu       The cross context virtual CPU structure.
+ * @param   uVector     The AutoEOI vector.
+*/
+static void apicSetAutoEoiVector(PVMCPU pVCpu, uint8_t uVector)
+{
+    PAPICCPU pApicCpu = VMCPU_TO_APICCPU(pVCpu);
+    AssertCompile(sizeof(pApicCpu->auAutoEoiVectors) * 8 > UINT8_MAX);
+    ASMBitSet(&pApicCpu->auAutoEoiVectors, uVector);
+}
+
+
+/**
+ * Tests and clears an AutoEOI vector.
+ *
+ * @returns @c true if it's an AutoEOI vector, @c false otherwise.
+ * @param   pVCpu       The cross context virtual CPU structure.
+ * @param   uVector     The AutoEOI vector.
+*/
+static bool apicTestAndClearAutoEoiVector(PVMCPU pVCpu, uint8_t uVector)
+{
+    PAPICCPU pApicCpu = VMCPU_TO_APICCPU(pVCpu);
+    AssertCompile(sizeof(pApicCpu->auAutoEoiVectors) * 8 > UINT8_MAX);
+    return ASMBitTestAndClear(&pApicCpu->auAutoEoiVectors, uVector);
+}
+
+
 #if 0 /* unused */
 /**
  * Clears the vector in an APIC Pending-Interrupt Bitmap (PIB).
@@ -2006,6 +2049,10 @@ void apicResetCpu(PVMCPUCC pVCpu, bool fResetApicBaseMsr)
      */
     RT_BZERO(&pXApicPage->id, sizeof(pXApicPage->id));
     pXApicPage->id.u8ApicId = pVCpu->idCpu;
+
+    /* Clear all AutoEOI vectors. */
+    PAPICCPU pApicCpu = VMCPU_TO_APICCPU(pVCpu);
+    RT_BZERO(&pApicCpu->auAutoEoiVectors, sizeof(pApicCpu->auAutoEoiVectors));
 }
 
 
@@ -2518,7 +2565,16 @@ static DECLCALLBACK(int) apicGetInterrupt(PVMCPUCC pVCpu, uint8_t *pu8Vector, ui
                 || XAPIC_PPR_GET_PP(uVector) > XAPIC_PPR_GET_PP(uPpr))
             {
                 apicClearVectorInReg(&pXApicPage->irr, uVector);
-                apicSetVectorInReg(&pXApicPage->isr, uVector);
+
+                /*
+                 * With Hyper-V AutoEOI, the hypervisor implicitly performs an EOI at the
+                 * time of delivering the interrupt. This is different from regular interrupt
+                 * handling because it delibarately loses the ISR/PPR protection of their
+                 * interrupt handler in the guest. In regular APIC operation, the AutoEOI
+                 * bitmap is 0 and thus we will always end up setting the ISR.
+                 */
+                if (!apicTestAndClearAutoEoiVector(pVCpu, uVector))
+                    apicSetVectorInReg(&pXApicPage->isr, uVector);
                 apicUpdatePpr(pVCpu);
                 apicSignalNextPendingIntr(pVCpu);
 
@@ -2711,7 +2767,6 @@ DECLCALLBACK(bool) apicPostInterrupt(PVMCPUCC pVCpu, uint8_t uVector, XAPICTRIGG
     Assert(pVCpu);
     AssertMsg(uVector > XAPIC_ILLEGAL_VECTOR_END, ("uVector=%#x, IcrLo=%#RX32 IcrHi=%#RX32\n", uVector,
         VMCPU_TO_CX2APICPAGE(pVCpu)->icr_lo.all.u32IcrLo, VMCPU_TO_CX2APICPAGE(pVCpu)->icr_hi.u32IcrHi));
-    RT_NOREF(fAutoEoi);
 
     PVMCC    pVM       = pVCpu->CTX_SUFF(pVM);
     PCAPIC   pApic     = VM_TO_APIC(pVM);
@@ -2749,9 +2804,12 @@ DECLCALLBACK(bool) apicPostInterrupt(PVMCPUCC pVCpu, uint8_t uVector, XAPICTRIGG
                 { /** @todo posted-interrupt call to hardware */ }
                 else
                 {
-                    apicSetVectorInPib(pApicCpu->CTX_SUFF(pvApicPib), uVector);
-                    uint32_t const fAlreadySet = apicSetNotificationBitInPib((PAPICPIB)pApicCpu->CTX_SUFF(pvApicPib));
-                    if (!fAlreadySet)
+                    bool const fVectorAlreadySet = apicTestAndSetVectorInPib(pApicCpu->CTX_SUFF(pvApicPib), uVector);
+                    if (   !fVectorAlreadySet
+                        &&  fAutoEoi)
+                        apicSetAutoEoiVector(pVCpu, uVector);
+                    uint32_t const fNotificationAlreadySet = apicSetNotificationBitInPib((PAPICPIB)pApicCpu->CTX_SUFF(pvApicPib));
+                    if (!fNotificationAlreadySet)
                     {
                         Log2(("APIC: apicPostInterrupt: Setting UPDATE_APIC FF for edge-triggered intr. uVector=%#x\n", uVector));
                         apicSetInterruptFF(pVCpu, PDMAPICIRQ_UPDATE_PENDING);

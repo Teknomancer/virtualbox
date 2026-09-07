@@ -320,6 +320,8 @@ typedef struct APICCPU
     uint8_t                     auAlignment2[6];
     /** The source tags corresponding to each interrupt vector (debugging). */
     uint32_t                    auSrcTags[256];
+    /** Hyper-V Auto EOI vectors. */
+    uint8_t                     auAutoEoiVectors[32];
     /** @} */
 
     /** @name The APIC timer.
