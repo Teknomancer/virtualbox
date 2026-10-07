@@ -520,7 +520,7 @@ RT_DECL_ASM(uint64_t) ASMMultU64ByU32DivByU64(uint64_t u64A, uint32_t u32B, uint
 #else
 DECLINLINE(uint64_t) ASMMultU64ByU32DivByU64(uint64_t u64A, uint32_t u32B, uint64_t u64C)
 {
-# if 0 /*RT_INLINE_ASM_GNU_STYLE*/
+# if RT_INLINE_ASM_GNU_STYLE
 #  ifdef RT_ARCH_AMD64
     uint64_t u64Result, u64Spill;
     __asm__ __volatile__("mulq %2\n\t"
@@ -548,6 +548,7 @@ DECLINLINE(uint64_t) ASMMultU64ByU32DivByU64(uint64_t u64A, uint32_t u32B, uint6
     /* Binary long division. */
     for (unsigned i = 0; i < 64; i++)
     {
+        /* Reminder * 2 + next-divident-bit can require 65-bits, fCarry holds the 65th bit here. */
         bool const fCarry = RT_BOOL(u64Rem & RT_BIT_64(63));
         u64Rem = (u64Rem << 1) | (u64Dividend >> 63);
         u64Dividend <<= 1;
