@@ -46,10 +46,25 @@
 ; @param   u32B/edx/esi     The 32-bit value to multiple by A.
 ; @param   u64C/r8d/rdx     The 64-bit value to divide A*B by.
 ;
-; @cproto  DECLASM(uint64_t) ASMMultU64ByU32DivByU64(uint64_t u64A, uint32_t u32B, uint32_t u64C);
+; @cproto  DECLASM(uint64_t) ASMMultU64ByU32DivByU64(uint64_t u64A, uint32_t u32B, uint64_t u64C);
 ;
 RT_BEGINPROC ASMMultU64ByU32DivByU64
+%if ARCH_BITS == 64
+ %ifdef ASM_CALL64_MSC
+    mov     rax, rcx                    ; rax = u64A
+    mov     r9d, edx                    ; r9d = u32B (high bits are cleared)
+                                        ; r8d already holds the 64-bit divisor
+ %else
+    mov     rax, rdi                    ; rax = u64A
+    mov     r9d, esi                    ; r9d = u32B
+    mov     r8d, rdx                    ; r8d = u64C
+ %endif
+    mul     r9
+    div     r8
+%else
 % error "Implement me"
+%endif
+    ret
 ENDPROC ASMMultU64ByU32DivByU64
 
 MARK_OBJECT_RETPOLINE_SAFE
